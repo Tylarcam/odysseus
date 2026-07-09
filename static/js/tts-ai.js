@@ -24,8 +24,98 @@ class AITTSManager {
         this._streamResetFn = null;
         this._streamDebounceTimer = null;
 
+        // iOS/Safari audio-unlock state.
+        // Mobile Safari only allows audio to start inside a user-gesture call
+        // stack. Because we fetch synthesized audio over the network before
+        // playing (an async gap), a freshly-created Audio() would be blocked by
+        // iOS with NotAllowedError. The workaround is to keep ONE persistent
+        // <audio> element, "bless" it during a real tap by playing a silent
+        // clip, then reuse that same blessed element for later programmatic
+        // playback.
+        this._sharedAudio = null;
+        this._audioUnlocked = false;
+        this._speechUnlocked = false;
+        this._setupAudioUnlock();
+
         // Check if TTS service is available
         this.checkAvailability();
+    }
+
+    // ── iOS/Safari audio unlock ──
+
+    /**
+     * A single reusable <audio> element. Created lazily and reused for every
+     * playback so the "unlocked" (user-gesture-blessed) state persists on iOS.
+     */
+    _getSharedAudio() {
+        if (!this._sharedAudio) {
+            const audio = new Audio();
+            // playsinline avoids the fullscreen player takeover on iPhone.
+            audio.setAttribute('playsinline', '');
+            audio.setAttribute('webkit-playsinline', '');
+            audio.preload = 'auto';
+            this._sharedAudio = audio;
+        }
+        return this._sharedAudio;
+    }
+
+    /**
+     * Attach one-time listeners so the first real user interaction anywhere in
+     * the app unlocks audio playback. iOS requires the very first play() to
+     * originate from a gesture; once blessed, the shared element (and Web
+     * Speech API) can be driven programmatically afterwards.
+     */
+    _setupAudioUnlock() {
+        if (typeof window === 'undefined') return;
+        const handler = () => this.unlockAudio();
+        // pointerdown fires earliest and is still within the gesture; touchend
+        // and click are kept as fallbacks for older iOS and desktop.
+        window.addEventListener('pointerdown', handler, { passive: true });
+        window.addEventListener('touchend', handler, { passive: true });
+        window.addEventListener('click', handler, { passive: true });
+    }
+
+    /**
+     * Unlock audio + speech synthesis. MUST run inside a user gesture. Safe to
+     * call repeatedly — it no-ops once each channel is unlocked.
+     */
+    unlockAudio() {
+        // 1) Bless the shared HTMLAudioElement by playing a silent clip.
+        if (!this._audioUnlocked) {
+            try {
+                const audio = this._getSharedAudio();
+                audio.muted = true;
+                audio.src = AITTSManager.SILENT_AUDIO;
+                const p = audio.play();
+                if (p && typeof p.then === 'function') {
+                    p.then(() => {
+                        audio.pause();
+                        audio.currentTime = 0;
+                        audio.muted = false;
+                        this._audioUnlocked = true;
+                    }).catch(() => {
+                        // Not fatal — a later gesture will retry.
+                        audio.muted = false;
+                    });
+                } else {
+                    audio.muted = false;
+                    this._audioUnlocked = true;
+                }
+            } catch (e) {
+                /* retried on next gesture */
+            }
+        }
+
+        // 2) Prime the Web Speech API. iOS won't speak() outside a gesture
+        // until it has spoken once inside one; an empty utterance warms it up.
+        if (!this._speechUnlocked && 'speechSynthesis' in window) {
+            try {
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+                this._speechUnlocked = true;
+            } catch (e) {
+                /* retried on next gesture */
+            }
+        }
     }
 
     async checkAvailability() {
@@ -185,8 +275,13 @@ class AITTSManager {
         try {
             const audioUrl = await this.synthesize(text);
 
-            this.currentAudio = new Audio(audioUrl);
-            await this.currentAudio.play();
+            const audio = this._getSharedAudio();
+            audio.src = audioUrl;
+            if (this._provider === 'local' && this.playbackSpeed !== 1) {
+                audio.playbackRate = this.playbackSpeed;
+            }
+            this.currentAudio = audio;
+            await audio.play();
             this.isPlaying = true;
             // Note: onended should be set by the caller (addAITTSButton)
             // to reset button state when audio finishes
@@ -303,35 +398,49 @@ class AITTSManager {
                 const plainText = this.extractPlainText(text);
                 await this._playBrowser(plainText);
             } else {
-                if (this.currentAudio) {
-                    this.currentAudio.pause();
-                    this.currentAudio = null;
+                // Reuse the single blessed <audio> element so iOS keeps
+                // allowing programmatic playback after the initial gesture.
+                const audio = this._getSharedAudio();
+                audio.pause();
+                if (this._provider === 'local' && this.playbackSpeed !== 1) {
+                    audio.playbackRate = this.playbackSpeed;
+                } else {
+                    audio.playbackRate = 1;
                 }
+                this.currentAudio = audio;
 
                 await new Promise((resolve, reject) => {
-                    const audio = new Audio(audioUrl);
-                    if (this._provider === 'local' && this.playbackSpeed !== 1) {
-                        audio.playbackRate = this.playbackSpeed;
-                    }
-                    this.currentAudio = audio;
+                    const cleanup = () => {
+                        audio.onended = null;
+                        audio.onerror = null;
+                        audio.onpause = null;
+                    };
                     audio.onended = () => {
+                        cleanup();
                         this.isPlaying = false;
                         if (this.currentAudio === audio) this.currentAudio = null;
                         resolve();
                     };
-                    audio.onerror = (e) => {
+                    audio.onerror = () => {
+                        cleanup();
                         this.isPlaying = false;
                         if (this.currentAudio === audio) this.currentAudio = null;
                         reject(new Error('Audio playback error'));
                     };
                     audio.onpause = () => {
+                        // Resolve when stop() (or a new item) took over playback.
                         if (this.currentAudio !== audio) {
+                            cleanup();
                             resolve();
                         }
                     };
+                    audio.src = audioUrl;
                     audio.play().then(() => {
                         this.isPlaying = true;
-                    }).catch(reject);
+                    }).catch((err) => {
+                        cleanup();
+                        reject(err);
+                    });
                 });
             }
         } finally {
@@ -452,6 +561,11 @@ class AITTSManager {
     }
 }
 
+// A short valid silent WAV (data URI) used only to "bless" the shared <audio>
+// element during a user gesture on iOS/Safari. Playing real audio afterwards
+// then works without a NotAllowedError.
+AITTSManager.SILENT_AUDIO = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
 // Create global AI TTS manager instance
 window.aiTTSManager = new AITTSManager();
 
@@ -495,6 +609,10 @@ export function addAITTSButton(messageElement, text) {
     playButton.addEventListener('click', async (e) => {
         e.stopPropagation();
         const mgr = window.aiTTSManager;
+
+        // Unlock audio synchronously inside this tap so iOS Safari will allow
+        // the deferred play() that happens after the synth network request.
+        mgr.unlockAudio();
 
         if (mgr.isPlaying || mgr._processing) {
             mgr.stop();
