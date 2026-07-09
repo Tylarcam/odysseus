@@ -1098,6 +1098,10 @@ async function initTtsSettings() {
     function resetPreview() { previewPlaying = false; previewBtn.textContent = 'Preview'; previewBtn.style.borderColor = ''; }
 
     previewBtn.addEventListener('click', async function() {
+      // Unlock audio synchronously inside this tap so iOS Safari allows the
+      // deferred play() that happens after the synth network request.
+      if (window.aiTTSManager) window.aiTTSManager.unlockAudio();
+
       if (previewPlaying) {
         if (previewAudio) { previewAudio.pause(); previewAudio = null; }
         window.speechSynthesis.cancel();
@@ -1138,11 +1142,17 @@ async function initTtsSettings() {
           if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
           var blob = await res.blob();
           var url = URL.createObjectURL(blob);
-          previewAudio = new Audio(url);
+          // Reuse the manager's blessed <audio> element so playback works on
+          // iOS Safari after the async fetch; fall back to a fresh element.
+          var mgr = window.aiTTSManager;
+          previewAudio = (mgr && mgr._getSharedAudio) ? mgr._getSharedAudio() : new Audio();
+          previewAudio.pause();
+          previewAudio.playbackRate = 1;
           previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
           await new Promise(function(resolve, reject) {
             previewAudio.onended = function() { URL.revokeObjectURL(url); previewAudio = null; resolve(); };
             previewAudio.onerror = function() { URL.revokeObjectURL(url); previewAudio = null; reject(new Error('Playback failed')); };
+            previewAudio.src = url;
             previewAudio.play().catch(reject);
           });
         }
