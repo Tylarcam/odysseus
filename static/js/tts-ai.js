@@ -279,6 +279,8 @@ class AITTSManager {
             audio.src = audioUrl;
             if (this._provider === 'local' && this.playbackSpeed !== 1) {
                 audio.playbackRate = this.playbackSpeed;
+            } else {
+                audio.playbackRate = 1;
             }
             this.currentAudio = audio;
             await audio.play();
