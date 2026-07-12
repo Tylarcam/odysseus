@@ -34,6 +34,7 @@ class AITTSManager {
         // playback.
         this._sharedAudio = null;
         this._audioUnlocked = false;
+        this._blessPending = false;
         this._speechUnlocked = false;
         this._setupAudioUnlock();
 
@@ -80,25 +81,28 @@ class AITTSManager {
      * call repeatedly — it no-ops once each channel is unlocked.
      */
     unlockAudio() {
-        // 1) Bless the shared HTMLAudioElement by playing a silent clip.
-        if (!this._audioUnlocked) {
+        // 1) Bless the shared HTMLAudioElement by playing a silent clip. The
+        // clip is genuinely silent, so we never mute the element — muting could
+        // stick "on" if the bless promise never settled on iOS and then leave
+        // real playback inaudible. The _blessPending guard avoids interrupting
+        // an in-flight bless with a second gesture (which throws AbortError).
+        if (!this._audioUnlocked && !this._blessPending) {
             try {
                 const audio = this._getSharedAudio();
-                audio.muted = true;
+                audio.muted = false;
                 audio.src = AITTSManager.SILENT_AUDIO;
                 const p = audio.play();
                 if (p && typeof p.then === 'function') {
+                    this._blessPending = true;
                     p.then(() => {
-                        audio.pause();
-                        audio.currentTime = 0;
-                        audio.muted = false;
+                        try { audio.pause(); audio.currentTime = 0; } catch (e) {}
                         this._audioUnlocked = true;
+                        this._blessPending = false;
                     }).catch(() => {
-                        // Not fatal — a later gesture will retry.
-                        audio.muted = false;
+                        // Not fatal — allow a later gesture to retry.
+                        this._blessPending = false;
                     });
                 } else {
-                    audio.muted = false;
                     this._audioUnlocked = true;
                 }
             } catch (e) {
@@ -116,6 +120,26 @@ class AITTSManager {
                 /* retried on next gesture */
             }
         }
+    }
+
+    /**
+     * Surface a playback/synthesis failure to the user. Console-only errors are
+     * invisible on a phone, which made failures look like an endless spinner.
+     */
+    _reportError(err) {
+        let msg = (err && err.message) ? err.message : 'TTS playback failed';
+        if (err && err.name === 'NotAllowedError') {
+            // iOS blocked playback because it wasn't tied to a gesture.
+            this._audioUnlocked = false;
+            msg = 'Tap the play button again to start audio';
+        }
+        try {
+            if (window.uiModule && window.uiModule.showError) {
+                window.uiModule.showError('TTS: ' + msg);
+            } else if (window.uiModule && window.uiModule.showToast) {
+                window.uiModule.showToast('TTS: ' + msg);
+            }
+        } catch (e) { /* toast is best-effort */ }
     }
 
     async checkAvailability() {
@@ -216,11 +240,18 @@ class AITTSManager {
             return this.cache.get(cacheKey);
         }
 
+        // Abort the request if the server never responds so the play button
+        // can't spin forever (e.g. an unreachable TTS endpoint on mobile).
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
+
         try {
             if (onProgress) onProgress('synthesizing');
 
             const response = await fetch('/api/tts/synthesize', {
                 method: 'POST',
+                credentials: 'same-origin',
+                signal: controller.signal,
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -231,11 +262,18 @@ class AITTSManager {
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail?.message || 'Synthesis failed');
+                let detail = 'Synthesis failed (HTTP ' + response.status + ')';
+                try {
+                    const error = await response.json();
+                    detail = error.detail?.message || error.detail || detail;
+                } catch {}
+                throw new Error(detail);
             }
 
             const audioBlob = await response.blob();
+            if (!audioBlob || audioBlob.size === 0) {
+                throw new Error('Synthesis returned no audio');
+            }
             const audioUrl = URL.createObjectURL(audioBlob);
 
             // Cache the result
@@ -247,7 +285,12 @@ class AITTSManager {
 
         } catch (error) {
             if (onProgress) onProgress('error');
+            if (error && error.name === 'AbortError') {
+                throw new Error('TTS timed out — the server did not respond');
+            }
             throw error;
+        } finally {
+            clearTimeout(timeout);
         }
     }
 
@@ -276,6 +319,7 @@ class AITTSManager {
             const audioUrl = await this.synthesize(text);
 
             const audio = this._getSharedAudio();
+            audio.muted = false;
             audio.src = audioUrl;
             if (this._provider === 'local' && this.playbackSpeed !== 1) {
                 audio.playbackRate = this.playbackSpeed;
@@ -290,6 +334,7 @@ class AITTSManager {
 
         } catch (error) {
             console.error('Failed to play audio:', error);
+            this._reportError(error);
             throw error;
         }
     }
@@ -364,6 +409,7 @@ class AITTSManager {
                 await this._playQueueItem(item);
             } catch (err) {
                 console.error('TTS queue item error:', err);
+                this._reportError(err);
             }
             if (this._queue.length > 0 && this._queue[0] === item) {
                 this._queue.shift();
@@ -404,6 +450,7 @@ class AITTSManager {
                 // allowing programmatic playback after the initial gesture.
                 const audio = this._getSharedAudio();
                 audio.pause();
+                audio.muted = false;
                 if (this._provider === 'local' && this.playbackSpeed !== 1) {
                     audio.playbackRate = this.playbackSpeed;
                 } else {
