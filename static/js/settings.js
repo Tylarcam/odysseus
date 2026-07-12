@@ -1094,6 +1094,7 @@ async function initTtsSettings() {
   var previewBtn = el('set-ttsPreviewBtn');
   if (previewBtn) {
     var previewAudio = null;
+    var previewUrl = null;
     var previewPlaying = false;
     function resetPreview() { previewPlaying = false; previewBtn.textContent = 'Preview'; previewBtn.style.borderColor = ''; }
 
@@ -1103,7 +1104,14 @@ async function initTtsSettings() {
       if (window.aiTTSManager) window.aiTTSManager.unlockAudio();
 
       if (previewPlaying) {
-        if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+        if (previewAudio) {
+          previewAudio.pause();
+          previewAudio = null;
+        }
+        if (previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          previewUrl = null;
+        }
         window.speechSynthesis.cancel();
         resetPreview(); return;
       }
@@ -1142,6 +1150,7 @@ async function initTtsSettings() {
           if (!res.ok) { var err = await res.json().catch(function() { return {}; }); throw new Error(err.detail?.message || 'Synthesis failed'); }
           var blob = await res.blob();
           var url = URL.createObjectURL(blob);
+          previewUrl = url;
           // Reuse the manager's blessed <audio> element so playback works on
           // iOS Safari after the async fetch; fall back to a fresh element.
           var mgr = window.aiTTSManager;
@@ -1150,8 +1159,8 @@ async function initTtsSettings() {
           previewAudio.playbackRate = 1;
           previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
           await new Promise(function(resolve, reject) {
-            previewAudio.onended = function() { URL.revokeObjectURL(url); previewAudio = null; resolve(); };
-            previewAudio.onerror = function() { URL.revokeObjectURL(url); previewAudio = null; reject(new Error('Playback failed')); };
+            previewAudio.onended = function() { URL.revokeObjectURL(previewUrl); previewUrl = null; previewAudio = null; resolve(); };
+            previewAudio.onerror = function() { URL.revokeObjectURL(previewUrl); previewUrl = null; previewAudio = null; reject(new Error('Playback failed')); };
             previewAudio.src = url;
             previewAudio.play().catch(reject);
           });
