@@ -21,6 +21,20 @@ import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
+import {
+  HANDOFF_TITLE_PREFIX,
+  HANDOFF_VALID_TARGETS,
+  createHandoffDocument,
+  handoffDocTitle,
+  handoffPickupHint,
+  isHandoffDoc,
+  normalizeHandoffTarget,
+  notifyHandoffPickup,
+  resolveHandoffDocId,
+} from './handoff.js';
+import { parseScheduleFromLine, toLocalIso as _scheduleToLocalIso } from './scheduleParse.js';
+// DISABLED: Docker Odysseus cannot launch Windows WPF via /api/clicky/start — use start-clicky.ps1 on host.
+// import { launchClicky } from './clickyLaunch.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -58,8 +72,10 @@ const SETUP_PROVIDER_URLS = {
   'opencode-zen': { name: 'OpenCode Zen', url: 'https://opencode.ai/zen/v1' },
   'opencode-go': { name: 'OpenCode Go', url: 'https://opencode.ai/zen/go/v1' },
   nvidia: { name: 'NVIDIA', url: 'https://integrate.api.nvidia.com/v1' },
+  cloudflare: { name: 'Cloudflare Workers AI', url: 'https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/ai/v1' },
+  minimax: { name: 'MiniMax', url: 'https://api.minimax.io/v1' },
 };
-const SETUP_PROVIDER_NAMES = ['deepseek', 'openai', 'openrouter', 'ollama', 'xai', 'anthropic', 'groq', 'gemini', 'opencode-zen', 'opencode-go', 'nvidia'];
+const SETUP_PROVIDER_NAMES = ['deepseek', 'openai', 'openrouter', 'ollama', 'xai', 'anthropic', 'groq', 'gemini', 'opencode-zen', 'opencode-go', 'nvidia', 'cloudflare', 'minimax'];
 const SETUP_DEVICE_AUTH_PROVIDERS = [
   { key: 'copilot', name: 'GitHub Copilot', aliases: ['github'], command: '/setup copilot' },
   { key: 'chatgpt-subscription', name: 'ChatGPT Subscription', aliases: ['chatgptsubscription', 'chatgpt-sub', 'codex'], command: '/setup chatgpt-subscription' },
@@ -100,6 +116,9 @@ function _setupProviderFromInput(input) {
     xai: 'xai',
     grok: 'xai',
     nvidia: 'nvidia',
+    cloudflare: 'cloudflare',
+    workersai: 'cloudflare',
+    minimax: 'minimax',
   };
   return SETUP_PROVIDER_URLS[aliases[raw] || raw] || null;
 }
@@ -1312,6 +1331,9 @@ async function _cmdOpen(args, ctx) {
       gallery: ['tool-gallery-btn', 'rail-gallery'],
       notes: ['tool-notes-btn', 'rail-notes'],
       tasks: ['tool-tasks-btn', 'rail-tasks'],
+      'agent-bin': ['tool-agent-bin-btn', 'rail-agent-bin'],
+      agentbin: ['tool-agent-bin-btn', 'rail-agent-bin'],
+      handoffs: ['tool-agent-bin-btn', 'rail-agent-bin'],
       library: ['tool-library-btn', 'rail-archive'],
       documents: ['tool-library-btn', 'rail-archive'],
       docs: ['tool-library-btn', 'rail-archive'],
@@ -1652,6 +1674,77 @@ async function _cmdReloadSkills(args, ctx) {
 
 // ── Note (quick Notes shortcut) ──
 
+function _extractHttpUrl(text) {
+  const m = String(text || '').match(/https?:\/\/[^\s<>"']+/i);
+  return m ? m[0] : '';
+}
+
+function _ensureAgentMode() {
+  const ab = document.getElementById('mode-agent-btn');
+  if (ab && !ab.classList.contains('active')) ab.click();
+}
+
+/** /integrate [vendor|ask] — ROI-first OSS/vendor stack integration skill */
+async function _cmdIntegrate(args, ctx) {
+  const request = args.join(' ').trim();
+  if (/^(help|\?)$/i.test(request)) {
+    slashReply(
+      'Usage: /integrate [vendor or ask]\n\n' +
+      'Runs the oss-stack-integration skill (ROI-first Search → Fetch → Agent,\n' +
+      'MCP vs in-app provider, minimal surface wiring).\n\n' +
+      'Examples:\n' +
+      '  /integrate TinyFish as search provider\n' +
+      '  /integrate set up Cursor MCP for TinyFish\n' +
+      '  /integrate weave Brave into research discovery\n\n' +
+      'Also: /oss-stack-integration &lt;ask&gt;'
+    );
+    return true;
+  }
+  _ensureAgentMode();
+  const ok = await _invokeSkillByName(
+    'oss-stack-integration',
+    request || 'Audit Odysseus search seams and propose the strongest-ROI integration path for the named vendor (or ask me which vendor).',
+    ctx
+  );
+  if (ok && request) {
+    await typewriterReply(`Integrating with oss-stack-integration… (Agent mode)`);
+  }
+  return true;
+}
+
+/** /brief <url> — transcribe video + CEO brief via youtube-ceo-brief skill */
+async function _cmdVideoBrief(args, ctx) {
+  const raw = args.join(' ').trim();
+  if (!raw || /^(help|\?)$/i.test(raw)) {
+    slashReply(
+      'Usage: /brief &lt;video url&gt;\n\n' +
+      'Transcribes a YouTube (or yt-dlp-supported) video and writes a CEO-level brief.\n' +
+      'Switches to Agent mode and uses the youtube-ceo-brief skill.\n\n' +
+      'Example: /brief https://youtu.be/FmT6GW-TM2A'
+    );
+    return true;
+  }
+  const url = _extractHttpUrl(raw);
+  if (!url) {
+    slashReply('Paste a full video URL after /brief (must start with https://)');
+    return true;
+  }
+  _ensureAgentMode();
+  const message =
+    `Brief this video: ${url}\n\n` +
+    '1. Call transcribe_video with {"url": "' + url + '", "save_as_document": true}\n' +
+    '2. From the transcript, write a CEO-level brief and save it as a document.\n\n' +
+    'Brief sections: Executive summary · Subject & topics · Technology (if applicable) · ' +
+    'Edge cases & wedge opportunities · Fast implementation playbook · Claims to verify · Confidence.\n' +
+    'Ground every claim in the transcript — do not web-search to fill gaps.';
+  if (!_submitComposedMessage(message)) {
+    slashReply('Could not start video brief — chat form not ready.');
+    return true;
+  }
+  await typewriterReply(`Starting CEO brief for ${ctx.esc(url)}… (Agent mode · may take a few minutes for long videos)`);
+  return true;
+}
+
 async function _cmdNote(args, ctx) {
   const text = args.join(' ');
   if (!text) { slashReply('Usage: /note Your note here'); return true; }
@@ -1678,72 +1771,13 @@ function _toLocalIso(d) {
 }
 
 /**
- * Parse a natural-language time spec from the *start* of the string.
- * Returns { date: Date, rest: string } or null if nothing matched.
- * Supported:
- *   "in 30m" / "in 2h" / "in 1d"
- *   "today 14:00" / "tomorrow 9am"
- *   "HH:MM" / "9am" / "9pm"   (today, or tomorrow if already past)
- *   "YYYY-MM-DD HH:MM"
- * Swallows common stop words: "me", "at", "on", "to".
+ * Parse event time/title from natural language (date/time anywhere in the string).
+ * @deprecated Use parseScheduleFromLine from scheduleParse.js directly.
  */
 function _parseTimeSpec(input) {
-  let s = (input || '').trim().replace(/^(me\s+)/i, '').trim();
-  const now = new Date();
-
-  // "in 30m" / "in 2h" / "in 1d"
-  let m = s.match(/^in\s+(\d+)\s*(m|min|mins|minutes|h|hr|hrs|hours|d|day|days)\b\s*(?:to\s+)?(.*)$/i);
-  if (m) {
-    const n = parseInt(m[1], 10);
-    const unit = m[2].toLowerCase();
-    const d = new Date(now);
-    if (unit.startsWith('m')) d.setMinutes(d.getMinutes() + n);
-    else if (unit.startsWith('h')) d.setHours(d.getHours() + n);
-    else d.setDate(d.getDate() + n);
-    return { date: d, rest: m[3].trim() };
-  }
-
-  // "YYYY-MM-DD HH:MM"
-  m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{2})\s*(?:to\s+)?(.*)$/i);
-  if (m) {
-    const d = new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]);
-    return { date: d, rest: m[6].trim() };
-  }
-
-  // "today HH:MM" / "tomorrow HH:MM" / "today 9am" / "tomorrow 9pm"
-  m = s.match(/^(today|tomorrow)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to\s+)?(.*)$/i);
-  if (m) {
-    const d = new Date(now);
-    if (m[1].toLowerCase() === 'tomorrow') d.setDate(d.getDate() + 1);
-    let hh = parseInt(m[2], 10);
-    const mm = m[3] ? parseInt(m[3], 10) : 0;
-    const mer = (m[4] || '').toLowerCase();
-    if (mer === 'pm' && hh < 12) hh += 12;
-    if (mer === 'am' && hh === 12) hh = 0;
-    if (hh > 23 || mm > 59) return null;
-    d.setHours(hh, mm, 0, 0);
-    return { date: d, rest: m[5].trim() };
-  }
-
-  // bare "HH:MM" / "9am" / "9pm" / "at HH:MM" — today, or tomorrow if past
-  m = s.match(/^(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b\s*(?:to\s+)?(.*)$/i);
-  if (m) {
-    const d = new Date(now);
-    let hh = parseInt(m[1], 10);
-    const mm = m[2] ? parseInt(m[2], 10) : 0;
-    const mer = (m[3] || '').toLowerCase();
-    if (mer === 'pm' && hh < 12) hh += 12;
-    if (mer === 'am' && hh === 12) hh = 0;
-    // Require a valid hour/minute and either a minute field or am/pm to
-    // avoid eating plain numbers like "3 apples".
-    if (hh > 23 || mm > 59) return null;
-    if (m[2] == null && !mer) return null;
-    d.setHours(hh, mm, 0, 0);
-    if (d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
-    return { date: d, rest: m[4].trim() };
-  }
-
-  return null;
+  const { title, start } = parseScheduleFromLine(input);
+  if (!title && !String(input || '').trim()) return null;
+  return { date: start, rest: title || String(input || '').trim() };
 }
 
 async function _cmdTodo(args, ctx) {
@@ -1773,15 +1807,14 @@ async function _cmdTodo(args, ctx) {
 
 async function _cmdEvent(args, ctx) {
   const raw = args.join(' ').trim();
-  if (!raw) { slashReply('Usage: /event tomorrow 14:00 Title  ·  /event in 30m Title  ·  /event 2026-04-20 15:00 Title'); return true; }
-  const parsed = _parseTimeSpec(raw);
-  if (!parsed || !parsed.rest) { slashReply(`Could not parse time from: ${ctx.esc(raw)}`); return true; }
-  const start = parsed.date;
-  const end = new Date(start.getTime() + 60 * 60 * 1000); // default 1h block
+  if (!raw) { slashReply('Usage: /event tomorrow 14:00 Title  ·  /event in 30m Title  ·  /event Title at 2pm'); return true; }
+  const { title, start } = parseScheduleFromLine(raw);
+  const summary = title || raw;
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
   const body = {
-    summary: parsed.rest,
-    dtstart: _toLocalIso(start),
-    dtend: _toLocalIso(end),
+    summary,
+    dtstart: _scheduleToLocalIso(start),
+    dtend: _scheduleToLocalIso(end),
     all_day: false,
   };
   const res = await fetch(`${API_BASE}/api/calendar/events`, {
@@ -1790,13 +1823,363 @@ async function _cmdEvent(args, ctx) {
     body: JSON.stringify(body),
   });
   if (res.ok) {
-    await typewriterReply(`Event: ${ctx.esc(parsed.rest)} — ${start.toLocaleString()}`);
+    await typewriterReply(`Event: ${ctx.esc(summary)} — ${start.toLocaleString()}`);
   } else {
     const err = await res.text().catch(() => '');
     slashReply(`Failed to create event${err ? `: ${ctx.esc(err.slice(0,200))}` : ''}`);
   }
   return true;
 }
+
+// ── Apply (Handshake job-application workflow) ───────────────────────
+// Pins the single-session tailor → PDF → upload flow and saves it to AgentMemory.
+
+const HANDSHAKE_APPLY_PROJECT = 'C:\\Users\\tylar\\code\\notion\\Projects\\job-application-ops';
+const HANDSHAKE_APPLY_PLAYBOOK = `${HANDSHAKE_APPLY_PROJECT}\\config\\handshake-apply-workflow.md`;
+
+function _applyUsageHint() {
+  return (
+    'Usage: <code>/apply [job-id] [goal]</code><br>' +
+    'Example: <code>/apply 11098487 Canvass Labs Applied AI/ML Engineer</code><br>' +
+    'Aliases: <code>/handshake</code>, <code>/job-apply</code>'
+  );
+}
+
+async function _rememberHandshakeWorkflow(jobId, goal) {
+  const res = await fetch(`${API_BASE}/api/agentmemory/remember`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      slot: 'handshake-apply-workflow',
+      job_id: jobId || '',
+      goal: goal || '',
+      refresh: true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    const detail = err?.detail || res.statusText || 'AgentMemory save failed';
+    return { ok: false, detail: String(detail) };
+  }
+  return { ok: true };
+}
+
+function _composeHandshakeApplyMessage(jobId, goal) {
+  const lines = [
+    'Run the Handshake job-application workflow end-to-end in ONE session (no mid-flow handoffs).',
+    '',
+    'Rules:',
+    '- Use browser-harness + Comet CDP (BU_CDP_URL=http://127.0.0.1:9333), NOT Docker MCP Playwright.',
+    '- Stop once if login wall (/access); user finishes OTP in Comet, then continue.',
+    '- Same agent builds DOCX, converts PDF, and uploads — do not hand off between those steps.',
+    '- Stop before Submit Application; user clicks Submit after preview.',
+    '',
+    'Ordered steps:',
+    'A. JD capture → save positions/_active/<Folder>/JD.md',
+    'B. Tailor package → notes, answers, cover letter, build script, DOCX (state Profile + match %)',
+    `C. PDF → ${HANDSHAKE_APPLY_PROJECT}\\scripts\\convert-resume-pdf.ps1`,
+    `D. Upload → ${HANDSHAKE_APPLY_PROJECT}\\scripts\\handshake-upload-resume.ps1 -JobId <ID> -PdfPath <pdf> -StopBeforeSubmit`,
+    'E. User submits in Comet',
+    'F. Post-submit → status.md + SESSION_LOG.md',
+    '',
+    `Playbook: ${HANDSHAKE_APPLY_PLAYBOOK}`,
+    `Project: ${HANDSHAKE_APPLY_PROJECT}`,
+  ];
+  if (jobId) {
+    lines.push('', `Handshake job ID: ${jobId}`);
+    lines.push(`Job URL: https://stanford.joinhandshake.com/jobs/${jobId}`);
+  }
+  if (goal) lines.push(`Goal: ${goal}`);
+  lines.push('', 'Follow the playbook Procedure / Pitfalls. Ask only if login or missing prerequisites block progress.');
+  return lines.join('\n');
+}
+
+async function _cmdApply(args, ctx) {
+  const raw = (args || []).join(' ').trim();
+  if (!raw || /^(help|\?)$/i.test(raw)) {
+    slashReply(_applyUsageHint());
+    return true;
+  }
+
+  let jobId = '';
+  let goal = raw;
+  const first = (args[0] || '').trim();
+  if (/^\d{5,}$/.test(first)) {
+    jobId = first;
+    goal = args.slice(1).join(' ').trim();
+  }
+
+  const mem = await _rememberHandshakeWorkflow(jobId, goal);
+  const message = _composeHandshakeApplyMessage(jobId, goal);
+  if (!_submitComposedMessage(message)) {
+    slashReply('Could not start Handshake apply flow.');
+    return true;
+  }
+
+  if (mem.ok) {
+    await typewriterReply(
+      `Saved Handshake apply workflow to AgentMemory.` +
+      (jobId ? `<br>Job ID: ${ctx.esc(jobId)}` : '') +
+      (goal ? `<br>Goal: ${ctx.esc(goal)}` : ''),
+    );
+  } else {
+    await typewriterReply(
+      `Started Handshake apply flow.` +
+      (jobId ? `<br>Job ID: ${ctx.esc(jobId)}` : '') +
+      `<br><span class="text-muted">AgentMemory save skipped: ${ctx.esc(mem.detail)}</span>`,
+    );
+  }
+  return true;
+}
+
+// ── Handoff (cross-agent work packets) ──────────────────────────────
+// Creates Odysseus documents matching integrations/claude/skills/handoff format.
+
+function _normalizeHandoffTarget(name) {
+  return normalizeHandoffTarget(name);
+}
+
+function _handoffDocTitle(target, title) {
+  return handoffDocTitle(target, title);
+}
+
+function _isHandoffDoc(doc) {
+  return isHandoffDoc(doc);
+}
+
+function _parseHandoffFrontmatter(content) {
+  const text = String(content || '');
+  if (!text.startsWith('---\n')) return { meta: {}, body: text };
+  const end = text.indexOf('\n---\n', 4);
+  if (end === -1) return { meta: {}, body: text };
+  const block = text.slice(4, end);
+  const body = text.slice(end + 5);
+  const meta = {};
+  for (const line of block.split('\n')) {
+    const idx = line.indexOf(':');
+    if (idx === -1) continue;
+    meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return { meta, body };
+}
+
+function _parseHandoffDoc(doc) {
+  const content = doc?.current_content || doc?.content || '';
+  const { meta, body } = _parseHandoffFrontmatter(content);
+  let target = meta.target || '';
+  const title = doc?.title || '';
+  if (!target && title.startsWith(HANDOFF_TITLE_PREFIX)) {
+    const rest = title.slice(HANDOFF_TITLE_PREFIX.length);
+    target = rest.split(':', 1)[0].trim();
+  }
+  return {
+    id: doc?.id,
+    title,
+    source: meta.source || '',
+    target: _normalizeHandoffTarget(target),
+    status: meta.status || 'pending',
+    project: meta.project || '',
+    created_at: meta.created_at || doc?.created_at || '',
+    session_id: meta.session_id || doc?.session_id || '',
+    body: body.trim(),
+    meta,
+  };
+}
+
+function _currentSessionMeta(ctx) {
+  const sessions = sessionModule.getSessions();
+  const s = ctx.sid ? sessions.find(ss => ss.id === ctx.sid) : null;
+  return { id: ctx.sid || '', name: (s?.name || '').trim() || 'Untitled' };
+}
+
+async function _fetchHandoffDocs(limit = 50) {
+  const res = await fetch(
+    `${API_BASE}/api/documents/library?search=handoff&limit=${limit}&sort=recent`,
+    { credentials: 'same-origin' },
+  );
+  if (!res.ok) throw new Error('Failed to load handoffs');
+  const data = await res.json();
+  const docs = data.documents || data.results || [];
+  return Array.isArray(docs) ? docs.filter(_isHandoffDoc) : [];
+}
+
+async function _fetchHandoffDoc(docId) {
+  const res = await fetch(`${API_BASE}/api/document/${encodeURIComponent(docId)}`, {
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error('Handoff not found');
+  const data = await res.json();
+  return data.document || data;
+}
+
+async function _cmdHandoffCreate(target, args, ctx) {
+  const normalized = _normalizeHandoffTarget(target);
+  if (!HANDOFF_VALID_TARGETS.has(normalized)) {
+    slashReply(`Unknown handoff target "${ctx.esc(target)}". Use cursor, claude, odysseus, or hermes.`);
+    return true;
+  }
+
+  const session = _currentSessionMeta(ctx);
+  let title = args.join(' ').trim();
+  if (!title) {
+    title = session.name === 'Untitled'
+      ? `Work from Odysseus (${new Date().toLocaleString()})`
+      : session.name;
+  }
+
+  const goal = title;
+  const context = [];
+  if (session.id) context.push(`Odysseus session: ${session.name} (${session.id})`);
+  if (!ctx.sid) context.push('Created without an active chat session.');
+
+  let result;
+  try {
+    result = await createHandoffDocument({
+      apiBase: API_BASE,
+      target: normalized,
+      title,
+      goal,
+      context,
+      sessionId: session.id,
+    });
+  } catch (err) {
+    slashReply(`Failed to create handoff${err?.message ? `: ${ctx.esc(err.message)}` : ''}`);
+    return true;
+  }
+
+  const { doc, docId: rawDocId, title: docTitle } = result;
+  const docId = resolveHandoffDocId(result.doc) || resolveHandoffDocId({ id: rawDocId });
+  if (!docId) {
+    slashReply('Handoff created but document id was missing or invalid');
+    return true;
+  }
+  const hint = handoffPickupHint(normalized, docId);
+  const hintHtml = normalized === 'odysseus'
+    ? `${ctx.esc(hint)} or run <code>/handoff pickup ${ctx.esc(docId)}</code>`
+    : ctx.esc(hint);
+
+  let materializedNote = '';
+  const mat = doc.materialized_jd;
+  if (mat?.jd_path) {
+    materializedNote = `<br>JD synced: <code>${ctx.esc(mat.jd_path)}</code>`;
+  }
+
+  slashReply(
+    `<b>Handoff created</b> → ${ctx.esc(normalized)}<br>` +
+    `ID: <code>${ctx.esc(docId)}</code><br>` +
+    `Title: ${ctx.esc(docTitle)}<br><br>` +
+    `<b>${hintHtml}</b>${materializedNote}`,
+  );
+  notifyHandoffPickup({ target: normalized, docId }).catch(() => {});
+  return true;
+}
+
+async function _cmdHandoffList(args, ctx) {
+  const filterTarget = args[0] ? _normalizeHandoffTarget(args[0]) : '';
+  if (filterTarget && !HANDOFF_VALID_TARGETS.has(filterTarget)) {
+    slashReply('Usage: /handoff list  ·  /handoff list cursor');
+    return true;
+  }
+
+  let handoffs;
+  try {
+    const docs = await _fetchHandoffDocs();
+    handoffs = docs.map(_parseHandoffDoc).filter(h => h.status === 'pending');
+    if (filterTarget) handoffs = handoffs.filter(h => h.target === filterTarget);
+  } catch (err) {
+    slashReply(`Failed to list handoffs: ${ctx.esc(err.message)}`);
+    return true;
+  }
+
+  if (!handoffs.length) {
+    slashReply(filterTarget ? `No pending handoffs for ${ctx.esc(filterTarget)}` : 'No pending handoffs');
+    return true;
+  }
+
+  const lines = handoffs.slice(0, 20).map(h => {
+    const shortId = String(h.id || '').slice(0, 8);
+    const stamp = (h.created_at || '').slice(0, 16).replace('T', ' ');
+    return `${shortId}  ${h.target.padEnd(8)}  ${stamp}  ${ctx.esc(h.title)}`;
+  });
+  slashReply(
+    `<pre>ID        TARGET    CREATED           TITLE\n${lines.join('\n')}</pre>` +
+    (handoffs.length > 20 ? `<br>…and ${handoffs.length - 20} more` : '') +
+    '<br>Pickup: <code>/handoff pickup [id]</code>',
+  );
+  return true;
+}
+
+async function _cmdHandoffPickup(args, ctx) {
+  const docId = (args[0] || '').trim();
+  let parsed;
+
+  try {
+    if (docId) {
+      parsed = _parseHandoffDoc(await _fetchHandoffDoc(docId));
+    } else {
+      const docs = await _fetchHandoffDocs();
+      const pending = docs
+        .map(_parseHandoffDoc)
+        .filter(h => h.status === 'pending' && h.target === 'odysseus');
+      if (!pending.length) {
+        slashReply('No pending handoffs for odysseus. Try <code>/handoff list</code>.');
+        return true;
+      }
+      parsed = pending[0];
+    }
+  } catch (err) {
+    slashReply(`Failed to load handoff: ${ctx.esc(err.message)}`);
+    return true;
+  }
+
+  const excerpt = parsed.body.length > 2400 ? `${parsed.body.slice(0, 2400)}\n…` : parsed.body;
+  slashReply(
+    `<b>Handoff</b> <code>${ctx.esc(parsed.id)}</code> → ${ctx.esc(parsed.target)} (${ctx.esc(parsed.status)})<br>` +
+    `Title: ${ctx.esc(parsed.title)}<br>` +
+    (parsed.project ? `Project: <code>${ctx.esc(parsed.project)}</code><br>` : '') +
+    (parsed.session_id ? `Session: <code>${ctx.esc(parsed.session_id)}</code><br>` : '') +
+    `<pre>${ctx.esc(excerpt)}</pre>` +
+    '<br>Execute the <b>Next steps</b> above. Run the <b>Agent bootstrap</b> block if env or cwd is required.',
+  );
+  return true;
+}
+
+async function _cmdHandoffHelp(args, ctx) {
+  slashReply(
+    '<pre>' +
+    'Cross-agent handoff packets (stored as Odysseus documents)\n\n' +
+    '  /handoff cursor [goal]     Hand off to Cursor\n' +
+    '  /handoff claude [goal]     Hand off to Claude Code\n' +
+    '  /handoff odysseus [goal]   Return packet for Odysseus\n' +
+    '  /handoff hermes [goal]     Hand off to Hermes Agent : brudda\n' +
+    '  /handoff list [target]     List pending handoffs\n' +
+    '  /handoff pickup [id]       Show handoff for pickup\n\n' +
+    'If [goal] is omitted, the current chat name is used.\n' +
+    '</pre>',
+  );
+  return true;
+}
+
+// DISABLED: /clicky and /start-clicky — POST /api/clicky/start fails in Docker (Linux container,
+// cannot spawn Windows WPF). Host launch: deploy/scripts/start-clicky.ps1
+// async function _cmdStartClicky(args, ctx) {
+//   const workerOnly = args[0] === 'worker';
+//   slashReply('<pre>Starting Clicky overlay…</pre>');
+//   try {
+//     const data = await launchClicky(API_BASE, { launchApp: !workerOnly });
+//     const model = data.worker_health?.chat_model;
+//     const lines = [
+//       data.message || 'Clicky launched.',
+//       model ? `Model: ${model}` : '',
+//       workerOnly ? '' : 'Hold Ctrl+Alt to talk once the tray icon appears.',
+//     ].filter(Boolean);
+//     slashReply(`<pre>${ctx.esc(lines.join('\n'))}</pre>`);
+//   } catch (e) {
+//     slashReply(`<pre>Clicky launch failed: ${ctx.esc(e.message || String(e))}</pre>`);
+//   }
+//   return true;
+// }
 
 // ── Shell (user command execution) ──
 
@@ -2028,22 +2411,20 @@ async function _cmdCompact(args, ctx) {
 async function _cmdTts(args, ctx) {
   const text = args.join(' ');
   if (!text) { slashReply('Usage: /tts &lt;text to speak&gt;'); return true; }
-  slashReply('Synthesizing...');
+
+  const mgr = window.aiTTSManager;
+  if (!mgr || !mgr.available) {
+    slashReply('TTS not available — enable it in Settings → Text to Speech (Browser or an API endpoint).');
+    return true;
+  }
+
+  slashReply('Speaking...');
   try {
-    const res = await fetch(`${API_BASE}/api/tts/synthesize`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, format: 'base64' })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.audio) {
-        const audio = new Audio('data:audio/wav;base64,' + data.audio);
-        audio.play();
-        slashReply('Playing...');
-      } else { slashReply('No audio returned'); }
-    } else { slashReply('TTS failed (is Kokoro running?)'); }
-  } catch(e) { slashReply('TTS service unavailable'); }
+    await mgr.play(text);
+    slashReply('Done.');
+  } catch (e) {
+    slashReply('TTS failed: ' + (e.message || 'unknown error'));
+  }
   return true;
 }
 
@@ -5785,6 +6166,29 @@ const COMMANDS = {
     noUserBubble: true,
     usage: '/event tomorrow 14:00 Team call',
   },
+  apply: {
+    alias: ['handshake', 'job-apply'],
+    category: 'Productivity',
+    help: 'Start Handshake job-application flow (tailor → PDF → upload)',
+    handler: _cmdApply,
+    noUserBubble: true,
+    usage: '/apply [job-id] [goal]',
+  },
+  handoff: {
+    alias: ['ho'],
+    category: 'Productivity',
+    help: 'Create or pick up cross-agent handoff packets',
+    default: '_help',
+    subs: {
+      cursor:   { handler: (a, c) => _cmdHandoffCreate('cursor', a, c),   help: 'Hand off to Cursor',       usage: '/handoff cursor [goal]' },
+      claude:   { handler: (a, c) => _cmdHandoffCreate('claude', a, c),   help: 'Hand off to Claude Code',  usage: '/handoff claude [goal]' },
+      odysseus: { handler: (a, c) => _cmdHandoffCreate('odysseus', a, c), help: 'Return packet for Odysseus', usage: '/handoff odysseus [goal]' },
+      hermes:   { handler: (a, c) => _cmdHandoffCreate('hermes', a, c),   help: 'Hand off to Hermes Agent : brudda', usage: '/handoff hermes [goal]' },
+      list:     { handler: _cmdHandoffList,   alias: ['ls'], help: 'List pending handoffs', usage: '/handoff list [target]' },
+      pickup:   { handler: _cmdHandoffPickup, alias: ['get'], help: 'Show handoff for pickup', usage: '/handoff pickup [id]' },
+      _help:    { handler: _cmdHandoffHelp,   alias: [],     help: 'Show handoff usage',      usage: '/handoff' },
+    },
+  },
   setup: {
     alias: ['su', 'seutp'],
     category: 'Getting started',
@@ -5807,6 +6211,7 @@ const COMMANDS = {
       gemini:     { help: 'Google Gemini', alias: ['google'], usage: '/setup gemini AIza...', handler: (a, c) => _cmdSetup(['gemini', ...a], c) },
       xai:        { help: 'xAI (Grok)',    alias: ['grok'],   usage: '/setup xai xai-...',   handler: (a, c) => _cmdSetup(['xai',    ...a], c) },
       ollama:     { help: 'Ollama Cloud',  usage: '/setup ollama KEY',          handler: (a, c) => _cmdSetup(['ollama',     ...a], c) },
+      minimax:    { help: 'MiniMax',       usage: '/setup minimax KEY',         handler: (a, c) => _cmdSetup(['minimax',    ...a], c) },
       copilot:    { help: 'GitHub Copilot', usage: '/setup copilot',            handler: (a, c) => _cmdSetup(['copilot',    ...a], c) },
       'chatgpt-subscription': { help: 'ChatGPT Subscription', alias: ['codex'], usage: '/setup chatgpt-subscription', handler: (a, c) => _cmdSetup(['chatgpt-subscription', ...a], c) },
       local:      { help: 'Local model server (vLLM / LM Studio / llama.cpp / Ollama)',
@@ -5908,6 +6313,13 @@ const COMMANDS = {
     handler: _cmdTheme,
     usage: '/theme name'
   },
+  tts: {
+    alias: ['speak', 'say'],
+    category: 'Utility',
+    help: 'Speak text aloud using the configured TTS provider',
+    handler: _cmdTts,
+    usage: '/tts hello world'
+  },
   settings: {
     alias: ['cfg', 'preferences', 'config'],
     category: 'Settings',
@@ -5951,6 +6363,13 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('tasks', args, ctx),
     usage: '/tasks'
   },
+  handoffs: {
+    alias: ['agentbin', 'agent-bin'],
+    category: 'Tools',
+    help: 'Open Agent Bin (handoff inbox)',
+    handler: (args, ctx) => _cmdToolPanel('handoffs', args, ctx),
+    usage: '/handoffs'
+  },
   brain: {
     alias: ['memories'],
     category: 'Tools',
@@ -5979,6 +6398,20 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('research', args, ctx),
     usage: '/research'
   },
+  brief: {
+    alias: ['videobrief', 'video-brief', 'ytbrief', 'ceo-brief'],
+    category: 'Tools',
+    help: 'Transcribe a video URL and write a CEO-level brief (Agent mode)',
+    handler: _cmdVideoBrief,
+    usage: '/brief https://youtube.com/watch?v=...'
+  },
+  integrate: {
+    alias: ['oss-integrate', 'stack-integrate', 'vendor-integrate'],
+    category: 'Tools',
+    help: 'ROI-first OSS/vendor search-stack integration (Agent mode · TinyFish/Firecrawl/…)',
+    handler: _cmdIntegrate,
+    usage: '/integrate [vendor or ask]  ·  /oss-stack-integration <ask>'
+  },
   compare: {
     alias: [],
     category: 'Tools',
@@ -5986,6 +6419,14 @@ const COMMANDS = {
     handler: (args, ctx) => _cmdToolPanel('compare', args, ctx),
     usage: '/compare'
   },
+  // DISABLED: Docker cannot spawn Windows WPF via /api/clicky/start — use start-clicky.ps1 on host.
+  // clicky: {
+  //   alias: ['start-clicky', 'overlay'],
+  //   category: 'Tools',
+  //   help: 'Launch Clicky cursor overlay (Odysseus worker + Windows app)',
+  //   handler: _cmdStartClicky,
+  //   usage: '/clicky  ·  /clicky worker'
+  // },
   mcp: {
     alias: [],
     category: 'Tools',

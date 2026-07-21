@@ -6,6 +6,25 @@ import themeModule from '../theme.js';
 import createResearchSynapse from '../researchSynapse.js';
 import spinnerModule from '../spinner.js';
 import { sortModelIds } from '../modelSort.js';
+import { createHandoffDocument, notifyHandoffPickup } from '../handoff.js';
+
+const _INTERVIEW_PACK_TEMPLATE = `Interview prep research pack.
+
+Company: <COMPANY>
+Role: <ROLE>
+Interviewers: <NAME — TITLE; …>
+Interview datetime / link: <WHEN / URL>
+JD: <URL or paste summary>
+
+Must answer:
+1) Org/program narrative and constraints
+2) Interviewer ownership and likely questions
+3) Last-30-day signals worth citing
+4) STAR stories that map to each interviewer
+5) Questions I should ask them
+6) Claims to avoid / nuance
+
+Format as an interview prep report: coach briefing first, then org, interviewer dossiers, STAR matrix, likely Qs, sources.`;
 
 // jobId -> { synapse, status } — survives across _renderJobs() rebuilds so
 // the SVG keeps its accumulated nodes/edges between progress events.
@@ -53,6 +72,7 @@ function _saveSettingsToStorage() {
     localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
       max_rounds: document.getElementById('research-rounds')?.value || '0',
       search_provider: document.getElementById('research-search-provider')?.value || '',
+      research_engine: document.getElementById('research-engine')?.value || 'iterative',
       endpoint_id: document.getElementById('research-endpoint')?.value || '',
       model: document.getElementById('research-model')?.value || '',
       category: activeCat?.dataset.cat || '',
@@ -323,7 +343,7 @@ export function closePanel() {
 }
 
 function _buildPanelHTML() {
-  const searchProviders = ['', 'searxng', 'duckduckgo', 'tavily', 'brave', 'google', 'serper'];
+  const searchProviders = ['', 'searxng', 'duckduckgo', 'tavily', 'brave', 'google', 'serper', 'firecrawl', 'tinyfish'];
   const providerOpts = searchProviders.map(p =>
     `<option value="${p}">${p || 'Default'}</option>`
   ).join('');
@@ -355,30 +375,42 @@ function _buildPanelHTML() {
         </p>
         <div id="research-no-past-hint" class="memory-desc doclib-desc" style="display:none;margin-top:-2px;font-size:11px;opacity:0.7;">All past research found in <button type="button" class="research-library-link">Library, Research</button></div>
         <textarea id="research-query" class="research-query" placeholder="e.g. Trace Odysseus's ten-year journey home from Troy — every island, monster, and detour, and why each one cost him" rows="4"></textarea>
+        <div class="research-template-row" id="research-template-row">
+          <button type="button" class="research-template-btn" id="research-tpl-interview" title="Prefill interview-prep prompt and select Interview category">Interview pack</button>
+          <button type="button" class="research-template-btn research-template-swarm" id="research-tpl-swarm-cursor" title="Create a Cursor handoff to run the full multi-leg interview-research skill">Swarm → Cursor</button>
+        </div>
         <div class="research-category-row" id="research-category-row">
           <button class="research-cat active" data-cat="" title="LLM auto-detects the best format">Auto</button>
           <button class="research-cat" data-cat="product">Product</button>
           <button class="research-cat" data-cat="comparison">Compare</button>
           <button class="research-cat" data-cat="howto">How-to</button>
           <button class="research-cat" data-cat="factcheck">Fact-check</button>
+          <button class="research-cat" data-cat="interview" title="Interview prep format: coach briefing, dossiers, STAR matrix">Interview</button>
         </div>
         <button id="research-settings-toggle" class="research-settings-toggle${chevronCls}">
           Settings<span class="research-settings-chevron">${_chevronIcon}</span>
         </button>
         <div id="research-settings-body" class="research-settings-row"${settingsHidden}>
           <label class="research-setting">
+            <span class="research-setting-label">Engine</span>
+            <select id="research-engine">
+              <option value="iterative">Standard (local LLM)</option>
+              <option value="perplexity_agent">Perplexity Fast (deep-research)</option>
+            </select>
+          </label>
+          <label class="research-setting research-setting-iterative">
             <span class="research-setting-label">Rounds</span>
             <select id="research-rounds">${roundOpts}</select>
           </label>
-          <label class="research-setting">
+          <label class="research-setting research-setting-iterative">
             <span class="research-setting-label">Search engine</span>
             <select id="research-search-provider">${providerOpts}</select>
           </label>
-          <label class="research-setting">
+          <label class="research-setting research-setting-iterative">
             <span class="research-setting-label">Endpoint</span>
             <select id="research-endpoint"><option value="">Default</option></select>
           </label>
-          <label class="research-setting">
+          <label class="research-setting research-setting-iterative">
             <span class="research-setting-label">Model</span>
             <select id="research-model"><option value="">Default</option></select>
           </label>
@@ -422,6 +454,78 @@ function _resetCategoryToAuto() {
     b.classList.toggle('active', (b.dataset.cat || '') === ''));
 }
 
+function _selectCategory(cat) {
+  const want = cat || '';
+  document.querySelectorAll('.research-cat').forEach(b =>
+    b.classList.toggle('active', (b.dataset.cat || '') === want));
+}
+
+function _applyInterviewPackTemplate() {
+  const queryEl = document.getElementById('research-query');
+  if (!queryEl) return;
+  const current = (queryEl.value || '').trim();
+  if (!current || current.includes('Interview prep research pack')) {
+    queryEl.value = _INTERVIEW_PACK_TEMPLATE;
+  } else if (!current.startsWith('Interview prep research pack')) {
+    queryEl.value = `${_INTERVIEW_PACK_TEMPLATE}\n\n---\nUser notes:\n${current}`;
+  }
+  _selectCategory('interview');
+  queryEl.focus();
+  const companyIdx = queryEl.value.indexOf('<COMPANY>');
+  if (companyIdx >= 0) queryEl.setSelectionRange(companyIdx, companyIdx + '<COMPANY>'.length);
+  else queryEl.setSelectionRange(queryEl.value.length, queryEl.value.length);
+}
+
+async function _swarmInterviewToCursor() {
+  const queryEl = document.getElementById('research-query');
+  let query = (queryEl?.value || '').trim();
+  if (!query) {
+    _applyInterviewPackTemplate();
+    query = (queryEl?.value || '').trim();
+  }
+  _selectCategory('interview');
+  const btn = document.getElementById('research-tpl-swarm-cursor');
+  if (btn) btn.disabled = true;
+  try {
+    const result = await createHandoffDocument({
+      apiBase: _apiBase,
+      target: 'cursor',
+      title: 'Interview research pack (swarm)',
+      goal: 'Run /interview-research (interview-research skill + research-swarm) for this interview and land an Odysseus library HTML report with coach Listen script.',
+      project: 'C:\\Users\\tylar\\code\\odysseus',
+      source: 'odysseus',
+      context: [
+        'Use Cursor skill ~/.cursor/skills/interview-research/SKILL.md',
+        'Also follow research-swarm for legs/merge',
+        'Category: interview_prep',
+      ],
+      next: [
+        'In Cursor: /interview-research (or Pick up this handoff)',
+        'Fill company/role/interviewers/JD from the Notes section',
+        'Land report at /api/research/report/<session_id>',
+      ],
+      noteBody: query,
+    });
+    await notifyHandoffPickup({
+      target: result.target,
+      docId: result.docId,
+      noteId: result.noteId,
+      relayStatus: result.relayStatus,
+    });
+  } catch (err) {
+    const msg = err?.message || String(err);
+    try {
+      const { default: ui } = await import('../ui.js');
+      ui.showError?.(msg);
+    } catch {
+      console.error('Swarm → Cursor handoff failed', err);
+      alert(msg);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function _wireEvents(pane) {
   pane.querySelector('#research-panel-close').addEventListener('click', closePanel);
   pane.querySelector('#research-panel-minimize')?.addEventListener('click', () => {
@@ -432,6 +536,10 @@ function _wireEvents(pane) {
   });
   pane.querySelector('#research-start-btn').addEventListener('click', _handleStart);
   pane.querySelector('#research-add-btn').addEventListener('click', _handleAdd);
+  pane.querySelector('#research-tpl-interview')?.addEventListener('click', _applyInterviewPackTemplate);
+  pane.querySelector('#research-tpl-swarm-cursor')?.addEventListener('click', () => {
+    void _swarmInterviewToCursor();
+  });
 
   pane.querySelectorAll('.research-cat').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -461,13 +569,32 @@ function _wireEvents(pane) {
   const endpointSelect = pane.querySelector('#research-endpoint');
   endpointSelect.addEventListener('change', () => _populateModels(endpointSelect.value));
 
+  const engineSelect = pane.querySelector('#research-engine');
+  if (engineSelect) {
+    engineSelect.addEventListener('change', () => {
+      _updateEngineFields();
+      _saveSettingsToStorage();
+    });
+    _updateEngineFields();
+  }
+
   _renderJobs();
+}
+
+function _updateEngineFields() {
+  const engine = document.getElementById('research-engine')?.value || 'iterative';
+  const perplexity = engine === 'perplexity_agent';
+  document.querySelectorAll('.research-setting-iterative').forEach(el => {
+    el.style.display = perplexity ? 'none' : '';
+  });
 }
 
 function _readSettings() {
   const activeCat = document.querySelector('.research-cat.active');
   const category = activeCat?.dataset.cat || undefined;
+  const engine = document.getElementById('research-engine')?.value || 'iterative';
   const settings = {
+    research_engine: engine,
     max_rounds: parseInt(document.getElementById('research-rounds')?.value || '0', 10),
     search_provider: document.getElementById('research-search-provider')?.value || undefined,
     endpoint_id: document.getElementById('research-endpoint')?.value || undefined,
@@ -510,6 +637,9 @@ function _editJob(job) {
   });
   // Restore settings
   const s = job.settings || {};
+  const engineEl = document.getElementById('research-engine');
+  if (engineEl && s.research_engine) engineEl.value = s.research_engine;
+  _updateEngineFields();
   const roundsEl = document.getElementById('research-rounds');
   if (roundsEl && s.max_rounds) roundsEl.value = s.max_rounds;
   const spEl = document.getElementById('research-search-provider');
@@ -599,7 +729,9 @@ function _restoreSavedSettings() {
     });
   }
   // Rounds intentionally defaults to "Auto" on every open — don't restore.
-  // Users can pick a specific cap each time if needed.
+  const engine = document.getElementById('research-engine');
+  if (engine && saved.research_engine) engine.value = saved.research_engine;
+  _updateEngineFields();
   const search = document.getElementById('research-search-provider');
   if (search && saved.search_provider !== undefined) search.value = saved.search_provider;
   const ep = document.getElementById('research-endpoint');
@@ -1068,6 +1200,7 @@ const _CAT_ICONS = {
   howto:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   landscape:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>',
   factcheck:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
+  interview:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
 };
 
 const _CAT_LABELS = {
@@ -1076,6 +1209,7 @@ const _CAT_LABELS = {
   howto: 'How-to Guide',
   landscape: 'Landscape',
   factcheck: 'Fact-check',
+  interview: 'Interview Prep',
 };
 
 function _renderResult(job) {

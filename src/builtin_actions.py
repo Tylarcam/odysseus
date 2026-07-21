@@ -617,7 +617,7 @@ async def action_classify_events(owner: str, **kwargs) -> Tuple[str, bool]:
                 if _mems:
                     _lines = []
                     for m in _mems:
-                        c = (m.content or "").strip()
+                        c = (m.text or "").strip()
                         if c:
                             _lines.append(f"- {c[:200]}")
                     if _lines:
@@ -1110,6 +1110,326 @@ async def action_daily_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     except Exception as e:
         logger.error(f"daily_brief action failed: {e}")
         return str(e), False
+
+
+# Morning swarm producers (see scripts/seed_swarm.py, America/New_York):
+# Sporangium 07:00 → Spore 07:40 → Rhizo 08:30. CEO brief cron is 09:00.
+# Soft deadline: if harvest docs are still missing after this hour, run anyway
+# (swarm may be paused) rather than deferring forever.
+CEO_BRIEF_HARVEST_SOFT_DEADLINE_HOUR = 10
+CEO_BRIEF_HARVEST_DEFER_SECONDS = 15 * 60
+
+
+def ceo_brief_morning_harvest_ready(
+    *,
+    has_swarm_plan_today: bool,
+    has_research_brief_today: bool,
+    local_hour: int,
+    soft_deadline_hour: int = CEO_BRIEF_HARVEST_SOFT_DEADLINE_HOUR,
+) -> tuple[bool, str]:
+    """Ordering invariant for the CEO brief vs morning chron harvest.
+
+    Ready when today's Swarm Plan and/or Research Brief exist, or when the
+    soft deadline has passed (avoid infinite defer if swarm tasks are paused).
+    """
+    if has_swarm_plan_today or has_research_brief_today:
+        return True, "morning harvest docs present"
+    if local_hour >= soft_deadline_hour:
+        return True, f"soft deadline hour={soft_deadline_hour} reached; proceeding with partial harvest"
+    return False, (
+        "morning harvest not ready (no today's Swarm Plan / Research Brief); "
+        f"deferring until after Rhizo wave or hour>={soft_deadline_hour}"
+    )
+
+
+async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
+    """Gather every chron task's latest output into one CEO Brief document,
+    then kick off the CEO-level audio brief pipeline (LLM synopsis → Open
+    Notebook podcast MP3, browser-speech fallback). Designed to run on a
+    daily cron after the morning swarm wave (Sporangium plan, Rhizo research,
+    Herald ledger) so the user gets a single voice rundown of what the
+    background loops produced — no context-switching across Docs/Notes/Research.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timedelta as _td
+    from sqlalchemy import or_ as _or
+
+    from core.database import (
+        SessionLocal, Document, Note, ScheduledTask, TaskRun,
+    )
+    from core.database import get_upcoming_events as _get_events
+    from src.handoff_bin import bucket_handoff_notes as _bucket_handoffs
+    from src.job_pipeline.brief import get_jobs_for_brief as _jobs_for_brief
+    from services.documents.audio_brief import kickoff_doc_audio_brief as _kickoff_audio
+
+    progress_cb = kwargs.get("progress_cb")
+
+    def _progress(msg: str) -> None:
+        if progress_cb:
+            try:
+                progress_cb(msg)
+            except Exception:
+                pass
+
+    try:
+        from core.auth import AuthManager
+        _allow_null = not AuthManager().is_configured
+    except Exception:
+        _allow_null = False
+
+    now = _dt.now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    date_label = today.strftime("%Y-%m-%d")
+    doc_id = f"ceo-brief-{date_label}"
+    title = f"CEO Brief — {date_label}"
+
+    # Scheduled runs pass task_name; manual CMD Center triggers do not.
+    # Only the scheduler may defer — HTTP handlers must not see TaskDeferred.
+    if kwargs.get("task_name") and not kwargs.get("force"):
+        db_gate = SessionLocal()
+        try:
+            def _doc_updated_today(phrases: list[str]) -> bool:
+                q = db_gate.query(Document).filter(
+                    Document.is_active == True,  # noqa: E712
+                    (Document.archived == False) | (Document.archived.is_(None)),  # noqa: E712
+                    Document.updated_at >= today,
+                )
+                if owner:
+                    q = owner_filter(q, Document, owner, include_shared=_allow_null)
+                q = q.filter(_or(*[Document.title.ilike(f"%{p}%") for p in phrases]))
+                return q.first() is not None
+
+            has_plan = _doc_updated_today(["Swarm Substrate", "Swarm Plan"])
+            has_research = _doc_updated_today(["Research Brief"])
+            ready, reason = ceo_brief_morning_harvest_ready(
+                has_swarm_plan_today=has_plan,
+                has_research_brief_today=has_research,
+                local_hour=now.hour,
+            )
+            if not ready:
+                _progress(f"Harvest gate: {reason}")
+                raise TaskDeferred(reason, delay_seconds=CEO_BRIEF_HARVEST_DEFER_SECONDS)
+        finally:
+            db_gate.close()
+
+    _progress("Gathering chron outputs…")
+
+    def _excerpt(text: str, n: int = 1500) -> str:
+        t = (text or "").strip()
+        return (t[:n] + "…") if len(t) > n else t
+
+    substrate_txt = ""
+    research_txt = ""
+    ledger_txt = ""
+    events: list = []
+    due_soon: list = []
+    overdue: list = []
+    next_run: dict | None = None
+    jobs: dict = {}
+    handoffs: dict = {"needs_attention": [], "in_progress": []}
+    runs: list = []
+
+    db = SessionLocal()
+    try:
+        def _latest_doc_like(phrases):
+            q = db.query(Document).filter(
+                Document.is_active == True,  # noqa: E712
+                (Document.archived == False) | (Document.archived.is_(None)),  # noqa: E712
+            )
+            if owner:
+                q = owner_filter(q, Document, owner, include_shared=_allow_null)
+            q = q.filter(_or(*[Document.title.ilike(f"%{p}%") for p in phrases]))
+            return q.order_by(Document.updated_at.desc()).first()
+
+        substrate = _latest_doc_like(["Swarm Substrate", "Swarm Plan"])
+        research = _latest_doc_like(["Research Brief"])
+        ledger = _latest_doc_like(["Fruit Ledger"])
+        substrate_txt = _excerpt(substrate.current_content if substrate else "")
+        research_txt = _excerpt(research.current_content if research else "")
+        ledger_txt = _excerpt(ledger.current_content if ledger else "", 1000)
+
+        # Agenda: calendar (next 48h) + due/overdue notes + next chron run.
+        try:
+            for e in (_get_events(owner=owner, horizon_days=2, limit=12) or []):
+                start = e.get("start") or e.get("dtstart")
+                if start:
+                    events.append({
+                        "start": start,
+                        "title": e.get("title") or e.get("summary") or "Event",
+                    })
+        except Exception as e:
+            logger.debug(f"ceo_brief: calendar gather failed: {e}")
+
+        n_q = db.query(Note).filter(
+            Note.archived == False, Note.due_date.isnot(None)  # noqa: E712
+        )
+        if owner:
+            n_q = owner_filter(n_q, Note, owner, include_shared=_allow_null)
+        for n in n_q.all():
+            try:
+                due_dt = _dt.fromisoformat((n.due_date or "").replace("Z", ""))
+            except Exception:
+                continue
+            entry = {"title": n.title or "Reminder", "due_date": n.due_date}
+            if due_dt < now:
+                overdue.append(entry)
+            elif (due_dt - now).total_seconds() <= 86400:
+                due_soon.append(entry)
+        due_soon.sort(key=lambda x: x["due_date"] or "")
+        overdue.sort(key=lambda x: x["due_date"] or "")
+
+        t_q = db.query(ScheduledTask).filter(ScheduledTask.next_run.isnot(None))
+        if owner:
+            t_q = t_q.filter(ScheduledTask.owner == owner)
+        nr = t_q.order_by(ScheduledTask.next_run.asc()).first()
+        if nr:
+            next_run = {
+                "name": nr.name,
+                "next_run": nr.next_run.isoformat() if nr.next_run else None,
+            }
+
+        try:
+            jobs = _jobs_for_brief(owner=owner)
+        except Exception as e:
+            logger.debug(f"ceo_brief: jobs gather failed: {e}")
+            jobs = {}
+
+        try:
+            h_q = db.query(Note).filter(Note.handoff_doc_id.isnot(None))
+            if owner:
+                h_q = owner_filter(h_q, Note, owner, include_shared=_allow_null)
+            h_notes = []
+            for n in h_q.order_by(Note.updated_at.desc()).limit(40).all():
+                try:
+                    items = _json.loads(n.items) if n.items else None
+                except Exception:
+                    items = None
+                h_notes.append({
+                    "id": n.id, "title": n.title, "content": n.content, "items": items,
+                    "handoff_doc_id": getattr(n, "handoff_doc_id", None),
+                    "handoff_target": getattr(n, "handoff_target", None),
+                    "handoff_at": getattr(n, "handoff_at", None),
+                    "handoff_relay_status": getattr(n, "handoff_relay_status", None),
+                    "handoff_outcome": getattr(n, "handoff_outcome", None),
+                    "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+                })
+            handoffs = _bucket_handoffs(h_notes)
+        except Exception as e:
+            logger.debug(f"ceo_brief: handoff gather failed: {e}")
+
+        try:
+            run_q = (
+                db.query(TaskRun, ScheduledTask)
+                .join(ScheduledTask, TaskRun.task_id == ScheduledTask.id)
+                .filter(TaskRun.status == "success")
+            )
+            if owner:
+                run_q = run_q.filter(ScheduledTask.owner == owner)
+            for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(8).all():
+                runs.append({
+                    "name": t.name,
+                    "result": _excerpt((r.result or "").strip(), 400),
+                    "at": r.started_at.isoformat() if r.started_at else None,
+                })
+        except Exception as e:
+            logger.debug(f"ceo_brief: runs gather failed: {e}")
+    finally:
+        db.close()
+
+    _progress("Composing CEO brief…")
+
+    md: list[str] = [
+        f"# {title}", "",
+        f"_Generated {now.strftime('%H:%M')} from the morning chron wave._", "",
+        "## Top 3 actions that move the needle",
+    ]
+    if substrate_txt:
+        md += ["From the Swarm Plan / blackboard (Sporangium):", "```", substrate_txt, "```"]
+    else:
+        md += ["_No Swarm Plan on the blackboard yet — Sporangium may not have run._"]
+
+    md += ["", "## What's upcoming"]
+    if events:
+        md += ["Calendar (next 48h):"] + [f"- {e['start']} — {e['title']}" for e in events]
+    else:
+        md += ["_Clear day._"]
+    if due_soon:
+        md += ["Due soon:"] + [f"- {d['title']} ({d['due_date']})" for d in due_soon[:5]]
+    if overdue:
+        md += ["Overdue:"] + [f"- {d['title']} ({d['due_date']})" for d in overdue[:5]]
+    if next_run:
+        md += [f"Next chron run: {next_run['name']} @ {next_run['next_run']}"]
+
+    md += ["", "## Job pipeline", jobs.get("headline") or "No job applications need attention."]
+    for j in (jobs.get("ready_to_apply") or [])[:3]:
+        md += [f"- ready: {j.get('company')} — {j.get('role')}"]
+    for j in (jobs.get("needs_review") or [])[:3]:
+        md += [f"- review: {j.get('company')} — {j.get('role')}"]
+
+    md += ["", "## Handoffs in flight"]
+    na = handoffs.get("needs_attention") or []
+    ip = handoffs.get("in_progress") or []
+    if not na and not ip:
+        md += ["_None._"]
+    for h in na[:3]:
+        md += [f"- needs attention: {h.get('title')} → {h.get('handoff_target') or '?'}"]
+    for h in ip[:3]:
+        md += [f"- in progress: {h.get('title')} → {h.get('handoff_target') or '?'}"]
+
+    md += ["", "## Research findings (Rhizo)"]
+    if research_txt:
+        md += ["```", research_txt, "```"]
+    else:
+        md += ["_Rhizo hasn't filed a research brief today._"]
+
+    md += ["", "## Fruit ledger (Herald)"]
+    if ledger_txt:
+        md += ["```", ledger_txt, "```"]
+    else:
+        md += ["_No fruit ledger entry yet._"]
+
+    md += ["", "## Recent chron outputs"]
+    if runs:
+        for r in runs:
+            md += [f"- **{r['name']}** ({r['at']}) — {r['result']}"]
+    else:
+        md += ["_No successful chron runs in the recent window._"]
+
+    content = "\n".join(md)
+
+    _progress("Saving CEO brief document…")
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc is None:
+            db.add(Document(
+                id=doc_id, title=title, language="markdown",
+                current_content=content, is_active=True, archived=False,
+                owner=owner or None, version_count=1,
+            ))
+        else:
+            doc.title = title
+            doc.current_content = content
+            doc.is_active = True
+            doc.archived = False
+            if owner and not doc.owner:
+                doc.owner = owner
+            doc.version_count = (doc.version_count or 1) + 1
+        db.commit()
+    finally:
+        db.close()
+
+    _progress("Kicking off CEO audio brief…")
+    try:
+        state = _kickoff_audio(doc_id, title, content, owner=owner or "")
+        audio_status = state.get("status") or "generating"
+    except Exception as e:
+        logger.error(f"ceo_brief: audio kickoff failed: {e}")
+        audio_status = "failed"
+
+    result = f"CEO Brief saved ({doc_id}). Audio: {audio_status}."
+    _progress(result)
+    return result, True
 
 
 async def action_test_skills(owner: str, **kwargs) -> Tuple[str, bool]:
@@ -2215,6 +2535,7 @@ BUILTIN_ACTIONS = {
     # ping_events removed from the user-facing registry. Calendar reminders
     # are represented as Notes, so note pings are the single dispatch path.
     "daily_brief": action_daily_brief,
+    "ceo_brief": action_ceo_brief,
     "learn_sender_signatures": action_learn_sender_signatures,
     "ssh_command": action_ssh_command,
     "run_script": action_run_script,
@@ -2237,6 +2558,7 @@ BUILTIN_ACTION_INFO = {
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",
+    "ceo_brief": "Gather every chron task's latest output (Swarm Plan, Rhizo research, Fruit Ledger, calendar, jobs, handoffs, recent runs) into one CEO Brief document and convert it to a CEO-level audio brief (LLM synopsis → Open Notebook podcast MP3, browser-speech fallback)",
     "learn_sender_signatures": "LLM learns each sender's signature from 3+ of their recent emails; cached per address so future renders fold sigs reliably without heuristics",
     "ssh_command": "Run a shell command on a local or remote host",
     "run_script": "Run a script locally or on ODYSSEUS_SCRIPT_HOST",

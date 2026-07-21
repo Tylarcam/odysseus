@@ -501,11 +501,12 @@ async def sync_caldav(owner: str) -> dict:
     accounts = _load_caldav_accounts(owner)
     if not accounts:
         return {
+            "configured": False,
             "calendars": 0, "events": 0, "deleted": 0,
-            "errors": ["CalDAV is not configured"],
+            "errors": [],
         }
 
-    totals: dict = {"calendars": 0, "events": 0, "deleted": 0, "errors": []}
+    totals: dict = {"configured": True, "calendars": 0, "events": 0, "deleted": 0, "errors": []}
     for acc in accounts:
         url = (acc.get("url") or "").strip()
         user = (acc.get("username") or "").strip()
@@ -532,4 +533,11 @@ async def sync_caldav(owner: str) -> dict:
         totals["deleted"] += result.get("deleted", 0)
         for err in result.get("errors", []):
             totals["errors"].append(f"{label}: {err}")
+    try:
+        orphan = await push_orphan_local_events(owner)
+        totals["orphans_pushed"] = orphan.get("pushed", 0)
+        for err in orphan.get("errors", []):
+            totals["errors"].append(f"orphan push: {err}")
+    except Exception as e:
+        logger.warning("Orphan local-event push failed for owner=%r: %s", owner, e)
     return totals

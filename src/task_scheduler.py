@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -212,6 +213,12 @@ HOUSEKEEPING_DEFAULTS = {
     "extract_email_events": {"name": "Email Calendar Events",    "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 */1 * * *", "ship_paused": True, "legacy_names": ["Email → Calendar Events"]},
     "classify_events":      {"name": "Calendar Classify Events", "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 6,18 * * *", "ship_paused": True, "legacy_names": ["Classify Calendar Events"]},
     "check_email_urgency":   {"name": "Email Tags",               "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 * * * *", "ship_paused": True, "old_cron_expressions": ["*/15 * * * *"], "legacy_names": ["Email Triage", "Urgent Email"]},
+    # INVARIANT: ceo_brief must run AFTER the morning swarm harvest wave.
+    # seed_swarm morning producers (America/New_York): Sporangium 07:00,
+    # Spore 07:40, Rhizo 08:30. Brief at 07:30 raced an empty blackboard.
+    # Keep cron ≥ 09:00; action_ceo_brief also defers if today's harvest
+    # docs are still missing before the soft deadline.
+    "ceo_brief":             {"name": "CEO Brief (Voice Rundown)", "schedule": "cron",  "scheduled_time": None,    "cron_expression": "0 9 * * *", "ship_paused": False, "old_cron_expressions": ["30 7 * * *"], "legacy_names": ["CEO Brief"]},
     "audit_skills":          {"name": "Skills Audit",             "trigger_type": "event", "trigger_event": "skill_added", "trigger_count": 5, "schedule": None, "scheduled_time": None, "cron_expression": None, "legacy_names": ["Audit Skills"]},
 }
 
@@ -234,6 +241,36 @@ def _digest_windows(now):
         ("this_week", now + timedelta(days=2), now + timedelta(days=7)),
         ("next_30_days", now + timedelta(days=7), now + timedelta(days=30)),
     ]
+
+
+_EMPTY_AGENT_RESPONSE = (
+    "The model returned an empty response. Please try again or switch to a different model."
+)
+
+
+def is_empty_agent_response(text: str) -> bool:
+    """True when the agent loop produced no usable output."""
+    stripped = (text or "").strip()
+    if not stripped or stripped == "(no output)":
+        return True
+    return stripped == _EMPTY_AGENT_RESPONSE
+
+
+# Morning Brief: model gathers live data via app/MCP tools (no server prefetch).
+MORNING_BRIEF_TOOLS = frozenset({
+    "manage_notes",
+    "manage_calendar",
+    "app_api",
+    "create_document",
+    "update_document",
+    "manage_documents",
+    "mcp__email__list_emails",
+    "list_emails",
+})
+
+
+def _is_morning_brief_task(task) -> bool:
+    return "morning brief" in ((getattr(task, "name", None) or "").lower())
 
 
 class TaskScheduler:
@@ -451,6 +488,8 @@ class TaskScheduler:
         # old event scanner too caused duplicate emails/notifications for the
         # same calendar event.
         self._note_pings_task = asyncio.create_task(self._note_pings_loop())
+        self._handoff_relay_task = asyncio.create_task(self._handoff_relay_loop())
+        self._caldav_sync_task = asyncio.create_task(self._caldav_sync_loop())
         logger.info(f"Task scheduler started (concurrency cap: {self._concurrency_cap})")
         # Audit clusters: show any minute-of-day where >1 active scheduled
         # tasks land. Helps spot "all my tasks fire at 9am" patterns the user
@@ -487,13 +526,24 @@ class TaskScheduler:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        for attr in ("_note_pings_task", "_event_pings_task"):
+        for attr in ("_note_pings_task", "_event_pings_task", "_handoff_relay_task", "_caldav_sync_task"):
             t = getattr(self, attr, None)
             if t:
                 t.cancel()
                 try: await t
                 except asyncio.CancelledError: pass
         logger.info("Task scheduler stopped")
+
+    async def _handoff_relay_loop(self):
+        """Scan queued/stuck handoff relays — dispatch recovery + timeout."""
+        await asyncio.sleep(45)
+        from src.handoff_relay import scan_stuck_relays
+        while self._running:
+            try:
+                await scan_stuck_relays()
+            except Exception as e:
+                logger.warning("handoff relay scanner errored: %s", e)
+            await asyncio.sleep(90)
 
     async def _note_pings_loop(self):
         """Built-in note-due scanner — ticks every 60s inside the scheduler.
@@ -534,6 +584,51 @@ class TaskScheduler:
                 except Exception as e:
                     logger.warning(f"ping_events background scanner errored for owner={ow!r}: {e}")
             await asyncio.sleep(600)  # 10 min
+
+    def _caldav_sync_interval_sec(self) -> int:
+        raw = os.environ.get("ODYSSEUS_CALDAV_SYNC_INTERVAL_SEC", "900").strip()
+        try:
+            return max(60, int(raw))
+        except ValueError:
+            return 900
+
+    def _caldav_sync_owners(self) -> list:
+        """Owners with at least one CalDAV account configured."""
+        from routes.prefs_routes import _load
+        from src.caldav_sync import _load_caldav_accounts
+
+        owners: set[str] = set()
+        try:
+            all_prefs = _load()
+            if "_users" in all_prefs:
+                for user in all_prefs["_users"]:
+                    if _load_caldav_accounts(user):
+                        owners.add(user)
+            elif _load_caldav_accounts(None):
+                owners.add("")
+        except Exception:
+            pass
+        return sorted(owners)
+
+    async def _caldav_sync_loop(self):
+        """Periodic CalDAV pull — keeps local calendar fresh without opening the UI."""
+        await asyncio.sleep(120)
+        from src.caldav_sync import sync_caldav
+        interval = self._caldav_sync_interval_sec()
+        while self._running:
+            for ow in self._caldav_sync_owners():
+                try:
+                    result = await sync_caldav(ow)
+                    if result.get("errors"):
+                        logger.debug("CalDAV sync owner=%r: %s", ow, result["errors"])
+                    elif result.get("events") or result.get("deleted"):
+                        logger.info(
+                            "CalDAV sync owner=%r: %d events, %d deleted",
+                            ow, result.get("events", 0), result.get("deleted", 0),
+                        )
+                except Exception as e:
+                    logger.warning("CalDAV background sync errored for owner=%r: %s", ow, e)
+            await asyncio.sleep(interval)
 
     def _known_task_owners(self) -> list:
         """Distinct non-empty owners that background scanners should visit.
@@ -724,7 +819,11 @@ class TaskScheduler:
                 else:
                     # LLM task — use agent loop for tool access
                     result = await self._execute_llm_task(task, db)
-                    run.status = "success"
+                    if is_empty_agent_response(result):
+                        run.status = "error"
+                        run.error = result
+                    else:
+                        run.status = "success"
                     run.result = result
                 # Record which model actually ran (resolved inside the executor).
                 if getattr(self, "_last_run_model", None):
@@ -1015,7 +1114,7 @@ class TaskScheduler:
         if not action_fn:
             return f"Unknown action: {task.action}", False
 
-        from src.builtin_actions import TaskNoop
+        from src.builtin_actions import TaskDeferred, TaskNoop
         try:
             # Pass task prompt as script/command for ssh_command/run_script actions.
             def _progress(message: str):
@@ -1030,8 +1129,8 @@ class TaskScheduler:
                 kwargs["command"] = task.prompt
             result, success = await action_fn(**kwargs)
             return result, success
-        except TaskNoop:
-            # Bubble up so _execute_task_locked can drop the run row silently.
+        except (TaskNoop, TaskDeferred):
+            # Bubble up so _execute_task_locked can skip/defer without a failed run.
             raise
         except Exception as e:
             logger.error(f"Action '{task.action}' failed: {e}")
@@ -1369,20 +1468,34 @@ class TaskScheduler:
             except Exception:
                 pass
 
-        # RAG-select relevant tools for this prompt + always-available assistant tools.
-        # Without this, all 40+ tools get sent and models hit their tool limit.
+        # Morning Brief: strict allowlist (app-driven gather). Others: RAG + always-available.
         relevant_tools = None
-        try:
-            from src.tool_index import get_tool_index, ASSISTANT_ALWAYS_AVAILABLE
-            tool_idx = get_tool_index()
-            if tool_idx:
-                rag_tools = tool_idx.get_tools_for_query(task.prompt or "", k=8)
-                relevant_tools = (rag_tools | ASSISTANT_ALWAYS_AVAILABLE)
-                if disabled_tools:
-                    relevant_tools -= disabled_tools
-                logger.info(f"[assistant] RAG selected {len(rag_tools)} tools + {len(ASSISTANT_ALWAYS_AVAILABLE)} always-available = {len(relevant_tools)} total for '{task.name}'")
-        except Exception as e:
-            logger.warning(f"[assistant] RAG tool selection failed, using all: {e}")
+        strict_relevant_tools = False
+        if _is_morning_brief_task(task):
+            relevant_tools = set(MORNING_BRIEF_TOOLS)
+            if disabled_tools:
+                relevant_tools -= disabled_tools
+            strict_relevant_tools = True
+            logger.info(
+                "[assistant] Morning Brief strict tool allowlist (%d tools)",
+                len(relevant_tools),
+            )
+        else:
+            try:
+                from src.tool_index import get_tool_index, ASSISTANT_ALWAYS_AVAILABLE
+                tool_idx = get_tool_index()
+                if tool_idx:
+                    rag_tools = tool_idx.get_tools_for_query(task.prompt or "", k=8)
+                    relevant_tools = (rag_tools | ASSISTANT_ALWAYS_AVAILABLE)
+                    if disabled_tools:
+                        relevant_tools -= disabled_tools
+                    logger.info(
+                        f"[assistant] RAG selected {len(rag_tools)} tools + "
+                        f"{len(ASSISTANT_ALWAYS_AVAILABLE)} always-available = "
+                        f"{len(relevant_tools)} total for '{task.name}'"
+                    )
+            except Exception as e:
+                logger.warning(f"[assistant] RAG tool selection failed, using all: {e}")
 
         # Try using the agent loop for full tool access
         try:
@@ -1390,6 +1503,7 @@ class TaskScheduler:
                 endpoint_url, model, task, session_id,
                 system_prompt=system_prompt, disabled_tools=disabled_tools,
                 relevant_tools=relevant_tools,
+                strict_relevant_tools=strict_relevant_tools,
             )
         except Exception as e:
             logger.warning(f"Agent loop failed for task '{task.name}', falling back to simple call: {e}")
@@ -1587,9 +1701,21 @@ class TaskScheduler:
                               system_prompt: str | None = None,
                               disabled_tools: set | None = None,
                               relevant_tools: set | None = None,
-                              override_user_message: str | None = None) -> str:
+                              override_user_message: str | None = None,
+                              strict_relevant_tools: bool = False) -> str:
         """Run the full agent loop with tool access, collecting the final text."""
         from src.agent_loop import stream_agent_loop
+
+        # Crew/task rows may store a bare API base (e.g. https://api.groq.com/openai/v1)
+        # instead of the full chat URL. The chat path always goes through
+        # build_chat_url; this path used to POST the bare base verbatim, which
+        # 404s on every OpenAI-compatible provider. Normalize idempotently
+        # (normalize_base strips an existing /chat/completions suffix first).
+        try:
+            from src.endpoint_resolver import normalize_base as _nb, build_chat_url as _bcu
+            endpoint_url = _bcu(_nb(endpoint_url))
+        except Exception:
+            pass
 
         system_content = system_prompt or "You are a helpful assistant executing a scheduled task. Use available tools to complete the task thoroughly."
         user_content = override_user_message or task.prompt
@@ -1642,14 +1768,22 @@ class TaskScheduler:
             headers=headers,
             disabled_tools=disabled_tools,
             relevant_tools=relevant_tools,
+            strict_relevant_tools=strict_relevant_tools,
             fallbacks=_task_fallbacks,
         ):
             if event_str.startswith("data: ") and not event_str.startswith("data: [DONE]"):
                 try:
                     data = json.loads(event_str[6:])
-                    # Capture text from all event types, not just delta
+                    # Capture text from all event types, not just delta.
+                    # Skip thinking/reasoning deltas — persisting them made
+                    # task results read as chain-of-thought monologue
+                    # ("We need to triage inbox...") instead of the actual
+                    # deliverable. If the model routes ALL tokens to
+                    # reasoning, the grace-summarization below still
+                    # guarantees clean output.
                     if "delta" in data:
-                        full_text += data["delta"]
+                        if not data.get("thinking"):
+                            full_text += data["delta"]
                     elif data.get("type") == "tool_output":
                         # Tool results — capture summary so we have SOMETHING even
                         # if the model never produces a final text response
@@ -1690,12 +1824,16 @@ class TaskScheduler:
         return full_text or "(no output)"
 
     async def _execute_research_task(self, task, db) -> str:
-        """Execute a deep research task using DeepResearcher."""
+        """Execute a deep research task using DeepResearcher or Perplexity Agent."""
         from core.database import Session as DbSession, ChatMessage
         from src.deep_research import DeepResearcher
         from src.research_handler import RESEARCH_DATA_DIR, ResearchHandler
         from src.research_utils import strip_thinking
         from src.settings import get_setting
+        from src.perplexity_agent import resolve_research_engine
+
+        engine = resolve_research_engine(None)
+        use_perplexity = engine == "perplexity_agent"
 
         # Resolve endpoint/model: research settings > task settings > session defaults
         endpoint_url = task.endpoint_url
@@ -1703,70 +1841,95 @@ class TaskScheduler:
         headers = {}
         headers_from_resolver = False
 
-        if not endpoint_url or not model:
-            try:
-                from src.endpoint_resolver import resolve_endpoint
-                ep_url, ep_model, ep_headers = resolve_endpoint(
-                    "research",
-                    endpoint_url or None,
-                    model or None,
-                    None,
-                    owner=task.owner or None,
-                )
-                endpoint_url = ep_url or endpoint_url
-                model = ep_model or model
-                if ep_headers is not None:
-                    headers = ep_headers
-                    headers_from_resolver = True
-            except Exception:
-                pass
+        if not use_perplexity:
+            if not endpoint_url or not model:
+                try:
+                    from src.endpoint_resolver import resolve_endpoint
+                    ep_url, ep_model, ep_headers = resolve_endpoint(
+                        "research",
+                        endpoint_url or None,
+                        model or None,
+                        None,
+                        owner=task.owner or None,
+                    )
+                    endpoint_url = ep_url or endpoint_url
+                    model = ep_model or model
+                    if ep_headers is not None:
+                        headers = ep_headers
+                        headers_from_resolver = True
+                except Exception:
+                    pass
 
-        if not endpoint_url or not model:
-            endpoint_url, model = self._resolve_defaults(db, task.owner)
-        if not endpoint_url or not model:
-            raise RuntimeError("No model/endpoint configured for research")
+            if not endpoint_url or not model:
+                endpoint_url, model = self._resolve_defaults(db, task.owner)
+            if not endpoint_url or not model:
+                raise RuntimeError("No model/endpoint configured for research")
+        else:
+            model = "perplexity-agent"
+            endpoint_url = endpoint_url or ""
+
         # Record the resolved model for the run record (see _execute_task_locked).
         self._last_run_model = model
 
-        # Resolve headers
-        try:
-            from core.database import ModelEndpoint
-            from src.endpoint_resolver import normalize_base, build_headers
-            from src.auth_helpers import owner_filter
-            db2 = db
-            if not headers_from_resolver:
-                ep_q = db2.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
-                ep_q = owner_filter(ep_q, ModelEndpoint, task.owner or None)
-                eps = ep_q.all()
-                for ep in eps:
-                    if normalize_base(ep.base_url) in endpoint_url or endpoint_url in normalize_base(ep.base_url):
-                        headers = build_headers(ep.api_key, normalize_base(ep.base_url))
-                        break
-        except Exception:
-            pass
+        if use_perplexity:
+            handler = ResearchHandler()
+            entry: dict = {}
+            started_ts = time.time()
+            report = await handler.call_research_service(
+                task.prompt,
+                endpoint_url,
+                model,
+                max_time=600,
+                llm_headers=headers,
+                research_engine=engine,
+                _task_entry=entry,
+            )
+            completed_ts = time.time()
+            stats = entry.get("stats") or {}
+            findings = entry.get("raw_findings") or []
+            sources = entry.get("sources") or []
+        else:
+            # Resolve headers
+            try:
+                from core.database import ModelEndpoint
+                from src.endpoint_resolver import normalize_base, build_headers
+                from src.auth_helpers import owner_filter
+                db2 = db
+                if not headers_from_resolver:
+                    ep_q = db2.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
+                    ep_q = owner_filter(ep_q, ModelEndpoint, task.owner or None)
+                    eps = ep_q.all()
+                    for ep in eps:
+                        if normalize_base(ep.base_url) in endpoint_url or endpoint_url in normalize_base(ep.base_url):
+                            headers = build_headers(ep.api_key, normalize_base(ep.base_url))
+                            break
+            except Exception:
+                pass
 
-        max_tokens = int(get_setting("research_max_tokens", 8192))
-        extraction_timeout = int(get_setting("research_extraction_timeout_seconds", 90) or 90)
-        extraction_concurrency = int(get_setting("research_extraction_concurrency", 3) or 3)
+            max_tokens = int(get_setting("research_max_tokens", 8192))
+            extraction_timeout = int(get_setting("research_extraction_timeout_seconds", 90) or 90)
+            extraction_concurrency = int(get_setting("research_extraction_concurrency", 3) or 3)
 
-        researcher = DeepResearcher(
-            llm_endpoint=endpoint_url,
-            llm_model=model,
-            llm_headers=headers,
-            max_rounds=8,
-            max_time=600,  # 10 min for scheduled research
-            max_report_tokens=max_tokens,
-            extraction_timeout=extraction_timeout,
-            extraction_concurrency=extraction_concurrency,
-        )
+            researcher = DeepResearcher(
+                llm_endpoint=endpoint_url,
+                llm_model=model,
+                llm_headers=headers,
+                max_rounds=8,
+                max_time=600,
+                max_report_tokens=max_tokens,
+                extraction_timeout=extraction_timeout,
+                extraction_concurrency=extraction_concurrency,
+            )
 
-        started_ts = time.time()
-        report = await researcher.research(task.prompt)
-        completed_ts = time.time()
-        try:
-            stats = researcher.get_stats() or {}
-        except Exception:
-            stats = {}
+            started_ts = time.time()
+            report = await researcher.research(task.prompt)
+            completed_ts = time.time()
+            try:
+                stats = researcher.get_stats() or {}
+            except Exception:
+                stats = {}
+            findings = getattr(researcher, "findings", []) or []
+            sources = ResearchHandler._extract_sources(findings)
 
         # Ensure a session exists for output
         session_id = task.session_id
@@ -1796,16 +1959,21 @@ class TaskScheduler:
         # no Library entry and no visual report route to open.
         try:
             RESEARCH_DATA_DIR.mkdir(parents=True, exist_ok=True)
-            findings = getattr(researcher, "findings", []) or []
+            raw_findings = (
+                findings
+                if use_perplexity
+                else ResearchHandler._extract_raw_findings(findings)
+            )
             payload = {
                 "query": task.prompt or task.name or "Scheduled research",
                 "status": "done",
                 "result": report,
-                "raw_report": strip_thinking(report or ""),
-                "sources": ResearchHandler._extract_sources(findings),
-                "raw_findings": ResearchHandler._extract_raw_findings(findings),
+                "raw_report": entry.get("raw_report", strip_thinking(report or "")) if use_perplexity else strip_thinking(report or ""),
+                "sources": sources if use_perplexity else ResearchHandler._extract_sources(findings),
+                "raw_findings": raw_findings,
                 "stats": stats,
                 "category": "scheduled",
+                "research_engine": engine if use_perplexity else "iterative",
                 "started_at": started_ts,
                 "completed_at": completed_ts,
                 "owner": task.owner or "",
@@ -2076,16 +2244,21 @@ class TaskScheduler:
                     renamed.append(task.action)
                 normalized = False
                 desired_trigger = defs.get("trigger_type", "schedule")
-                if task.action == "check_email_urgency":
-                    old_crons = set(defs.get("old_cron_expressions") or [])
-                    if task.schedule == "cron" and (task.cron_expression or "") in old_crons:
-                        task.cron_expression = defs["cron_expression"]
-                        task.next_run = compute_next_run(
-                            defs["schedule"], defs["scheduled_time"], None, None,
-                            after=_utcnow(), cron_expression=defs["cron_expression"],
-                            tz_name=_resolve_task_timezone(db, task),
-                        )
-                        normalized = True
+                # Migrate built-in crons listed in old_cron_expressions (e.g.
+                # ceo_brief 07:30 → 09:00 so it no longer races morning harvest).
+                old_crons = set(defs.get("old_cron_expressions") or [])
+                if (
+                    old_crons
+                    and task.schedule == "cron"
+                    and (task.cron_expression or "") in old_crons
+                ):
+                    task.cron_expression = defs["cron_expression"]
+                    task.next_run = compute_next_run(
+                        defs["schedule"], defs["scheduled_time"], None, None,
+                        after=_utcnow(), cron_expression=defs["cron_expression"],
+                        tz_name=_resolve_task_timezone(db, task),
+                    )
+                    normalized = True
                 if desired_trigger == "event" and (
                     (task.trigger_type or "schedule") != "event"
                     or task.trigger_event != defs.get("trigger_event")

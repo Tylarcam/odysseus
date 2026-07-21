@@ -126,19 +126,26 @@ def push_event(calendars, local_cal_id: str, ev: dict, *, delete: bool = False,
     return {"ok": True, "created": True}
 
 
-def _discover_calendars(client):
+def _discover_calendars(client, account_url: str = ""):
     """Discover the principal's calendars, falling back to the URL itself —
-    same strategy as the pull path."""
+    same strategy as the pull path (including Google /user → /events mapping)."""
     from caldav.lib.error import AuthorizationError, NotFoundError
+    from src.caldav_sync import _open_url_as_calendar
+
+    calendars = []
     try:
-        return client.principal().calendars()
+        calendars = client.principal().calendars()
     except (AuthorizationError, NotFoundError):
         raise
     except Exception:
+        pass
+    if not calendars:
         try:
-            return [client.calendar(url=str(client.url))]
+            target_url = account_url or str(getattr(client, "url", "") or "")
+            calendars = [_open_url_as_calendar(client, target_url)]
         except Exception:
             return []
+    return calendars
 
 
 def _writeback_blocking(local_cal_id, ev, delete, url, username, password,
@@ -147,7 +154,7 @@ def _writeback_blocking(local_cal_id, ev, delete, url, username, password,
     # Redirects disabled here too: the write-back path opens its own DAVClient,
     # so it needs the same SSRF-via-redirect protection as the pull path.
     client = _build_dav_client(url, username, password)
-    calendars = _discover_calendars(client)
+    calendars = _discover_calendars(client, account_url=url)
     if not calendars:
         return {"ok": False, "error": "no remote calendars discovered"}
     return push_event(calendars, local_cal_id, ev, delete=delete,
@@ -210,3 +217,81 @@ async def writeback_event(owner: str, calendar_source: str, calendar_id: str,
     except Exception as e:
         logger.exception("CalDAV write-back raised")
         return {"ok": False, "error": str(e)[:200]}
+
+
+async def push_orphan_local_events(owner: str) -> dict:
+    """Push events stuck on local-only calendars onto the primary CalDAV calendar.
+
+    Used after a CalDAV pull so events created in Odysseus on Personal/local
+    calendars reach the user's remote (Stanford alumni mail, Google, etc.).
+    """
+    import os
+    from datetime import datetime, timedelta
+    from core.database import CalendarCal, CalendarEvent, SessionLocal
+    from src.caldav_sync import _LOOKAHEAD_DAYS, _LOOKBACK_DAYS
+
+    owner_key = owner or os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
+    db = SessionLocal()
+    try:
+        caldav_cals = (
+            db.query(CalendarCal)
+            .filter(CalendarCal.owner == owner_key, CalendarCal.source == "caldav")
+            .order_by(CalendarCal.name)
+            .all()
+        )
+        if not caldav_cals:
+            return {"pushed": 0, "skipped": "no caldav calendar"}
+
+        target = caldav_cals[0]
+        now = datetime.utcnow()
+        start = now - timedelta(days=_LOOKBACK_DAYS)
+        end = now + timedelta(days=_LOOKAHEAD_DAYS)
+
+        orphans = (
+            db.query(CalendarEvent)
+            .join(CalendarCal)
+            .filter(
+                CalendarCal.owner == owner_key,
+                CalendarCal.source == "local",
+                CalendarEvent.status != "cancelled",
+                CalendarEvent.dtstart >= start,
+                CalendarEvent.dtstart <= end,
+            )
+            .order_by(CalendarEvent.dtstart)
+            .all()
+        )
+        if not orphans:
+            return {"pushed": 0}
+
+        pushed = 0
+        errors: list[str] = []
+        for ev in orphans:
+            payload = {
+                "uid": ev.uid,
+                "summary": ev.summary,
+                "description": ev.description,
+                "location": ev.location,
+                "dtstart": ev.dtstart,
+                "dtend": ev.dtend,
+                "all_day": ev.all_day,
+                "is_utc": ev.is_utc,
+                "rrule": ev.rrule or "",
+            }
+            result = await writeback_event(owner_key, "caldav", target.id, payload)
+            if result.get("ok"):
+                ev.calendar_id = target.id
+                pushed += 1
+            elif result.get("skipped"):
+                continue
+            else:
+                errors.append(f"{ev.summary or ev.uid}: {result.get('error') or result}")
+
+        if pushed:
+            db.commit()
+        return {"pushed": pushed, "errors": errors}
+    except Exception as e:
+        logger.exception("push_orphan_local_events failed")
+        db.rollback()
+        return {"pushed": 0, "errors": [str(e)[:200]]}
+    finally:
+        db.close()

@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { addAITTSButton } from './tts-ai.js';
+import { ensureTTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
 import spinnerModule from './spinner.js';
@@ -20,10 +20,12 @@ import searchModule from './search.js';
 import documentModule from './document.js';
 import * as emailInbox from './emailInbox.js';
 import codeRunnerModule from './codeRunner.js';
+import { NOTE_BTN_ICON, codeBlockText, saveNoteFromText } from './noteFromCodeBlock.js';
 import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handleSetupInput, handleSetupWizard, typewriterInto } from './slashCommands.js';
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
+import voiceTelemetry from './voiceTelemetry.js';
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
@@ -291,8 +293,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       return;
     }
 
-    // If currently streaming, stop it
+    // If currently streaming, stop it — unless voice barge-in wants to
+    // replace this turn with a new spoken utterance already in #message.
     if (isStreaming) {
+      const voiceBarge = !!window.voiceChatModule?.isVoiceBargeSubmit?.();
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
       if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
@@ -335,13 +339,18 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         // Empty cancel — keep the assistant bubble around with a "Cancelled
         // by user" indicator and persist a placeholder server-side so the
         // turn survives a refresh instead of vanishing without a trace.
-        _renderCancelledBubble(currentHolder);
+        // Voice barge-in skips the cancelled bubble and continues to send.
+        if (!voiceBarge) {
+          _renderCancelledBubble(currentHolder);
+          currentHolder = null;
+          updateSubmitButton('idle', submitBtn);
+          const messageInput = uiModule.el('message');
+          if (messageInput) messageInput.disabled = false;
+          currentAccumulated = '';
+          return;
+        }
         currentHolder = null;
-        updateSubmitButton('idle', submitBtn);
-        const messageInput = uiModule.el('message');
-        if (messageInput) messageInput.disabled = false;
         currentAccumulated = '';
-        return;
       }
       // Render whatever was accumulated so far
       if (currentHolder && currentAccumulated) {
@@ -362,31 +371,33 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           });
         }
         
-        // Add the stopped indicator with continue button
-        const stoppedIndicator = document.createElement('div');
-        stoppedIndicator.className = 'stopped-indicator';
-        const stoppedLabel = document.createElement('span');
-        stoppedLabel.textContent = '[Message interrupted]';
-        stoppedIndicator.appendChild(stoppedLabel);
-        const continueBtn = document.createElement('button');
-        continueBtn.className = 'continue-btn';
-        continueBtn.title = 'Continue';
-        continueBtn.textContent = '\u25B8';
-        const _stoppedHolder = currentHolder; // capture before it gets cleared
-        continueBtn.addEventListener('click', () => {
-          stoppedIndicator.remove();
-          _hideUserBubble = true;
-          _pendingContinue = _stoppedHolder;
-          const cutoff = stoppedContent;
-          const msgInput = uiModule.el('message');
-          if (msgInput) {
-            msgInput.value = 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.';
-            const sb = document.querySelector('.send-btn');
-            if (sb) sb.click();
-          }
-        });
-        stoppedIndicator.appendChild(continueBtn);
-        currentHolder.querySelector('.body').appendChild(stoppedIndicator);
+        // Add the stopped indicator with continue button (skip for voice barge)
+        if (!voiceBarge) {
+          const stoppedIndicator = document.createElement('div');
+          stoppedIndicator.className = 'stopped-indicator';
+          const stoppedLabel = document.createElement('span');
+          stoppedLabel.textContent = '[Message interrupted]';
+          stoppedIndicator.appendChild(stoppedLabel);
+          const continueBtn = document.createElement('button');
+          continueBtn.className = 'continue-btn';
+          continueBtn.title = 'Continue';
+          continueBtn.textContent = '\u25B8';
+          const _stoppedHolder = currentHolder; // capture before it gets cleared
+          continueBtn.addEventListener('click', () => {
+            stoppedIndicator.remove();
+            _hideUserBubble = true;
+            _pendingContinue = _stoppedHolder;
+            const cutoff = stoppedContent;
+            const msgInput = uiModule.el('message');
+            if (msgInput) {
+              msgInput.value = 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.';
+              const sb = document.querySelector('.send-btn');
+              if (sb) sb.click();
+            }
+          });
+          stoppedIndicator.appendChild(continueBtn);
+          currentHolder.querySelector('.body').appendChild(stoppedIndicator);
+        }
 
         // Tell server to mark this message as stopped
         const _sid = sessionModule.getCurrentSessionId();
@@ -412,7 +423,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       currentAccumulated = '';
       currentHolder = null;
 
-      return;
+      // Manual Stop ends here. Voice barge-in continues into the send path
+      // with the new spoken text already placed in #message.
+      if (!voiceBarge) return;
+      window.voiceChatModule?.consumeVoiceBargeSubmit?.();
     }
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
@@ -1043,6 +1057,13 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       // Streaming TTS: synthesize sentence-by-sentence during streaming
       const streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
+      let _voiceResponseCreatedEmitted = false;
+      function _emitVoiceResponseCreated() {
+        if (_voiceResponseCreatedEmitted) return;
+        if (!window.voiceChatModule?.isAwaitingReply?.()) return;
+        _voiceResponseCreatedEmitted = true;
+        voiceTelemetry.emit('response.created');
+      }
       // Multi-bubble agent tracking
       let roundHolder = holder;       // Current AI text bubble (changes per round)
       let roundText = '';             // Text accumulated for current round
@@ -1380,6 +1401,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 break;
               }
               if (json.delta || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
+                _emitVoiceResponseCreated();
                 clearResponseTimeout();
                 clearProcessingProbe();
               }
@@ -1637,6 +1659,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   _scheduleThinkingSpinner();
                   // Feed streaming TTS with accumulated text
                   if (streamingTTS) window.aiTTSManager.streamingUpdate(roundText);
+                  // Feed realtime voice bridge (speaks sentences as they stream)
+                  if (!_isBg && window.voiceChatModule?.onAssistantStreamText) {
+                    window.voiceChatModule.onAssistantStreamText(roundText);
+                  }
                 }
               } else if (json.type === 'research_progress') {
                 if (_isBg) continue; // Skip DOM updates in background
@@ -2465,6 +2491,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   spinner.start();
                 }
                 if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
+                // Realtime voice bridge: flush the finished round's tail before reset
+                if (!_isBg && window.voiceChatModule?.onAssistantStreamRoundEnd) {
+                  window.voiceChatModule.onAssistantStreamRoundEnd();
+                }
                 uiModule.scrollHistory();
               } else if (json.type === 'budget_exceeded') {
                 if (_isBg) continue;
@@ -2728,10 +2758,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         }
         // Also store raw on the footer target so copy/TTS work
         if (footerTarget !== holder) footerTarget.dataset.raw = accumulated;
-        if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
-          addAITTSButton(footerTarget, accumulated);
+        if (ensureTTSButton && accumulated) {
+          ensureTTSButton(footerTarget, accumulated);
         }
-        // TTS auto-play: streaming mode flushes remaining text, non-streaming enqueues full message
         if (accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay) {
           const ttsBtn = holder.querySelector('.ai-tts-button');
           if (ttsBtn) {
@@ -2759,6 +2788,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
               window.aiTTSManager.enqueue(accumulated, ttsBtn, resetFn);
             }
           }
+        }
+        if (window.voiceChatModule?.onAssistantTurnComplete) {
+          const willPlayTts = !!(accumulated && window.aiTTSManager && window.aiTTSManager.autoPlay);
+          window.voiceChatModule.onAssistantTurnComplete(willPlayTts);
         }
         if (metrics) {
           displayMetrics(footerTarget, metrics);
@@ -2833,6 +2866,14 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       } else {
         // Stop streaming TTS on any error/abort
         if (streamingTTS && window.aiTTSManager) window.aiTTSManager.stop();
+
+        // Unstick voice-chat loop if this stream was started by a voice turn
+        if (window.voiceChatModule?.isAwaitingReply?.()) {
+          const failReason = (currentAbort && currentAbort.signal.aborted)
+            ? (currentAbort._reason || 'aborted')
+            : (err && err.message ? String(err.message) : 'stream_error');
+          window.voiceChatModule.onTurnFailed(failReason);
+        }
 
         if (currentAbort && currentAbort.signal.aborted) {
           const abortReason = currentAbort._reason || '';
@@ -3537,9 +3578,208 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     const compact = lines.length <= 1 && txt.length < 200;
     pre.classList.toggle('pre-compact', compact);
   }
-  function _scanCompactPres(root) {
+
+  async function _saveCodeBlockToNote(pre, btn) {
+    if (btn?.disabled) return;
+    const prevTitle = btn?.title;
+    if (btn) {
+      btn.disabled = true;
+      btn.title = 'Saving…';
+    }
+    try {
+      const sid = sessionModule.getCurrentSessionId?.();
+      await saveNoteFromText(codeBlockText(pre), {
+        apiBase: API_BASE || window.location.origin,
+        sessionId: sid || undefined,
+        source: 'chat_codeblock',
+      });
+      const isCompact = pre.classList.contains('pre-compact');
+      if (!isCompact) {
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      }
+      btn.classList.add('saved');
+      setTimeout(() => {
+        if (!isCompact) btn.innerHTML = NOTE_BTN_ICON;
+        btn.classList.remove('saved');
+      }, 1500);
+    } catch (err) {
+      uiModule?.showError?.(err?.message || 'Failed to save note');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.title = prevTitle || 'Save to Notes';
+      }
+    }
+  }
+  const _EDIT_BTN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  const _COPY_BTN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const _SPARKLE_BTN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3z"/><path d="M5 3v4M3 5h4M19 15v4M17 17h4"/></svg>';
+
+  /** Caret / selection offset inside a contentEditable root (plain text). */
+  function _plainOffsetIn(root, node, offset) {
+    if (!root.contains(node)) return 0;
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    try { range.setEnd(node, offset); } catch (_) { return 0; }
+    return range.toString().length;
+  }
+
+  /**
+   * Resolve the sentence (or selection) to improve inside an editable code block.
+   * Returns { text, start, end, context } or null.
+   */
+  function _sentenceSpanForImprove(codeEl) {
+    const full = codeEl.textContent ?? '';
+    if (!full.trim()) return null;
+    const sel = window.getSelection();
+    let start = 0;
+    let end = full.length;
+    if (sel && sel.rangeCount && codeEl.contains(sel.anchorNode)) {
+      const a = _plainOffsetIn(codeEl, sel.anchorNode, sel.anchorOffset);
+      const b = _plainOffsetIn(codeEl, sel.focusNode, sel.focusOffset);
+      start = Math.min(a, b);
+      end = Math.max(a, b);
+      if (start === end) {
+        // Expand caret to surrounding sentence (., !, ?, or newline).
+        const left = full.slice(0, start);
+        const right = full.slice(start);
+        const prevBreak = Math.max(left.lastIndexOf('\n'), left.lastIndexOf('. '), left.lastIndexOf('! '), left.lastIndexOf('? '));
+        start = prevBreak < 0 ? 0 : (left[prevBreak] === '\n' ? prevBreak + 1 : prevBreak + 2);
+        const m = right.match(/[.!?](?:\s|$)|$/);
+        const relEnd = m ? (m[0].startsWith('.') || m[0].startsWith('!') || m[0].startsWith('?') ? m.index + 1 : m.index) : right.length;
+        const nl = right.indexOf('\n');
+        end = start + (nl >= 0 ? Math.min(relEnd, nl) : relEnd);
+      }
+    } else {
+      // No caret in block — improve first non-empty sentence.
+      const m = full.match(/[^\n.!?][^.!?\n]*[.!?]?/);
+      if (!m) return null;
+      start = m.index;
+      end = start + m[0].length;
+    }
+    while (start < end && /\s/.test(full[start])) start++;
+    while (end > start && /\s/.test(full[end - 1])) end--;
+    const text = full.slice(start, end);
+    if (!text.trim()) return null;
+    if (text.length > 2000) {
+      uiModule?.showError?.('Selection too long — select a shorter sentence');
+      return null;
+    }
+    const ctxPad = 500;
+    const context = full.slice(Math.max(0, start - ctxPad), Math.min(full.length, end + ctxPad));
+    return { text, start, end, context };
+  }
+
+  async function _improveDoclibSentence(pre, btn) {
+    const codeEl = pre.querySelector('code');
+    const docCard = pre.closest('#doclib-modal .doclib-card[data-doc-id]');
+    if (!codeEl || !docCard || !pre.classList.contains('editing')) return;
+    const span = _sentenceSpanForImprove(codeEl);
+    if (!span) {
+      uiModule?.showError?.('Place the cursor in a sentence (or select text) to improve');
+      return;
+    }
+    const prevTitle = btn.title;
+    btn.disabled = true;
+    btn.classList.add('busy');
+    btn.title = 'Improving…';
+    try {
+      const base = API_BASE || window.location.origin;
+      const res = await fetch(`${base}/api/document/improve-sentence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          text: span.text,
+          context: span.context,
+          doc_id: docCard.dataset.docId || '',
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(errText || `Improve failed (${res.status})`);
+      }
+      const data = await res.json();
+      const improved = (data?.text || '').trim();
+      if (!improved) throw new Error('Empty improvement');
+      const full = codeEl.textContent ?? '';
+      codeEl.textContent = full.slice(0, span.start) + improved + full.slice(span.end);
+      // Reselect the improved span so the user can see what changed.
+      try {
+        const range = document.createRange();
+        const node = codeEl.firstChild || codeEl;
+        const s = span.start;
+        const e = span.start + improved.length;
+        if (node.nodeType === 3) {
+          range.setStart(node, Math.min(s, node.length));
+          range.setEnd(node, Math.min(e, node.length));
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (_) { /* selection restore best-effort */ }
+      try { codeEl.focus({ preventScroll: true }); } catch (_) { codeEl.focus(); }
+      uiModule?.showToast?.('Sentence improved');
+    } catch (err) {
+      console.error('[doclib-improve]', err);
+      uiModule?.showError?.(err?.message || 'Failed to improve sentence');
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('busy');
+      btn.title = prevTitle || 'Improve sentence';
+    }
+  }
+
+  /** Ensure chat <pre> blocks have copy/edit/save-to-note controls (retrofits old HTML too). */
+  function _ensureCodeBlockButtons(pre) {
+    if (!pre || pre.closest('.cookbook-output-wrap')) return;
+    const codeEl = pre.querySelector('code');
+    if (!codeEl && !pre.textContent?.trim()) return;
+    const codeText = () => (pre.querySelector('code')?.textContent || pre.textContent || '').trim();
+    const inDoclib = !!pre.closest('#doclib-modal .doclib-card[data-doc-id]');
+
+    if (!pre.querySelector('.copy-code')) {
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'copy-code';
+      copyBtn.setAttribute('data-code', codeText());
+      copyBtn.innerHTML = _COPY_BTN_ICON;
+      pre.appendChild(copyBtn);
+    }
+    if (!pre.querySelector('.edit-code')) {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'edit-code';
+      editBtn.title = 'Edit';
+      editBtn.innerHTML = _EDIT_BTN_ICON;
+      pre.insertBefore(editBtn, pre.querySelector('.copy-code'));
+    }
+    if (!pre.querySelector('.save-to-note')) {
+      const noteBtn = document.createElement('button');
+      noteBtn.type = 'button';
+      noteBtn.className = 'save-to-note';
+      noteBtn.title = 'Save to Notes';
+      noteBtn.innerHTML = NOTE_BTN_ICON;
+      pre.insertBefore(noteBtn, pre.querySelector('.copy-code'));
+    }
+    // Doc-library only: sparkle improve — visible solely while editing (CSS).
+    if (inDoclib && !pre.querySelector('.improve-sentence')) {
+      const sparkleBtn = document.createElement('button');
+      sparkleBtn.type = 'button';
+      sparkleBtn.className = 'improve-sentence';
+      sparkleBtn.title = 'Improve sentence';
+      sparkleBtn.setAttribute('aria-label', 'Improve sentence');
+      sparkleBtn.innerHTML = _SPARKLE_BTN_ICON;
+      pre.insertBefore(sparkleBtn, pre.querySelector('.edit-code') || pre.querySelector('.copy-code'));
+    }
+  }
+
+  function _enhancePres(root) {
     if (!root || !root.querySelectorAll) return;
-    root.querySelectorAll('pre').forEach(_markCompactPre);
+    root.querySelectorAll('pre').forEach((pre) => {
+      _ensureCodeBlockButtons(pre);
+      _markCompactPre(pre);
+    });
   }
   // Global observer so any <pre> added anywhere in the app (chat stream,
   // chat re-renders, document library chat previews, slash commands,
@@ -3548,13 +3788,16 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
   (function _initCompactPreObserver() {
     if (window._cmpPreObserverWired) return;
     window._cmpPreObserverWired = true;
-    _scanCompactPres(document.body);
+    _enhancePres(document.body);
     const obs = new MutationObserver((muts) => {
       for (const m of muts) {
         for (const n of m.addedNodes) {
           if (n.nodeType !== 1) continue;
-          if (n.tagName === 'PRE') _markCompactPre(n);
-          if (n.querySelectorAll) _scanCompactPres(n);
+          if (n.tagName === 'PRE') {
+            _ensureCodeBlockButtons(n);
+            _markCompactPre(n);
+          }
+          if (n.querySelectorAll) _enhancePres(n);
         }
       }
     });
@@ -3565,12 +3808,19 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
    * Initialize event listeners
    */
   export function initListeners() {
+    // Capture phase so these win over parent card click handlers (e.g. doclib
+    // expand/collapse) that would otherwise fire first on bubble and steal the tap.
+    const _codeBtnCapture = true;
+
     // Global event delegation for copy-code buttons
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.copy-code');
       if (!btn) return;
       e.stopPropagation();
-      const code = btn.getAttribute('data-code');
+      // Prefer live <code> text so copy reflects in-progress / just-finished edits
+      // (data-code is only refreshed when Edit → Done runs).
+      const preForCopy = btn.closest('pre');
+      const code = (preForCopy ? codeBlockText(preForCopy) : '') || btn.getAttribute('data-code') || '';
       if (code && uiModule) {
         uiModule.copyToClipboard(code);
         // Visual feedback: swap the icon to a checkmark (regular size)
@@ -3591,7 +3841,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
           delete btn.dataset.state;
         }, 1500);
       }
-    });
+    }, _codeBtnCapture);
 
     // Run code button delegation
     document.addEventListener('click', (e) => {
@@ -3599,24 +3849,65 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       if (!btn) return;
       e.stopPropagation();
       if (codeRunnerModule) codeRunnerModule.run(btn);
-    });
+    }, _codeBtnCapture);
 
-    // Edit code button delegation — toggle contentEditable on the code element
+    // Save-to-note button delegation
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.save-to-note');
+      if (!btn) return;
+      e.stopPropagation();
+      const pre = btn.closest('pre');
+      if (!pre) return;
+      _saveCodeBlockToNote(pre, btn);
+    }, _codeBtnCapture);
+
+    // Doclib sparkle — improve selected / caret sentence using surrounding context.
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.improve-sentence');
+      if (!btn) return;
+      e.stopPropagation();
+      const pre = btn.closest('pre');
+      if (!pre) return;
+      _improveDoclibSentence(pre, btn);
+    }, _codeBtnCapture);
+
+    // Edit code button delegation — toggle contentEditable on the code element.
+    // In the document library, Done also persists via PUT /api/document/{id}.
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.edit-code');
       if (!btn) return;
       e.stopPropagation();
       const pre = btn.closest('pre');
       if (!pre) return;
-      const codeEl = pre.querySelector('code');
-      if (!codeEl) return;
+      let codeEl = pre.querySelector('code');
+      // Bare <pre> blocks (e.g. older Gen preview) get .edit-code injected by the
+      // observer but have no <code> child — wrap text nodes so Edit is not a no-op.
+      if (!codeEl) {
+        const parts = [];
+        for (const n of [...pre.childNodes]) {
+          if (n.nodeType === Node.TEXT_NODE) {
+            parts.push(n.textContent || '');
+            n.remove();
+          }
+        }
+        const joined = parts.join('');
+        if (!joined.trim()) return;
+        codeEl = document.createElement('code');
+        codeEl.textContent = joined;
+        const firstBtn = pre.querySelector('button');
+        if (firstBtn) pre.insertBefore(codeEl, firstBtn);
+        else pre.appendChild(codeEl);
+      }
+      const docCard = pre.closest('#doclib-modal .doclib-card[data-doc-id]');
+      const docId = docCard?.dataset?.docId || '';
       const isEditing = codeEl.contentEditable !== 'false' && codeEl.contentEditable !== 'inherit';
       if (isEditing) {
         // Save: exit edit mode, update data-code on copy/run buttons
         codeEl.contentEditable = 'false';
         codeEl.classList.remove('editing');
         pre.classList.remove('editing');
-        const newCode = codeEl.textContent;
+        if (docCard?.dataset) delete docCard.dataset.docEditing;
+        const newCode = codeEl.textContent ?? '';
         const copyBtn = pre.querySelector('.copy-code');
         if (copyBtn) copyBtn.setAttribute('data-code', newCode);
         const runBtn = pre.querySelector('.run-code');
@@ -3625,15 +3916,41 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         btn.title = 'Edit';
         btn.classList.remove('active');
+        // Persist library document edits (chat code blocks stay ephemeral).
+        if (docId) {
+          const base = API_BASE || window.location.origin;
+          btn.disabled = true;
+          fetch(`${base}/api/document/${encodeURIComponent(docId)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ content: newCode }),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const errText = await res.text().catch(() => '');
+              throw new Error(errText || `Save failed (${res.status})`);
+            }
+            const saved = await res.json().catch(() => null);
+            const badge = docCard.querySelector('.doclib-card-ver');
+            if (badge && saved?.version_count) badge.textContent = 'v' + saved.version_count;
+            uiModule?.showToast?.('Document saved');
+          }).catch((err) => {
+            console.error('[doclib-edit] save failed:', err);
+            uiModule?.showError?.(err?.message || 'Failed to save document');
+          }).finally(() => { btn.disabled = false; });
+        }
       } else {
         // Enter edit mode. Firefox (especially on mobile) historically lacks
         // contentEditable="plaintext-only" — setting it there leaves the block
         // non-editable, so the tap "just gets a checkmark" with no way to type.
         // Fall back to "true" when plaintext-only didn't take.
+        // Flatten hljs spans in the library so the user edits plain text.
+        if (docId) codeEl.textContent = codeEl.textContent ?? '';
         try { codeEl.contentEditable = 'plaintext-only'; } catch (_) { /* unsupported value */ }
         if (codeEl.contentEditable !== 'plaintext-only') codeEl.contentEditable = 'true';
         codeEl.classList.add('editing');
         pre.classList.add('editing');
+        if (docCard) docCard.dataset.docEditing = '1';
         // preventScroll keeps the page from jumping to the codeblock when
         // focusing the editable on mobile — the browser would otherwise
         // scroll it into view above the keyboard, which reads as "auto-
@@ -3641,15 +3958,15 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
         try { codeEl.focus({ preventScroll: true }); } catch (_) { codeEl.focus(); }
         // Swap icon to checkmark
         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-        btn.title = 'Done editing';
+        btn.title = docId ? 'Save document' : 'Done editing';
         btn.classList.add('active');
       }
-    });
+    }, _codeBtnCapture);
 
     // Tapping a code block body (not its buttons) toggles the overlay
     // copy/edit/run buttons, which otherwise cover the text on mobile.
     document.addEventListener('click', (e) => {
-      if (e.target.closest('.copy-code, .edit-code, .run-code')) return;
+      if (e.target.closest('.copy-code, .edit-code, .save-to-note, .run-code, .improve-sentence')) return;
       const pre = e.target.closest('pre');
       if (!pre || !pre.querySelector('.copy-code')) return;
       // Don't hide while editing — the buttons (incl. the Done checkmark) matter.
@@ -3673,6 +3990,10 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       if (copyBtn) copyBtn.classList.toggle('bottom', isBottom);
       const editBtn = pre.querySelector('.edit-code');
       if (editBtn) editBtn.classList.toggle('bottom', isBottom);
+      const improveBtn = pre.querySelector('.improve-sentence');
+      if (improveBtn) improveBtn.classList.toggle('bottom', isBottom);
+      const noteBtn = pre.querySelector('.save-to-note');
+      if (noteBtn) noteBtn.classList.toggle('bottom', isBottom);
       const runBtn = pre.querySelector('.run-code');
       if (runBtn) runBtn.classList.toggle('bottom', isBottom);
       pre.dataset.btnPosComputed = '1';
@@ -4206,6 +4527,43 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     } catch (err) {
       console.error('Fork failed:', err);
       if (uiModule) uiModule.showError('Fork failed: ' + err.message);
+    }
+  }
+
+  export async function forkSelectionToSplit({ text, keepCount, sessionId } = {}) {
+    const sid = String(sessionId || sessionModule.getCurrentSessionId() || '').trim();
+    if (!sid) {
+      uiModule?.showToast?.('Open a chat session first');
+      return false;
+    }
+    if (window.innerWidth <= 768) {
+      uiModule?.showToast?.('Split chat is desktop-only for now');
+      return false;
+    }
+    let count = Number(keepCount);
+    if (!(count > 0)) {
+      const box = document.getElementById('chat-history');
+      count = box ? box.querySelectorAll('.msg').length : 0;
+    }
+    const draft = String(text || '').trim();
+    try {
+      const res = await fetch(`${API_BASE}/api/session/${sid}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keep_count: count }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      await sessionModule.loadSessions();
+      const splitMod = window.splitChatModule;
+      if (!splitMod?.openSplit) throw new Error('Split chat not available');
+      const opened = await splitMod.openSplit(data.id, { draftMessage: draft });
+      if (opened) uiModule?.showToast?.(`Forked → ${data.name}`);
+      return opened;
+    } catch (err) {
+      console.error('Fork to split failed:', err);
+      uiModule?.showError?.('Fork failed: ' + (err.message || 'unknown error'));
+      return false;
     }
   }
 
@@ -4932,6 +5290,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     setPendingContinue,
     regenerateFrom,
     forkFrom,
+    forkSelectionToSplit,
     editUserMessage,
     editAIMessage,
     resendUserMessage,

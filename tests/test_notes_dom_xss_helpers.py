@@ -25,9 +25,9 @@ def test_notes_linkify_escapes_href_attribute():
 def test_notes_edit_form_uses_safe_image_src_guard():
     src = (_REPO / "static" / "js" / "notes.js").read_text(encoding="utf-8")
 
-    assert "let currentImageUrl = _safeImgSrc(note?.image_url || '');" in src
+    assert "form._noteImageUrl = _safeImgSrc(note?.image_url || '');" in src
     assert "let _stashedDrawUrl = (type === 'draw') ? (_safeImgSrc(note?.image_url) || null) : null;" in src
-    assert "_wireCanvas(bodyEl, _stashedDrawUrl || currentImageUrl || _safeImgSrc(note?.image_url) || null)" in src
+    assert "_wireCanvas(bodyEl, _stashedDrawUrl || form._noteImageUrl || _safeImgSrc(note?.image_url) || null)" in src
     assert "_wireCanvas(form.querySelector('.note-form-body'), _safeImgSrc(note?.image_url) || null)" in src
     assert "const safeInitialImageUrl = _safeImgSrc(initialImageUrl);" in src
     assert "img.src = safeInitialImageUrl;" in src

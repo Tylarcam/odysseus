@@ -195,49 +195,69 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
     # calendar path (_acct_owner, which expects None rather than "").
     account_owner = _owner_for_email_account(account_id)
     _acct_owner = account_owner or None
+    cfg = _get_email_config(account_id, owner=account_owner)
+    _use_gog = cfg.get("provider") == "gmail_gog"
+    _gog_account = (cfg.get("from_address") or cfg.get("imap_user") or "") if _use_gog else ""
 
     conn = None
     try:
         await _emit_progress(progress_cb, "Connecting to mail…")
-        conn = _imap_connect(account_id, owner=account_owner)
-        from datetime import timedelta as _td
-        since = (datetime.utcnow() - _td(days=max(1, days_back))).strftime("%d-%b-%Y")
-        # uid_list carries real IMAP UIDs, matching the email UI/read routes.
-        # Using sequence numbers here made background-cached replies miss when
-        # the user clicked the same visible message in the UI.
         uid_list = []
-        folders_to_scan = ["INBOX"]
-        if auto_cal:
-            for sent_name in ("Sent", "INBOX/Sent", "Sent Items", "[Gmail]/Sent Mail"):
+        if _use_gog:
+            from src import gmail_gog as _gog
+            folders_to_scan = [("INBOX", "INBOX")]
+            if auto_cal:
+                folders_to_scan.append(("[Gmail]/Sent Mail", "[Gmail]/Sent Mail"))
+            for _folder_label, _folder in folders_to_scan:
                 try:
-                    st, _ = conn.select(_q(sent_name), readonly=True)
-                    if st == "OK":
-                        folders_to_scan.append(sent_name)
-                        break
-                except Exception:
-                    continue
-        for folder in folders_to_scan:
-            try:
-                conn.select(_q(folder), readonly=True)
-                status, data = conn.uid("SEARCH", None, f'(SINCE {since})')
-                if status == "OK" and data[0]:
-                    for u in reversed(data[0].split()[-30:]):
-                        uid_list.append((folder, u))
-            except Exception as _e:
-                logger.warning(f"Folder {folder} scan failed: {_e}")
-        # Some IMAP servers/accounts give unreliable results for SINCE
-        # because of INTERNALDATE/date-header quirks. If the user manually
-        # runs a cacheable email task and SINCE finds nothing, fall back to
-        # the latest visible inbox messages so Clear cache -> Run again can
-        # actually repopulate AI reply/summary/tag caches.
-        if not uid_list:
-            _fb_uids, conn = _latest_inbox_fallback_uids(
-                conn, lambda: _imap_connect(account_id, owner=account_owner)
-            )
-            uid_list.extend(_fb_uids)
-        # Re-select INBOX as default for downstream code (on a clean socket even
-        # if the SEARCH ALL fallback above failed — see #1613).
-        conn.select("INBOX", readonly=True)
+                    listing = await asyncio.to_thread(
+                        _gog.list_inbox, _gog_account, _folder, 30, 0, "all"
+                    )
+                    if listing.get("error"):
+                        raise RuntimeError(listing["error"])
+                    for e in (listing.get("emails") or []):
+                        uid_list.append((_folder_label, e["uid"]))
+                except Exception as _e:
+                    logger.warning(f"gog folder {_folder} scan failed: {_e}")
+        else:
+            conn = _imap_connect(account_id, owner=account_owner)
+            from datetime import timedelta as _td
+            since = (datetime.utcnow() - _td(days=max(1, days_back))).strftime("%d-%b-%Y")
+            # uid_list carries real IMAP UIDs, matching the email UI/read routes.
+            # Using sequence numbers here made background-cached replies miss when
+            # the user clicked the same visible message in the UI.
+            folders_to_scan = ["INBOX"]
+            if auto_cal:
+                for sent_name in ("Sent", "INBOX/Sent", "Sent Items", "[Gmail]/Sent Mail"):
+                    try:
+                        st, _ = conn.select(_q(sent_name), readonly=True)
+                        if st == "OK":
+                            folders_to_scan.append(sent_name)
+                            break
+                    except Exception:
+                        continue
+            for folder in folders_to_scan:
+                try:
+                    conn.select(_q(folder), readonly=True)
+                    status, data = conn.uid("SEARCH", None, f'(SINCE {since})')
+                    if status == "OK" and data[0]:
+                        for u in reversed(data[0].split()[-30:]):
+                            uid_list.append((folder, u))
+                except Exception as _e:
+                    logger.warning(f"Folder {folder} scan failed: {_e}")
+            # Some IMAP servers/accounts give unreliable results for SINCE
+            # because of INTERNALDATE/date-header quirks. If the user manually
+            # runs a cacheable email task and SINCE finds nothing, fall back to
+            # the latest visible inbox messages so Clear cache -> Run again can
+            # actually repopulate AI reply/summary/tag caches.
+            if not uid_list:
+                _fb_uids, conn = _latest_inbox_fallback_uids(
+                    conn, lambda: _imap_connect(account_id, owner=account_owner)
+                )
+                uid_list.extend(_fb_uids)
+            # Re-select INBOX as default for downstream code (on a clean socket even
+            # if the SEARCH ALL fallback above failed — see #1613).
+            conn.select("INBOX", readonly=True)
         if not uid_list:
             return "No recent emails"
         await _emit_progress(progress_cb, f"Found {len(uid_list)} recent email(s); checking cache…")
@@ -281,7 +301,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
         except Exception:
             _self_self_addr = ""
 
-        spam_folder = _detect_spam_folder(conn) if auto_spam else None
+        spam_folder = "[Gmail]/Spam" if (_use_gog and auto_spam) else (_detect_spam_folder(conn) if auto_spam else None)
         if auto_spam and not spam_folder:
             logger.warning("Auto-spam enabled but no Junk/Spam folder detected — will classify but not move")
 
@@ -313,15 +333,33 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
             else:
                 _folder, uid = "INBOX", _entry
             try:
-                if _folder != _current_folder:
-                    conn.select(_q(_folder), readonly=True)
-                    _current_folder = _folder
-                st, msg_data = conn.uid("FETCH", uid if isinstance(uid, bytes) else str(uid).encode(), "(RFC822)")
-                if st != "OK":
-                    continue
-                examined += 1
-                raw = msg_data[0][1]
-                msg = email_mod.message_from_bytes(raw)
+                if _use_gog:
+                    from email.mime.text import MIMEText
+                    from src import gmail_gog as _gog
+                    read = await asyncio.to_thread(
+                        _gog.read_message, _gog_account, str(uid), _folder, False
+                    )
+                    if read.get("error"):
+                        continue
+                    examined += 1
+                    _from_addr = read.get("from_address") or ""
+                    _from_name = read.get("from_name") or ""
+                    _from_hdr = f"{_from_name} <{_from_addr}>".strip() if _from_addr else _from_name
+                    msg = MIMEText(read.get("body") or "", "plain", "utf-8")
+                    msg["From"] = _from_hdr
+                    msg["Subject"] = read.get("subject") or ""
+                    msg["Date"] = read.get("date") or ""
+                    msg["Message-ID"] = read.get("message_id") or ""
+                else:
+                    if _folder != _current_folder:
+                        conn.select(_q(_folder), readonly=True)
+                        _current_folder = _folder
+                    st, msg_data = conn.uid("FETCH", uid if isinstance(uid, bytes) else str(uid).encode(), "(RFC822)")
+                    if st != "OK":
+                        continue
+                    examined += 1
+                    raw = msg_data[0][1]
+                    msg = email_mod.message_from_bytes(raw)
                 message_id = msg.get("Message-ID", "").strip()
                 if not message_id:
                     # Include folder+UID so each message gets a unique synth ID
@@ -832,7 +870,12 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                             "Classify the email. Return ONLY a JSON object, no prose, no markdown fences. "
                             "Schema: {\"tags\": [\"tag1\"], \"spam\": false, \"reason\": \"short\"}. "
                             "Pick 1-2 tags from: work, personal, finance, bills, receipt, travel, "
-                            "newsletter, promo, notification, security, social, shopping, calendar.\n\n"
+                            "newsletter, promo, notification, security, social, shopping, calendar, job-alert.\n\n"
+                            "If the email is a job posting or job alert (Handshake, LinkedIn Jobs, Indeed, etc.), "
+                            "include tag job-alert and add a \"job\" object: "
+                            "{\"is_job_alert\": true, \"company\": \"...\", \"role\": \"...\", "
+                            "\"apply_url\": \"...\", \"jd_snippet\": \"...\", \"confidence\": 0.0-1.0}. "
+                            "Otherwise omit \"job\" or set is_job_alert=false.\n\n"
                             "Set spam=true for ANY of:\n"
                             "- Phishing, scams, chain mail, deceptive offers\n"
                             "- Marketing/promotional blasts (\"special offer\", \"limited time\", discount codes)\n"
@@ -885,7 +928,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                             if parsed is not None:
                                 _ALLOWED_TAGS = {"work","personal","finance","bills","receipt","travel",
                                                  "newsletter","marketing","notification","security","social",
-                                                 "shopping","calendar"}
+                                                 "shopping","calendar","job-alert"}
                                 raw_tags = parsed.get("tags") or []
                                 if isinstance(raw_tags, str):
                                     raw_tags = [raw_tags]
@@ -897,7 +940,13 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
 
                                 moved_to = ""
                                 if is_spam and auto_spam and spam_folder:
-                                    if _imap_move(uid, spam_folder, account_id=account_id, owner=account_owner):
+                                    if _use_gog:
+                                        from src import gmail_gog as _gog
+                                        _uid_str = uid.decode() if isinstance(uid, bytes) else str(uid)
+                                        if _gog.trash_message(_gog_account, _uid_str).get("ok"):
+                                            moved_to = spam_folder
+                                            logger.info(f"Auto-spam moved uid={_uid_str} to {spam_folder}: {spam_reason}")
+                                    elif _imap_move(uid, spam_folder, account_id=account_id, owner=account_owner):
                                         moved_to = spam_folder
                                         logger.info(f"Auto-spam moved uid={uid.decode() if isinstance(uid, bytes) else str(uid)} to {spam_folder}: {spam_reason}")
 
@@ -913,6 +962,41 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                                 _c.commit()
                                 _c.close()
                                 _tag_existing.add(message_id)
+
+                                if "job-alert" in tags:
+                                    job_info = parsed.get("job") if isinstance(parsed.get("job"), dict) else {}
+                                    is_job = bool(job_info.get("is_job_alert"))
+                                    try:
+                                        confidence = float(job_info.get("confidence") or 0)
+                                    except (TypeError, ValueError):
+                                        confidence = 0.0
+                                    if is_job and confidence >= 0.5:
+                                        try:
+                                            from src.job_pipeline.orchestrator import inbound_job_event
+
+                                            inbound_job_event(
+                                                {
+                                                    "source": "email",
+                                                    "subject": subject,
+                                                    "body": body,
+                                                    "job": job_info,
+                                                    "message_id": message_id,
+                                                },
+                                                owner=account_owner or None,
+                                                source="email",
+                                            )
+                                            logger.info(
+                                                "Job pipeline ingest for uid=%s company=%r role=%r",
+                                                uid.decode() if isinstance(uid, bytes) else str(uid),
+                                                job_info.get("company"),
+                                                job_info.get("role"),
+                                            )
+                                        except Exception as job_err:
+                                            logger.warning(
+                                                "Job pipeline ingest failed uid=%s: %s",
+                                                uid.decode() if isinstance(uid, bytes) else str(uid),
+                                                job_err,
+                                            )
                     except Exception as e:
                         logger.warning(f"Auto-classify {uid} failed: {e}")
 

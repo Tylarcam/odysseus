@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 from src.endpoint_resolver import resolve_endpoint
 from src.auth_helpers import _auth_disabled, get_current_user
@@ -107,7 +107,7 @@ def _resolve_endpoint_runtime(ep, owner=None, model: Optional[str] = None):
     return build_chat_url(base), ep_model, build_headers(api_key, base)
 
 
-def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
+def setup_research_routes(research_handler, session_manager=None, tts_service=None) -> APIRouter:
     router = APIRouter(tags=["research"])
 
     def _require_user(request: Request) -> str:
@@ -223,6 +223,106 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             logger.warning(f"No report data found for session {session_id}")
             raise HTTPException(404, "No visual report available for this session")
         return HTMLResponse(content=html_content)
+
+    @router.get("/api/research/{session_id}/audio-brief/status")
+    async def research_audio_brief_status(session_id: str, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        from services.research.audio_brief import get_audio_brief_meta
+        brief = get_audio_brief_meta(session_id) or {}
+        status = brief.get("status") or "pending"
+        return {
+            "status": status,
+            "ready": status == "ready",
+            "chunk_count": int(brief.get("chunk_count") or 0),
+            "mime": brief.get("mime"),
+            "error": brief.get("error"),
+            "generated_at": brief.get("generated_at"),
+        }
+
+    @router.get("/api/research/{session_id}/audio-brief/transcript")
+    async def research_audio_brief_transcript(session_id: str, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        from services.research.audio_brief import get_audio_brief_meta
+        brief = get_audio_brief_meta(session_id) or {}
+        return {"script": brief.get("script") or "", "status": brief.get("status") or "pending"}
+
+    @router.get("/api/research/{session_id}/audio-brief/chunk/{index}")
+    async def research_audio_brief_chunk(session_id: str, index: int, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        from services.research.audio_brief import read_audio_chunk
+        result = read_audio_chunk(session_id, index)
+        if result is None:
+            raise HTTPException(404, "Audio chunk not found")
+        data, mime = result
+        return Response(
+            content=data,
+            media_type=mime,
+            headers={"Content-Disposition": f"inline; filename=brief-{index}.{mime.split('/')[-1]}"},
+        )
+
+    @router.post("/api/research/{session_id}/audio-brief/regenerate")
+    async def research_audio_brief_regenerate(session_id: str, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        path = Path(DEEP_RESEARCH_DIR) / f"{session_id}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            raise HTTPException(404, "Research not found")
+        entry = {
+            "status": data.get("status"),
+            "owner": data.get("owner") or user,
+            "llm_endpoint": data.get("llm_endpoint") or "",
+            "llm_model": data.get("llm_model") or "",
+            "llm_headers": data.get("llm_headers") or {},
+        }
+        from services.research.audio_brief import kickoff_audio_brief
+        kickoff_audio_brief(session_id, entry, tts_service)
+        return {"ok": True, "status": "generating"}
+
+    @router.get("/api/research/{session_id}/hero-image/status")
+    async def research_hero_image_status(session_id: str, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        from services.research.hero_image import get_hero_image_meta
+        meta = get_hero_image_meta(session_id) or {}
+        return {
+            "status": meta.get("status") or "pending",
+            "url": meta.get("url"),
+            "prompt": meta.get("prompt"),
+            "error": meta.get("error"),
+            "model": meta.get("model"),
+        }
+
+    @router.post("/api/research/{session_id}/regenerate-hero")
+    async def research_regenerate_hero(session_id: str, request: Request):
+        user = _require_user(request)
+        _validate_session_id(session_id)
+        _assert_owns_research(session_id, user)
+        path = Path(DEEP_RESEARCH_DIR) / f"{session_id}.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            raise HTTPException(404, "Research not found")
+        from services.research.hero_image import get_hero_image_meta, kickoff_hero_image
+        meta = get_hero_image_meta(session_id) or {}
+        if meta.get("status") == "pending":
+            return {"ok": True, "status": "pending"}
+        entry = {
+            "status": data.get("status") or "done",
+            "owner": data.get("owner") or user,
+            "query": data.get("query") or "",
+        }
+        kickoff_hero_image(session_id, entry, force=True)
+        return {"ok": True, "status": "pending"}
 
     class HideImageRequest(BaseModel):
         url: str
@@ -362,6 +462,8 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 raise HTTPException(404, "Research not found")
             json_path.unlink()
             deleted = True
+        from services.research.audio_brief import delete_audio_brief_files
+        delete_audio_brief_files(session_id)
         return {"deleted": deleted}
 
     # ------------------------------------------------------------------
@@ -373,6 +475,7 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
         # max_rounds=0 means "Auto" — let the AI decide when to stop, capped at 20.
         max_rounds: int = Field(default=0, ge=0, le=20)
         search_provider: Optional[str] = None
+        research_engine: Optional[str] = None
         endpoint_id: Optional[str] = None
         model: Optional[str] = None
         max_time: int = Field(default=300, ge=60, le=1800)
@@ -401,53 +504,64 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                 user = tool_owner
         session_id = f"rp-{uuid.uuid4().hex[:12]}"
 
-        if body.endpoint_id:
-            from src.database import SessionLocal
-            db = SessionLocal()
-            try:
-                # Owner-scoped: never resolve another user's private endpoint
-                # (and its decrypted api_key / internal base_url). A scoped miss
-                # reads as 404 so the endpoint's existence isn't revealed.
-                ep = _owned_enabled_endpoint(db, user, body.endpoint_id)
-                if not ep:
-                    raise HTTPException(404, "Endpoint not found or disabled")
-                resolved = _resolve_endpoint_runtime(ep, owner=user, model=body.model)
-                if not resolved:
-                    raise HTTPException(400, "Endpoint is not configured with a usable model.")
-                ep_url, ep_model, ep_headers = resolved
-            finally:
-                db.close()
-        else:
-            ep_url, ep_model, ep_headers = resolve_endpoint("research", owner=user)
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("utility", owner=user)
-            # When neither research nor utility is configured, use the user's
-            # configured DEFAULT model (default_endpoint_id/default_model) rather
-            # than arbitrarily grabbing the first enabled endpoint's first model
-            # (which surfaced gpt-3.5). "Default" should mean the default model.
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("default", owner=user)
-            if not ep_url:
-                ep_url, ep_model, ep_headers = resolve_endpoint("chat", owner=user)
-            if not ep_url:
+        from src.perplexity_agent import resolve_research_engine
+        engine = resolve_research_engine(body.research_engine)
+        use_perplexity = engine == "perplexity_agent"
+
+        ep_url = ""
+        ep_model = ""
+        ep_headers = {}
+
+        if not use_perplexity:
+            if body.endpoint_id:
                 from src.database import SessionLocal
                 db = SessionLocal()
                 try:
-                    # Owner-scoped first-enabled fallback: the caller's own rows
-                    # + legacy null-owner shared rows only — never borrow another
-                    # user's private endpoint/api_key. Same fix as the
-                    # /api/v1/chat fallback (webhook_routes._first_enabled_endpoint).
-                    ep = _owned_enabled_endpoint(db, user)
-                    if ep:
-                        resolved = _resolve_endpoint_runtime(ep, owner=user)
-                        if resolved:
-                            ep_url, ep_model, ep_headers = resolved
+                    ep = _owned_enabled_endpoint(db, user, body.endpoint_id)
+                    if not ep:
+                        raise HTTPException(404, "Endpoint not found or disabled")
+                    resolved = _resolve_endpoint_runtime(ep, owner=user, model=body.model)
+                    if not resolved:
+                        raise HTTPException(400, "Endpoint is not configured with a usable model.")
+                    ep_url, ep_model, ep_headers = resolved
                 finally:
                     db.close()
-            if not ep_url:
-                raise HTTPException(400, "No endpoints configured. Add one in Settings first.")
-            if body.model:
-                ep_model = body.model
+            else:
+                ep_url, ep_model, ep_headers = resolve_endpoint("research", owner=user)
+                if not ep_url:
+                    ep_url, ep_model, ep_headers = resolve_endpoint("utility", owner=user)
+                if not ep_url:
+                    ep_url, ep_model, ep_headers = resolve_endpoint("default", owner=user)
+                if not ep_url:
+                    ep_url, ep_model, ep_headers = resolve_endpoint("chat", owner=user)
+                if not ep_url:
+                    from src.database import SessionLocal
+                    db = SessionLocal()
+                    try:
+                        ep = _owned_enabled_endpoint(db, user)
+                        if ep:
+                            resolved = _resolve_endpoint_runtime(ep, owner=user)
+                            if resolved:
+                                ep_url, ep_model, ep_headers = resolved
+                    finally:
+                        db.close()
+                if not ep_url:
+                    raise HTTPException(400, "No endpoints configured. Add one in Settings first.")
+                if body.model:
+                    ep_model = body.model
+        else:
+            from src.perplexity_agent import get_api_key, check_budget
+
+            if not get_api_key():
+                raise HTTPException(
+                    400,
+                    "Perplexity API key not configured. Set PERPLEXITY_API_KEY or "
+                    "perplexity_api_key in Settings → Research.",
+                )
+            budget_err = check_budget()
+            if budget_err:
+                raise HTTPException(400, budget_err)
+            ep_model = "perplexity-agent"
 
         # max_rounds=0 → "Auto", let AI decide; pass 20 as the safety cap.
         effective_max_rounds = body.max_rounds if body.max_rounds > 0 else 20
@@ -464,8 +578,14 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
             extraction_timeout=body.extraction_timeout,
             extraction_concurrency=body.extraction_concurrency,
             owner=user,
+            research_engine=engine,
         )
-        return {"session_id": session_id, "status": "running", "query": body.query}
+        return {
+            "session_id": session_id,
+            "status": "running",
+            "query": body.query,
+            "research_engine": engine,
+        }
 
     @router.get("/api/research/stream/{session_id}")
     async def research_stream(session_id: str, request: Request):

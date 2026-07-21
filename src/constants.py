@@ -52,10 +52,13 @@ SKILLS_DIR = os.path.join(DATA_DIR, "skills")
 GALLERY_DIR = os.path.join(DATA_DIR, "gallery")
 GALLERY_UPLOADS_DIR = os.path.join(DATA_DIR, "gallery_uploads")
 MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
+DOC_AUDIO_BRIEF_DIR = os.path.join(DATA_DIR, "doc_audio_briefs")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))
-FASTEMBED_CACHE_DIR = os.getenv("FASTEMBED_CACHE_PATH", os.path.join(DATA_DIR, "fastembed_cache"))
+# Docker Compose may pass FASTEMBED_CACHE_PATH="" when unset; treat that as missing.
+_fastembed_cache = (os.getenv("FASTEMBED_CACHE_PATH") or "").strip()
+FASTEMBED_CACHE_DIR = _fastembed_cache or os.path.join(DATA_DIR, "fastembed_cache")
 
 # Agent tool output limits (single source of truth — imported by tool_execution.py,
 # tool_implementations.py, agent_tools.py, and any other module that needs them)
@@ -73,6 +76,14 @@ DEFAULT_HOST = os.getenv("LLM_HOST", "localhost")
 LLM_HOSTS = [h.strip() for h in os.getenv("LLM_HOSTS", "").split(",") if h.strip()]
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SEARXNG_INSTANCE = os.getenv("SEARXNG_INSTANCE", "http://localhost:8080")
+
+# Open Notebook (self-hosted NotebookLM alternative) — powers the document
+# library "Listen" audio briefs. Unset URL = feature falls back to browser TTS.
+OPEN_NOTEBOOK_URL = (os.getenv("OPEN_NOTEBOOK_URL") or "").strip().rstrip("/")
+OPEN_NOTEBOOK_PASSWORD = (os.getenv("OPEN_NOTEBOOK_PASSWORD") or "").strip()
+# Voice id for the single-narrator brief speaker (provider-specific, e.g.
+# OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer).
+OPEN_NOTEBOOK_VOICE_ID = (os.getenv("OPEN_NOTEBOOK_VOICE_ID") or "nova").strip()
 
 
 # Cleanup configuration

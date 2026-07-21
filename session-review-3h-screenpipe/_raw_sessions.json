@@ -1,0 +1,62 @@
+{
+  "generated": "2026-07-11T16:35:00Z",
+  "window_hours": 3,
+  "scope": "screenpipe/archivist/pixelrag/unified-memory",
+  "live_probes": {
+    "screenpipe_3030": "down",
+    "pixelrag_30001": "down",
+    "unified_memory_40001": "ok"
+  },
+  "disk_export": {
+    "screenshots": 950,
+    "ocr_transcripts": 1113,
+    "audio_transcripts": 0,
+    "tile_urls_http": 0,
+    "captures_in_last_3h": 0,
+    "newest_ocr_timestamp": "2026-07-11T11:04:22.391018+00:00",
+    "top_app_names": [
+      ["windows explorer", 463],
+      ["cursor", 447],
+      ["comet", 117]
+    ]
+  },
+  "last_known_boot": {
+    "mode": "screen-only",
+    "ocr_engine": "windows-native",
+    "export": {"rows_fetched": 100, "frames_exported": 78, "articles": 950, "faiss_rebuild": "skipped"}
+  },
+  "sessions": [
+    {
+      "id": "d9b78c4e-bfd0-44e4-92fb-ffbbec23027a",
+      "when": "2026-07-11T10:32",
+      "title": "Screenpipe comprehension + 3h ops review",
+      "theme": "screenpipe",
+      "status": "partial",
+      "in_scope": true
+    },
+    {
+      "id": "1063753d-1748-40a0-a8da-84df0f085579",
+      "when": "2026-07-11T10:27",
+      "title": "Handshake / Oz resume",
+      "theme": "jobs",
+      "status": "partial",
+      "in_scope": false
+    },
+    {
+      "id": "2f507bb6-4560-485a-8fee-3fd56858af02",
+      "when": "2026-07-11T08:08",
+      "title": "Voice.ai TTS 503",
+      "theme": "voice-mic-policy",
+      "status": "shipped",
+      "in_scope": "adjacent"
+    },
+    {
+      "id": "c5747aed-4e05-444a-b10a-2251cae2c6f2",
+      "when": "2026-07-11T07:44",
+      "title": "Local STT fix",
+      "theme": "voice-archivist-adjacent",
+      "status": "shipped",
+      "in_scope": "adjacent"
+    }
+  ]
+}

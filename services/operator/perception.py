@@ -28,6 +28,41 @@ MAX_LOOKBACK_MINUTES = 120
 LIVE_LOOKBACK_SECONDS = 60  # no-query default: "what's on screen right now"
 FRAME_LIMIT = 50
 REQUEST_TIMEOUT = 15.0
+# Screenpipe `q=` is keyword search — long spoken sentences return zero hits.
+MAX_QUERY_WORDS = 4
+MAX_QUERY_CHARS = 48
+
+
+def _sanitize_ocr_query(query: Optional[str]) -> Optional[str]:
+    """Compress a spoken utterance into short OCR keywords.
+
+    Passing the full user sentence to Screenpipe filters everything out.
+    Keep a few content words; drop filler.
+    """
+    if not query:
+        return None
+    raw = " ".join(str(query).split()).strip()
+    if not raw:
+        return None
+    stop = {
+        "a", "an", "the", "and", "or", "but", "on", "in", "at", "to", "for", "of",
+        "is", "are", "was", "were", "be", "been", "am", "i", "my", "me", "we", "you",
+        "what", "whats", "what's", "which", "who", "whom", "whose", "when", "where",
+        "why", "how", "can", "could", "would", "should", "please", "just", "like",
+        "about", "with", "from", "that", "this", "these", "those", "there", "here",
+        "right", "now", "screen", "looking", "look", "see", "saw", "show", "tell",
+        "speak", "speaks", "speaking", "running", "locally", "laptop", "minutes",
+        "ago", "few", "something", "anything", "stuff", "thing", "things",
+    }
+    words = [w.strip(".,!?;:\"'()[]{}") for w in raw.split()]
+    keep = [w for w in words if w and w.lower() not in stop and len(w) > 1]
+    if not keep:
+        # Fall back to first few raw tokens if everything was stopwords.
+        keep = [w for w in words if w][:MAX_QUERY_WORDS]
+    shortened = " ".join(keep[:MAX_QUERY_WORDS]).strip()
+    if len(shortened) > MAX_QUERY_CHARS:
+        shortened = shortened[:MAX_QUERY_CHARS].rsplit(" ", 1)[0].strip()
+    return shortened or None
 
 
 def _char_budget() -> int:
@@ -101,6 +136,9 @@ def screen_look(query: Optional[str] = None, minutes: Optional[int] = None) -> D
     else:
         lookback = timedelta(seconds=LIVE_LOOKBACK_SECONDS)
 
+    original_query = (query or "").strip() or None
+    query = _sanitize_ocr_query(original_query)
+
     start_time = (datetime.now(timezone.utc) - lookback).isoformat().replace("+00:00", "Z")
     params: Dict[str, str] = {
         "content_type": "ocr",
@@ -123,6 +161,9 @@ def screen_look(query: Optional[str] = None, minutes: Optional[int] = None) -> D
     frames = _parse_frames(body)
     data = _apply_budget(frames, _char_budget())
     data["query"] = query
+    if original_query and original_query != query:
+        data["query_original"] = original_query
+        data["query_note"] = "long spoken query shortened to OCR keywords"
     data["lookback_minutes"] = round(lookback.total_seconds() / 60, 2)
     data["window_count"] = len({(f.get("app"), f.get("window")) for f in data["frames"]})
     return envelope(CAP_SCREEN_PERCEPTION, True, data=data)

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Screenpipe session mind graph — 3h</title>
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: Georgia, "Times New Roman", serif; background: #0e1116; color: #e8e6e3; }
+    header { padding: 12px 18px; border-bottom: 1px solid #2a313c; }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.02em; }
+    header p { margin: 4px 0 0; font-size: 0.85rem; color: #9aa3ad; }
+    #graph { height: calc(100% - 64px); }
+    .legend { position: absolute; right: 12px; bottom: 12px; background: #161b22; border: 1px solid #2a313c; padding: 8px 10px; font-size: 12px; color: #c4cad2; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Screenpipe · last 3 hours</h1>
+    <p>Themes → sessions → actions · generated 2026-07-11 · live :3030 down · disk export still present</p>
+  </header>
+  <div id="graph"></div>
+  <div class="legend">
+    green = shipped · amber = partial · red = blocked · gray = out of scope
+  </div>
+  <script>
+    const nodes = new vis.DataSet([
+      { id: "root", label: "Screenpipe\n3h review", shape: "box", color: "#1f6feb", font: { color: "#fff" } },
+
+      { id: "t_capture", label: "Capture / API", color: "#3d2c1e" },
+      { id: "t_export", label: "Export → PixelRAG", color: "#1e3d2c" },
+      { id: "t_voice", label: "Voice mic policy", color: "#2c1e3d" },
+      { id: "t_comps", label: "Comprehension", color: "#1e2c3d" },
+      { id: "t_jobs", label: "Jobs (noise)", color: "#333" },
+
+      { id: "s_d9", label: "d9b78c4e\ncomprehension", color: "#9a6700", title: "Screenpipe docs + ops review" },
+      { id: "s_c5", label: "c5747aed\nLocal STT", color: "#238636", title: "Archivist /remember adjacent" },
+      { id: "s_2f", label: "2f507bb6\nVoice.ai TTS", color: "#238636", title: "Mic contention context" },
+      { id: "s_10", label: "1063753d\nHandshake", color: "#484f58", title: "Out of scope" },
+
+      { id: "a1", label: "Restart :3030", color: "#da3633", shape: "ellipse" },
+      { id: "a2", label: "Restart :30001", color: "#da3633", shape: "ellipse" },
+      { id: "a3", label: "Re-export freshness", color: "#9a6700", shape: "ellipse" },
+      { id: "a4", label: "Wire browser_url", color: "#9a6700", shape: "ellipse" },
+      { id: "a5", label: "Keep audio OFF", color: "#238636", shape: "ellipse" },
+      { id: "a6", label: "Field map shipped", color: "#238636", shape: "ellipse" },
+    ]);
+
+    const edges = new vis.DataSet([
+      { from: "root", to: "t_comps" },
+      { from: "root", to: "t_capture" },
+      { from: "root", to: "t_export" },
+      { from: "root", to: "t_voice" },
+      { from: "root", to: "t_jobs", dashes: true },
+
+      { from: "t_comps", to: "s_d9" },
+      { from: "t_capture", to: "s_d9" },
+      { from: "t_capture", to: "s_c5" },
+      { from: "t_export", to: "s_d9" },
+      { from: "t_export", to: "s_c5" },
+      { from: "t_voice", to: "s_2f" },
+      { from: "t_voice", to: "s_c5" },
+      { from: "t_jobs", to: "s_10", dashes: true },
+
+      { from: "s_d9", to: "a1" },
+      { from: "s_d9", to: "a2" },
+      { from: "s_d9", to: "a6" },
+      { from: "s_d9", to: "a4" },
+      { from: "s_c5", to: "a3" },
+      { from: "s_2f", to: "a5" },
+    ]);
+
+    new vis.Network(document.getElementById("graph"), { nodes, edges }, {
+      physics: { barnesHut: { gravitationalConstant: -12000, springLength: 120 } },
+      interaction: { hover: true, tooltipDelay: 80 },
+      edges: { color: "#6e7681", arrows: { to: { enabled: true, scaleFactor: 0.5 } } },
+      nodes: { font: { face: "Segoe UI, sans-serif", size: 13 } },
+    });
+  </script>
+</body>
+</html>

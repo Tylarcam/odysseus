@@ -13,12 +13,36 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
-def _format_mcp_connection_error(name: str, command: str = "", args: Optional[List[str]] = None, error: Exception = None) -> str:
+def _unwrap_mcp_exception(error: Optional[Exception]) -> Optional[Exception]:
+    """Return the most useful leaf exception from TaskGroup/ExceptionGroup wrappers."""
+    current = error
+    while current is not None:
+        subs = getattr(current, "exceptions", None)
+        if subs and len(subs) == 1:
+            current = subs[0]
+            continue
+        return current
+    return error
+
+
+def _format_mcp_connection_error(
+    name: str,
+    command: str = "",
+    args: Optional[List[str]] = None,
+    error: Exception = None,
+    *,
+    transport: str = "stdio",
+    url: Optional[str] = None,
+) -> str:
     """Return a user-actionable MCP connection error message."""
     args = args or []
-    raw_error = str(error) if error else "Unknown error"
+    root = _unwrap_mcp_exception(error)
+    raw_error = str(root) if root else (str(error) if error else "Unknown error")
     command_line = " ".join([command or "", *args]).strip()
     lower_command = command_line.lower()
+    lower_error = raw_error.lower()
+    lower_name = (name or "").lower()
+    lower_url = (url or "").lower()
 
     if "@playwright/mcp" in lower_command:
         return (
@@ -26,6 +50,25 @@ def _format_mcp_connection_error(name: str, command: str = "", args: Optional[Li
             "Browser MCP could not start. On fresh installs, cache the Playwright MCP package once before connecting:\n\n"
             "npx -y @playwright/mcp@latest --version\n\n"
             "Then restart Odysseus and reconnect the Browser MCP server."
+        )
+
+    docker_gateway = (
+        transport == "sse"
+        and (
+            "8811" in lower_url
+            or "docker mcp" in lower_name
+            or "docker mcp" in lower_error
+        )
+    )
+    if docker_gateway and any(
+        token in lower_error
+        for token in ("connect", "connection refused", "connection attempts failed", "taskgroup")
+    ):
+        return (
+            f"{raw_error}\n\n"
+            "Could not reach the Docker MCP Gateway on the host. Start it, then reconnect this server:\n\n"
+            "  powershell -ExecutionPolicy Bypass -File .\\scripts\\start-docker-mcp-gateway.ps1\n\n"
+            "Odysseus in Docker expects the gateway at http://host.docker.internal:8811/sse."
         )
 
     return raw_error
@@ -174,7 +217,14 @@ class McpManager:
             return res
         except Exception as e:
             logger.error(f"Failed to connect MCP server {name} ({server_id}): {e}")
-            error_message = _format_mcp_connection_error(name, command or "", args or [], e)
+            error_message = _format_mcp_connection_error(
+                name,
+                command or "",
+                args or [],
+                e,
+                transport=transport,
+                url=url,
+            )
             self._connections[server_id] = {"status": "error", "error": error_message, "name": name}
             self._generation += 1
             return False
@@ -670,6 +720,12 @@ class McpManager:
                 lines.append(f"  - {t['qualified_name']}: {desc}{args_hint}")
 
         result = "\n".join(lines)
+        result += (
+            "\n\n**External MCP policy:** MCP servers (Notion, etc.) are optional add-ons. "
+            "Do NOT call Notion or any external MCP to list todos, notes, calendar, or email — "
+            "those live in Odysseus built-in tools (`manage_notes`, `manage_calendar`, `list_emails`). "
+            "Only use Notion MCP when the user explicitly mentions Notion or names a specific Notion page/database."
+        )
         self._cached_prompt_desc = result
         self._cached_prompt_desc_key = cache_key
         return result

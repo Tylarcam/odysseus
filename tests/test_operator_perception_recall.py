@@ -89,6 +89,33 @@ def test_screen_look_query_uses_lookback_and_q_param():
     assert result["data"]["query"] == "TypeError"
 
 
+def test_sanitize_ocr_query_shortens_spoken_sentence():
+    from services.operator.perception import _sanitize_ocr_query
+
+    q = "What's on my screen right now that speaks to GLM 5.2 running locally on the laptop?"
+    assert _sanitize_ocr_query(q) == "GLM 5.2"
+    assert _sanitize_ocr_query("OpenDesign") == "OpenDesign"
+    assert _sanitize_ocr_query("") is None
+
+
+def test_screen_look_sanitizes_long_spoken_query_param():
+    from services.operator import perception
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        return _FakeResp(_frames_payload("GLM 5.2 local"))
+
+    spoken = "What's on my screen right now that speaks to GLM 5.2 running locally?"
+    with patch.object(perception.request, "urlopen", fake_urlopen):
+        result = perception.screen_look(query=spoken, minutes=5)
+
+    assert "q=GLM" in seen["url"] or "q=GLM+5.2" in seen["url"]
+    assert result["data"]["query"] == "GLM 5.2"
+    assert result["data"]["query_original"] == spoken
+
+
 def test_screen_look_clamps_lookback_to_max():
     from services.operator import perception
 

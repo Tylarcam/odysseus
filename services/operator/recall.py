@@ -91,4 +91,12 @@ def screen_recall(query: str, k: int = DEFAULT_K) -> Dict[str, Any]:
     }
     if err:
         data["warning"] = err
+    # Empty / PixelRAG-down: steer the agent to Screenpipe lookback instead of
+    # burning more LLM rounds waiting on a cold index.
+    if not data["visual_results"] and not data["agent_memory_results"] and not data["notes_results"]:
+        data["hint"] = (
+            "No indexed PixelRAG/memory hits. For recent screen content "
+            "(minutes ago), call screen_look with minutes=5..30 and a SHORT "
+            "keyword query (e.g. OpenDesign) — do not retry screen_recall."
+        )
     return envelope(CAP_PIXEL_RETRIEVAL, True, data=data)

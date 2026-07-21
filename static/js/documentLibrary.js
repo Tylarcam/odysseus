@@ -11,6 +11,7 @@ import markdownModule from './markdown.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { langIcon } from './langIcons.js';
 import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
+import { JOB_PIPELINE_BTN_ICON, runJobPipelineFromDocument } from './jobPipeline.js';
 
 // ── Injected references from documentModule ──
 let API_BASE = '';
@@ -95,10 +96,16 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
 // ---- Library animation helpers ----
 
   /** Collapse an expanded card */
-  function _collapseExpandedCard(card) {
+  function _collapseExpandedCard(card, { force = false } = {}) {
+    // Hard lock while inline-editing — clicking title/meta/preview chrome
+    // must not tear down the editor mid-keystroke.
+    if (!force && card?.dataset?.docEditing === '1') return;
     const grid = card.closest('.doclib-grid');
     const instant = card?.dataset?.spaceToggle === '1';
+    // Collapsing tears down the audio-brief UI — stop any playback tied to it.
+    if (_listenState.active && _listenState.card === card) _listenStop();
     card.classList.remove('doclib-card-expanded');
+    if (card?.dataset) delete card.dataset.docEditing;
     // Release the height lock so grid returns to natural size
     if (grid) {
       grid.style.minHeight = '';
@@ -557,6 +564,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     titleEl.innerHTML = (_langSvg || _GEN_DOC_ICON) + _hlSearch(doc.title || 'Untitled');
     titleRow.appendChild(titleEl);
     const verBadge = document.createElement('span');
+    verBadge.className = 'doclib-card-ver';
     verBadge.style.cssText = 'font-size:9px;padding:1px 6px;border-radius:8px;background:color-mix(in srgb, var(--red) 15%, transparent);border:1px solid color-mix(in srgb, var(--red) 40%, transparent);color:var(--red);flex-shrink:0;';
     verBadge.textContent = 'v' + (doc.version_count || 1);
     titleRow.appendChild(verBadge);
@@ -611,6 +619,29 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         const items = [];
         if (doc.session_id) items.push({ label: 'Open', action: () => libraryOpenInSession(doc) });
         items.push({ label: 'Clone', action: () => libraryImportDocument(doc) });
+        items.push({
+          label: 'Run job pipeline',
+          action: async () => {
+            try {
+              await runJobPipelineFromDocument(doc);
+            } catch (err) {
+              uiModule?.showError?.(err?.message || 'Job pipeline failed');
+            }
+          },
+        });
+        items.push({
+          label: 'Listen',
+          action: async () => {
+            if (!card.classList.contains('doclib-card-expanded')) {
+              await libraryExpandCard(card, doc);
+            }
+            libraryListenToBrief(doc, card);
+          },
+        });
+        items.push({
+          label: 'Copy ID',
+          action: () => uiModule?.copyToClipboard?.(String(doc.id)),
+        });
         _showLibDropdown(menuBtn, items, { onSelect: () => {
           libraryEnterSelectMode();
           _librarySelectedIds.add(doc.id);
@@ -698,6 +729,37 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     cloneItem.addEventListener('click', (e) => { e.stopPropagation(); hideCardDropdown(); libraryImportDocument(doc); });
     dropdown.appendChild(cloneItem);
 
+    const pipelineItem = document.createElement('button');
+    pipelineItem.className = 'dropdown-item-compact';
+    pipelineItem.style.cssText = 'background:none;border:none;width:100%;';
+    pipelineItem.innerHTML = _di(JOB_PIPELINE_BTN_ICON) + '<span>Run job pipeline</span>';
+    pipelineItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideCardDropdown();
+      try {
+        await runJobPipelineFromDocument(doc);
+      } catch (err) {
+        uiModule?.showError?.(err?.message || 'Job pipeline failed');
+      }
+    });
+    dropdown.appendChild(pipelineItem);
+
+    // Listen — expands the card (the audio-brief UI lives there) and starts playback.
+    const listenItem = document.createElement('button');
+    listenItem.className = 'dropdown-item-compact';
+    listenItem.style.cssText = 'background:none;border:none;width:100%;';
+    listenItem.innerHTML = _di(_LISTEN_ICO_SM) + '<span>Listen</span>';
+    listenItem.title = 'CEO-level audio brief of this document';
+    listenItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      hideCardDropdown();
+      if (!card.classList.contains('doclib-card-expanded')) {
+        await libraryExpandCard(card, doc);
+      }
+      libraryListenToBrief(doc, card);
+    });
+    dropdown.appendChild(listenItem);
+
     // Export
     const _exportIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
     const exportItem = document.createElement('button');
@@ -722,6 +784,19 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       } catch { if (uiModule) uiModule.showError('Failed to export document'); }
     });
     dropdown.appendChild(exportItem);
+
+    // Copy ID — unambiguous ref when titles collide after clone/fork.
+    const copyIdItem = document.createElement('button');
+    copyIdItem.className = 'dropdown-item-compact';
+    copyIdItem.style.cssText = 'background:none;border:none;width:100%;';
+    copyIdItem.innerHTML = _di(_LIB_DD_ICONS.copy) + '<span>Copy ID</span>';
+    copyIdItem.title = 'Copy document ID to clipboard';
+    copyIdItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideCardDropdown();
+      uiModule?.copyToClipboard?.(String(doc.id));
+    });
+    dropdown.appendChild(copyIdItem);
 
     // Archive / Restore — soft-archive a doc out of the main list, or bring it back.
     const _archiveIco = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
@@ -813,6 +888,26 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     cloneBtn.title = 'Clone — copy to active session';
     cloneBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryImportDocument(doc); });
 
+    const pipelineBtn = document.createElement('button');
+    pipelineBtn.className = 'doclib-card-text-btn doclib-card-action-btn';
+    pipelineBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>Pipeline';
+    pipelineBtn.title = 'Run job pipeline on this document';
+    pipelineBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await runJobPipelineFromDocument(doc);
+      } catch (err) {
+        uiModule?.showError?.(err?.message || 'Job pipeline failed');
+      }
+    });
+
+    // Listen — CEO-level audio brief (Open Notebook narration, browser-TTS fallback)
+    const listenBtn = document.createElement('button');
+    listenBtn.className = 'doclib-card-text-btn doclib-card-action-btn doclib-listen-btn';
+    listenBtn.innerHTML = LISTEN_ICON_DEFAULT;
+    listenBtn.title = 'Listen — CEO-level audio brief of this document';
+    listenBtn.addEventListener('click', (e) => { e.stopPropagation(); libraryListenToBrief(doc, card); });
+
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'doclib-card-text-btn doclib-card-action-btn doclib-card-text-btn-danger';
     deleteBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete';
@@ -842,6 +937,8 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     btnRow.className = 'doclib-action-btn-row';
     // Export lives in the ⋮ menu — keep the footer uncrowded with Clone + Open.
     btnRow.appendChild(cloneBtn);
+    btnRow.appendChild(pipelineBtn);
+    btnRow.appendChild(listenBtn);
     btnRow.appendChild(openBtn);
     leftGroup.appendChild(btnRow);
     // Delete furthest LEFT, then Archive; Open/Clone group on the RIGHT.
@@ -855,8 +952,19 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     preview.appendChild(expandedActions);
     card.appendChild(preview);
 
-    card.addEventListener('click', () => {
+    // Ignore clicks on overlay controls / footer actions. Chat's .edit-code /
+    // .copy-code handlers are document-delegated, so without this guard the
+    // card collapses before Edit can enter contentEditable.
+    card.addEventListener('click', (e) => {
       if (card._suppressNextClick) { card._suppressNextClick = false; return; }
+      // Absolute lock for the whole card while editing (title, meta, chrome).
+      if (card.dataset.docEditing === '1') return;
+      if (e.target.closest([
+        '.copy-code', '.edit-code', '.save-to-note', '.run-code', '.improve-sentence',
+        '.doclib-card-expanded-actions', '.memory-item-actions',
+        '.memory-select-cb', 'button', 'a', 'input', 'textarea', 'select', 'label',
+      ].join(','))) return;
+      if (e.target.closest('pre.editing, code.editing')) return;
       if (_librarySelectMode) {
         const cb = card.querySelector('.memory-select-cb');
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
@@ -872,8 +980,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const grid = card.closest('.doclib-grid');
     const instant = card?.dataset?.spaceToggle === '1';
 
-    // Already expanded — collapse
+    // Already expanded — collapse (blocked while inline-editing)
     if (card.classList.contains('doclib-card-expanded')) {
+      if (card.dataset.docEditing === '1') return;
       _collapseExpandedCard(card);
       return;
     }
@@ -964,6 +1073,13 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
       }
       pre.appendChild(code);
 
+      // If the user started editing the preview while the full doc was still
+      // loading, do not tear down their editor.
+      if (card.dataset.docEditing === '1' || existingPre?.classList?.contains('editing')) {
+        if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+        return;
+      }
+
       // Swap content — fade in the full version
       if (existingPre) existingPre.remove();
       if (existingFrame) existingFrame.remove();
@@ -980,6 +1096,189 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         preview.innerHTML = '<div style="padding:8px;color:var(--color-error);font-size:10px;">Failed to load</div>';
       }
       if (actionsBar && !preview.contains(actionsBar)) preview.appendChild(actionsBar);
+    }
+  }
+
+  // ── Audio brief "Listen" ──────────────────────────────────────────
+  // Ported from the deep-research visual report's #btn-listen wiring
+  // (src/visual_report.py): toggle start/stop state machine, poll status
+  // until ready, sequential chunk playback via Audio(), and a `skipped`
+  // → browser speechSynthesis fallback. URL base swapped to the document
+  // audio-brief endpoints; state is per-card (one playback at a time).
+
+  const LISTEN_ICON_DEFAULT = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>Listen';
+  const LISTEN_ICON_STOP = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="vertical-align:-1px;margin-right:3px;"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>Stop';
+  const LISTEN_ICON_LOAD = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;margin-right:3px;"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>Preparing\u2026';
+  const _LISTEN_ICO_SM = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>';
+
+  // Podcast generation on the Open Notebook side takes minutes; the brief
+  // LLM pass adds more. Poll generously before declaring a timeout.
+  const _LISTEN_WAIT_MS = 15 * 60 * 1000;
+
+  const _listenState = { active: false, docId: null, card: null, audio: null, run: 0 };
+
+  function _listenBtnOf(card) {
+    return card ? card.querySelector('.doclib-listen-btn') : null;
+  }
+
+  function _listenProgressEl(card, create) {
+    if (!card) return null;
+    const preview = card.querySelector('.doclib-card-preview');
+    if (!preview) return null;
+    let el = preview.querySelector('.doclib-listen-progress');
+    if (!el && create) {
+      el = document.createElement('div');
+      el.className = 'doclib-listen-progress';
+      el.setAttribute('aria-live', 'polite');
+      const actions = preview.querySelector('.doclib-card-expanded-actions');
+      if (actions) preview.insertBefore(el, actions);
+      else preview.appendChild(el);
+    }
+    return el;
+  }
+
+  function _listenSetProgress(card, text) {
+    const el = _listenProgressEl(card, !!text);
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.display = text ? '' : 'none';
+  }
+
+  function _listenStop() {
+    _listenState.active = false;
+    _listenState.run++;                 // invalidates any in-flight poll/playback chain
+    if (_listenState.audio) {
+      try { _listenState.audio.pause(); } catch {}
+      _listenState.audio = null;
+    }
+    if (window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch {} }
+    const btn = _listenBtnOf(_listenState.card);
+    if (btn) {
+      btn.innerHTML = LISTEN_ICON_DEFAULT;
+      btn.classList.remove('doclib-listen-loading', 'doclib-listen-playing');
+    }
+    _listenSetProgress(_listenState.card, '');
+    _listenState.docId = null;
+    _listenState.card = null;
+  }
+
+  function _briefFetch(docId, path) {
+    return fetch(`${API_BASE}/api/document/${encodeURIComponent(docId)}/audio-brief${path}`, {
+      credentials: 'same-origin',
+    });
+  }
+
+  async function _briefStatus(docId) {
+    const r = await _briefFetch(docId, '/status');
+    if (!r.ok) {
+      let detail = 'status failed';
+      try { detail = (await r.json()).detail || detail; } catch {}
+      throw new Error(detail);
+    }
+    return r.json();
+  }
+
+  function _briefWaitReady(docId, card, run) {
+    const started = Date.now();
+    return new Promise((resolve, reject) => {
+      async function tick() {
+        if (run !== _listenState.run) { reject(new Error('cancelled')); return; }
+        let st;
+        try { st = await _briefStatus(docId); } catch (e) { reject(e); return; }
+        if (run !== _listenState.run) { reject(new Error('cancelled')); return; }
+        if (st.status === 'ready' || st.status === 'skipped') { resolve(st); return; }
+        if (st.status === 'failed') { reject(new Error(st.error || 'Audio brief failed')); return; }
+        if (Date.now() - started > _LISTEN_WAIT_MS) { reject(new Error('Timed out waiting for the audio brief')); return; }
+        _listenSetProgress(card, st.status === 'generating' ? 'Generating audio brief\u2026' : 'Queued\u2026');
+        setTimeout(tick, 2500);
+      }
+      tick();
+    });
+  }
+
+  async function _briefPlayChunk(docId, index, run) {
+    if (run !== _listenState.run) return;
+    const r = await _briefFetch(docId, `/chunk/${index}`);
+    if (!r.ok) throw new Error(`Audio part ${index + 1} unavailable`);
+    const blob = await r.blob();
+    if (run !== _listenState.run) return;
+    await new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      _listenState.audio = audio;
+      audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Playback error')); };
+      audio.play().catch(reject);
+    });
+  }
+
+  function _briefPlayBrowserTTS(text, run) {
+    return new Promise((resolve, reject) => {
+      if (!window.speechSynthesis) { reject(new Error('Browser speech not available')); return; }
+      if (run !== _listenState.run) { resolve(); return; }
+      const u = new SpeechSynthesisUtterance(text);
+      u.onend = () => resolve();
+      u.onerror = (e) => reject(new Error(e.error || 'speech error'));
+      window.speechSynthesis.speak(u);
+    });
+  }
+
+  async function libraryListenToBrief(doc, card) {
+    // Second click on the same doc = stop. A click on another card stops
+    // the old playback first — one narration at a time.
+    if (_listenState.active && _listenState.docId === doc.id) { _listenStop(); return; }
+    if (_listenState.active) _listenStop();
+
+    _listenState.active = true;
+    _listenState.docId = doc.id;
+    _listenState.card = card;
+    const run = ++_listenState.run;
+
+    const btn = _listenBtnOf(card);
+    if (btn) { btn.innerHTML = LISTEN_ICON_LOAD; btn.classList.add('doclib-listen-loading'); }
+    _listenSetProgress(card, 'Preparing audio brief\u2026');
+
+    try {
+      const kick = await fetch(`${API_BASE}/api/document/${encodeURIComponent(doc.id)}/audio-brief`, {
+        method: 'POST', credentials: 'same-origin',
+      });
+      if (!kick.ok) {
+        let detail = 'Could not start the audio brief';
+        try { detail = (await kick.json()).detail || detail; } catch {}
+        throw new Error(detail);
+      }
+
+      const st = await _briefWaitReady(doc.id, card, run);
+      if (run !== _listenState.run) return;
+
+      if (btn) {
+        btn.innerHTML = LISTEN_ICON_STOP;
+        btn.classList.remove('doclib-listen-loading');
+        btn.classList.add('doclib-listen-playing');
+      }
+
+      if (st.status === 'skipped') {
+        // No server audio (Open Notebook unset/unreachable) — read the
+        // brief text with the browser voice instead.
+        const tr = await _briefFetch(doc.id, '/transcript');
+        const script = tr.ok ? ((await tr.json()).script || '').trim() : '';
+        if (!script) throw new Error(st.error || 'No brief text available');
+        _listenSetProgress(card, 'Browser voice');
+        await _briefPlayBrowserTTS(script, run);
+      } else {
+        const count = Math.max(1, Number(st.chunk_count) || 1);
+        for (let i = 0; i < count; i++) {
+          if (run !== _listenState.run) return;
+          _listenSetProgress(card, count > 1 ? `Part ${i + 1} / ${count}` : 'Audio brief');
+          await _briefPlayChunk(doc.id, i, run);
+        }
+      }
+      if (run === _listenState.run) _listenStop();
+    } catch (err) {
+      if (run !== _listenState.run) return;   // superseded/stopped — not an error
+      console.warn('Listen failed', err);
+      uiModule?.showError?.(err?.message || 'Listen failed');
+      _listenStop();
     }
   }
 
@@ -3693,10 +3992,17 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // Escape key
     _libraryEscHandler = (e) => {
       if (e.key === 'Escape') {
+        // While editing: save+exit edit mode first (don't collapse the card).
+        const editingPre = document.querySelector('#doclib-modal pre.editing');
+        if (editingPre) {
+          const saveBtn = editingPre.querySelector('.edit-code.active');
+          if (saveBtn) saveBtn.click();
+          return;
+        }
         // Collapse expanded card first, then close modal on second Escape
         const expanded = document.querySelector('#doclib-grid .doclib-card-expanded, #doclib-prompts-grid .doclib-card-expanded');
         if (expanded) {
-          _collapseExpandedCard(expanded);
+          _collapseExpandedCard(expanded, { force: true });
           const preview = expanded.querySelector('.doclib-card-preview');
           if (preview) { preview.style.display = 'none'; preview.innerHTML = ''; }
         } else {

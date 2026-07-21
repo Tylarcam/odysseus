@@ -26,21 +26,22 @@ fi
 
 # Repair ownership on every writable path the app touches at runtime.
 #
-# Bind-mounted dirs (/app/data, /app/logs) are the obvious ones, but
-# the app ALSO writes inside the image's own source tree at runtime:
-#   - services/cache/{search,content}/*  (search cache LRU)
-#   - services/search_analytics.json
-#   - services/search_engine_error.log
-#   - services/tts cache, etc.
-# These dirs were created as root during `docker build`, so dropping
-# to PUID:PGID would otherwise crash on the first import that tries
-# to mkdir them. Chown the whole /app tree — fast (<1s on this size)
-# and idempotent via the `-not -uid` filter so we only touch files
-# that need fixing.
-for dir in /app /app/data /app/logs; do
+# Bind-mounted dirs (/app/data, /app/logs, /app/.local) only get their
+# mount roots chowned here. Do NOT recursively walk them — on Windows
+# Docker those trees can contain tens of thousands of pip/HF cache files
+# and a full `find` blocks startup for minutes with no log output while
+# the browser shows "Connection failed".
+#
+# Image-owned runtime dirs under /app/services were created as root during
+# `docker build`, so dropping to PUID:PGID would otherwise crash on the
+# first import that tries to mkdir them. A scoped find there is fast.
+for dir in /app/data /app/logs /app/.local; do
     if [ -d "$dir" ]; then
-        # `find ... -not -uid` keeps this O(touched-files), not
-        # O(everything), so terabyte-sized maildirs don't slow startup.
+        chown "$PUID:$PGID" "$dir" 2>/dev/null || true
+    fi
+done
+for dir in /app/services; do
+    if [ -d "$dir" ]; then
         find "$dir" -not -uid "$PUID" -print0 2>/dev/null \
             | xargs -0 -r chown "$PUID:$PGID" 2>/dev/null || true
     fi

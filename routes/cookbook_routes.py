@@ -2509,6 +2509,7 @@ def setup_cookbook_routes() -> APIRouter:
         {"name": "phi3", "description": "Microsoft Phi-3 small / medium.", "sizes": ["mini", "medium"]},
         {"name": "phi4", "description": "Microsoft Phi-4 14B.", "sizes": ["14b"]},
         {"name": "deepseek-r1", "description": "DeepSeek R1 reasoning model (distilled variants).", "sizes": ["1.5b", "7b", "8b", "14b", "32b", "70b"]},
+        {"name": "glm-5.2", "description": "Z.ai GLM-5.2 — long-horizon coding flagship (Ollama Cloud).", "sizes": ["cloud"]},
         {"name": "deepseek-v3", "description": "DeepSeek V3 MoE 671B (huge — needs serious VRAM).", "sizes": ["671b"]},
         {"name": "codellama", "description": "Meta Code Llama instruct family.", "sizes": ["7b", "13b", "34b", "70b"]},
         {"name": "starcoder2", "description": "BigCode StarCoder2 — code completion.", "sizes": ["3b", "7b", "15b"]},

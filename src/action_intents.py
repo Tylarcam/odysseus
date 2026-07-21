@@ -76,6 +76,12 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("notes", "add item to notes/todo request", rf"{_PLEASE}(?:add|jot|write\s+down)\b.{{0,120}}\b(?:to|in|into)\s+(?:my\s+|the\s+)?(?:todo(?:\s+list)?|task\s+list|notes?|checklist)\b"),
         ("notes", "set reminder request", rf"{_PLEASE}set\s+(?:a\s+)?reminder\b"),
         ("notes", "assistant reminder request", rf"{_ACTION_QUESTION}set\s+(?:a\s+)?reminder\b"),
+        # Todo/note lookup — mirror calendar read patterns so plain chat
+        # auto-escalates to agent and manage_notes action=list is reachable.
+        ("notes", "todo list lookup request", r"\b(?:list|show|check|review|analyze|categorize|triage)\b.{0,120}\b(?:my\s+|the\s+)?(?:(?:todo|to-do|to\s+do)(?:s|\s+list)?|tasks?)\b"),
+        ("notes", "todo list question", r"\bwhat(?:'s| is| are)\s+(?:on|in)\s+(?:my\s+)?(?:(?:todo|to-do|to\s+do)(?:s|\s+list)?|tasks?)\b"),
+        ("notes", "notes lookup request", r"\b(?:list|show|check)\b.{0,120}\b(?:my\s+|the\s+)?notes?\b"),
+        ("notes", "assistant todo lookup request", rf"{_ACTION_QUESTION}(?:list|show|check|review|analyze)\b.{{0,120}}\b(?:my\s+|the\s+)?(?:(?:todo|to-do|to\s+do)(?:s|\s+list)?|notes?)\b"),
 
         # Email actions.
         ("email", "assistant email action request", rf"{_ACTION_QUESTION}(?:send|write|reply|email|message|archive|delete|mark)\b.{{0,120}}\b(?:emails?|mail|messages?|inbox|unread|read)\b"),

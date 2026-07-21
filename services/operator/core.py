@@ -266,6 +266,44 @@ def reset_status_cache() -> None:
     _status_cache.clear()
 
 
+# ── Action consent (shared by desktop_act and browser_act) ──
+# Per-session, process-local: the agent loop runs in this process, and consent
+# should die with the session, never persist across restarts.
+
+_consents: Dict[str, float] = {}
+CONSENT_TTL_SECONDS = 12 * 3600  # safety cap; sessions rarely live longer
+
+
+def _consent_key(session_id: Optional[str]) -> str:
+    return session_id or "_no_session"
+
+
+def has_consent(session_id: Optional[str]) -> bool:
+    granted_at = _consents.get(_consent_key(session_id))
+    return bool(granted_at and (time.time() - granted_at) < CONSENT_TTL_SECONDS)
+
+
+def grant_consent(session_id: Optional[str]) -> None:
+    _consents[_consent_key(session_id)] = time.time()
+
+
+def reset_consents() -> None:
+    """Test hook."""
+    _consents.clear()
+
+
+def consent_required_envelope(capability: str) -> Dict[str, Any]:
+    """Tell the agent how to obtain approval. Callers audit the denial."""
+    return envelope(
+        capability, False, reason="consent_required",
+        hint=(
+            "This action needs the user's approval for this session. "
+            "Ask with the ask_user tool and retry with user_approved=true "
+            "after an explicit yes."
+        ),
+    )
+
+
 # ── Audit log ──
 
 def record_audit(

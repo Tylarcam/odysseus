@@ -3,18 +3,43 @@
 
 import uiModule from './ui.js';
 import markdownModule from './markdown.js';
-import { addAITTSButton } from './tts-ai.js';
+import { ensureTTSButton } from './tts-ai.js';
 import { providerLogo, providerLabel } from './providers.js';
 import settingsModule from './settings.js';
 import spinnerModule from './spinner.js';
 import { bindMenuDismiss } from './escMenuStack.js';
 import { matchModelKey } from './model/matchKey.js';
+import sessionModule from './sessions.js';
+import { NOTE_BTN_ICON, saveNoteFromText } from './noteFromCodeBlock.js';
+import { FORMFLOW_BTN_ICON, sendMessageToFormFlow } from './formflowFromChat.js';
 
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
 const REPORT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
 const CHAT_ABOUT_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const COPY_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const CHECK_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+async function _saveMessageToNote(msgElement, source = 'chat_message') {
+  const raw = msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '';
+  const sid = sessionModule.getCurrentSessionId?.();
+  try {
+    await saveNoteFromText(raw, {
+      sessionId: sid || undefined,
+      source,
+    });
+  } catch (err) {
+    uiModule?.showError?.(err?.message || 'Failed to save note');
+  }
+}
+
+async function _forkMessageToFormFlow(msgElement) {
+  const raw = msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '';
+  try {
+    await sendMessageToFormFlow(raw);
+  } catch (err) {
+    uiModule?.showError?.(err?.message || 'Failed to open FormFlow');
+  }
+}
 
 /** Sanitize a URL for use in href — only allow http(s) and protocol-relative. */
 function _safeHref(url) {
@@ -1299,7 +1324,10 @@ export function hideWelcomeScreen() {
   const ws = document.getElementById('welcome-screen');
   const cc = document.getElementById('chat-container');
   if (ws) ws.classList.add('hidden');
-  if (cc) cc.classList.remove('welcome-active');
+  if (cc) {
+    cc.classList.remove('welcome-active');
+    cc.classList.remove('welcome-has-recents');
+  }
   // Update send button — switches from muted arrow to + Chat
   if (window._updateSendBtnIcon) setTimeout(window._updateSendBtnIcon, 50);
   const ib = document.getElementById('incognito-btn');
@@ -1341,6 +1369,9 @@ export function showWelcomeScreen() {
     const msg = document.getElementById('message');
     if (msg) msg.focus();
   }
+  try {
+    window.homeDashboardModule?.refreshHomeDashboard?.();
+  } catch (_) {}
 }
 
 // ── Dynamic action buttons (show 3 most recent, rest under ···) ──
@@ -1375,6 +1406,14 @@ export function createMsgFooter(msgElement) {
       uiModule.copyToClipboard(msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '');
       btn.innerHTML = CHECK_ICON;
       setTimeout(() => { btn.innerHTML = COPY_ICON; }, 1500);
+    }},
+    { id: 'note', icon: NOTE_BTN_ICON, title: 'Save to Notes', cls: 'msg-action-btn', html: true, handler(e) {
+      e.stopPropagation();
+      _saveMessageToNote(msgElement, 'chat_message');
+    }},
+    { id: 'formflow', icon: FORMFLOW_BTN_ICON, title: 'Fork to FormFlow', cls: 'msg-action-btn', html: true, handler(e) {
+      e.stopPropagation();
+      _forkMessageToFormFlow(msgElement);
     }},
     { id: 'edit', icon: '\u270E', title: 'Edit', cls: 'msg-action-btn', handler(e) {
       e.stopPropagation();
@@ -1554,6 +1593,10 @@ export function createMsgFooter(msgElement) {
   }
 
   footer.appendChild(actions);
+
+  const ttsText = msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '';
+  if (ttsText.trim()) ensureTTSButton(msgElement, ttsText);
+
   return footer;
 }
 
@@ -1594,6 +1637,14 @@ export function createUserMsgFooter(msgElement) {
       uiModule.copyToClipboard(msgElement.querySelector('.body')?.textContent || '');
       btn.innerHTML = CHECK_ICON;
       setTimeout(() => { btn.innerHTML = COPY_ICON; }, 1500);
+    }},
+    { id: 'note', icon: NOTE_BTN_ICON, title: 'Save to Notes', cls: 'msg-action-btn', html: true, handler(e) {
+      e.stopPropagation();
+      _saveMessageToNote(msgElement, 'chat_message');
+    }},
+    { id: 'formflow', icon: FORMFLOW_BTN_ICON, title: 'Fork to FormFlow', cls: 'msg-action-btn', html: true, handler(e) {
+      e.stopPropagation();
+      _forkMessageToFormFlow(msgElement);
     }},
     { id: 'resend', icon: '\u21BB', title: 'Resend message', cls: 'msg-action-btn', handler(e) {
       e.stopPropagation();
@@ -1963,10 +2014,10 @@ export function displayMetrics(messageElement, metrics) {
 /**
  * Add a message to the chat history.
  */
-export function addMessage(role, content, modelName, metadata) {
+export function addMessage(role, content, modelName, metadata, targetBox) {
   try {
-    hideWelcomeScreen();
-    const box = document.getElementById('chat-history');
+    if (!targetBox) hideWelcomeScreen();
+    const box = targetBox || document.getElementById('chat-history');
     if (!box) { console.error('Chat history element not found'); return; }
 
     var esc = uiModule.esc;

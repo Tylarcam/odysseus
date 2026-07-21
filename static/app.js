@@ -19,11 +19,23 @@ import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
+import voiceChatModule from './js/voiceChat.js';
+import voiceRealtimeModule from './js/voiceRealtime.js';
+import voiceTelemetry from './js/voiceTelemetry.js';
+import { initVoiceDebugPanel } from './js/voiceDebugPanel.js';
+import voiceVisualizerModule from './js/voiceVisualizer.js';
+import voiceStatusModule from './js/voiceStatus.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js';
+import agentBinModule from './js/agentBin.js';
+import cmdCenterModule from './js/cmdCenter.js';
+import homeDashboardModule from './js/homeDashboard.js';
+import splitChatModule from './js/splitChat.js';
+import { initSelectionActions } from './js/selectionActions.js';
+import * as handoffModule from './js/handoff.js';
 import formflowModule from './js/formflow.js';
 import adminModule from './js/admin.js';
 import settingsModule from './js/settings.js';
@@ -41,17 +53,25 @@ import cookbookModule from './js/cookbook.js';
 import groupModule from './js/group.js';
 import * as researchPanelModule from './js/research/panel.js';
 import ttsModule from './js/tts-ai.js';
+import ttsControlsModule from './js/ttsControls.js';
 import spinnerModule from './js/spinner.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
+import { initVoiceKeyboardPtt } from './js/voiceKeyboardPtt.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
 window.sessionModule = sessionModule;
+window.splitChatModule = splitChatModule;
+window.handoffModule = handoffModule;
 window.uiModule = uiModule;
 window.adminModule = adminModule;
+window.settingsModule = settingsModule;
 window.cookbookModule = cookbookModule;
+window.documentModule = documentModule;
+window.notesModule = notesModule;
+window.homeDashboardModule = homeDashboardModule;
 
 // Redirect to login on 401 from any fetch
 const _origFetch = window.fetch;
@@ -668,6 +688,9 @@ function initializeEventListeners() {
     if (chatModule && chatModule.showWelcomeScreen) {
       chatModule.showWelcomeScreen();
     }
+    if (homeDashboardModule?.refreshHomeDashboard) {
+      homeDashboardModule.refreshHomeDashboard();
+    }
     // Close document panel if open
     if (documentModule && documentModule.closePanel) documentModule.closePanel();
     if (researchPanelModule && researchPanelModule.isOpen()) researchPanelModule.closePanel();
@@ -879,12 +902,6 @@ function initializeEventListeners() {
   // Tasks tool button
   const toolTasksBtn = el('tool-tasks-btn');
   if (toolTasksBtn) {
-  // Agents buttons (sidebar + rail)
-  const agentsBtns = [el("rail-agents"), el("tool-agents-btn")].filter(Boolean);
-  agentsBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-    });
-  });
     toolTasksBtn.addEventListener('click', () => {
       if (tasksModule) {
         tasksModule.isTasksOpen() ? tasksModule.closeTasks() : tasksModule.openTasks();
@@ -892,6 +909,34 @@ function initializeEventListeners() {
     });
   }
 
+  // Agent Bin tool button
+  const toolAgentBinBtn = el('tool-agent-bin-btn');
+  if (toolAgentBinBtn) {
+    toolAgentBinBtn.addEventListener('click', async () => {
+      if (!agentBinModule) return;
+      const Modals = await import('./js/modalManager.js');
+      if (!Modals.toggle('agent-bin-modal')) {
+        if (agentBinModule.isAgentBinOpen()) agentBinModule.closeAgentBin();
+        else agentBinModule.openAgentBin();
+      }
+    });
+  }
+  if (agentBinModule?.startBadgePolling) {
+    agentBinModule.startBadgePolling();
+  }
+
+  // CMD Center (V.A.U.L.T.)
+  const toolCmdCenterBtn = el('tool-cmd-center-btn');
+  if (toolCmdCenterBtn) {
+    toolCmdCenterBtn.addEventListener('click', async () => {
+      if (!cmdCenterModule) return;
+      const Modals = await import('./js/modalManager.js');
+      if (!Modals.toggle('cmd-center-panel')) {
+        if (cmdCenterModule.isCmdCenterOpen()) cmdCenterModule.minimizeCmdCenter();
+        else cmdCenterModule.openCmdCenter();
+      }
+    });
+  }
   // Calendar tool button
   const toolCalendarBtn = el('tool-calendar-btn');
   if (toolCalendarBtn) {
@@ -1056,6 +1101,10 @@ function initializeEventListeners() {
     '/memory':   () => document.getElementById('tool-memory-btn')?.click(),
     '/gallery':  () => document.getElementById('tool-gallery-btn')?.click(),
     '/tasks':    () => document.getElementById('tool-tasks-btn')?.click(),
+    '/agent-bin': () => document.getElementById('tool-agent-bin-btn')?.click(),
+    '/handoffs': () => document.getElementById('tool-agent-bin-btn')?.click(),
+    '/cmd-center': () => document.getElementById('tool-cmd-center-btn')?.click(),
+    '/vault': () => document.getElementById('tool-cmd-center-btn')?.click(),
     '/library':  () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary(),
     '/library/prompts': () => sessionModule && sessionModule.openLibrary && sessionModule.openLibrary('prompts'),
   };
@@ -1381,8 +1430,12 @@ function initializeEventListeners() {
       // Hide TTS overflow button when TTS is disabled or no provider configured
       const ttsOff = settings.tts_enabled === false || !settings.tts_provider || settings.tts_provider === 'disabled';
       const overflowTts = el('overflow-tts-btn');
+      const overflowTtsControls = el('overflow-tts-controls-btn');
       if (overflowTts) {
         overflowTts.style.display = ttsOff ? 'none' : '';
+      }
+      if (overflowTtsControls) {
+        overflowTtsControls.style.display = ttsOff ? 'none' : '';
       }
     })
     .catch(() => {});
@@ -2058,11 +2111,13 @@ function initializeEventListeners() {
 
       let totalWidth = wrapperWidth + otherWidth + btnWidths.reduce((a, b) => a + b, 0);
 
-      // Force-collapse shell & search when research mode + doc panel are both active
+      // Force-collapse shell & search when research mode + doc panel are both active,
+      // or on mobile so Agent/Chat + mic + send stay primary in the bottom row.
       const _resChk = el('research-toggle');
       const _researchOn = _resChk && _resChk.checked;
       const _docViewOn = document.body.classList.contains('doc-view');
-      if (_researchOn && _docViewOn) {
+      const _mobileComposer = window.innerWidth <= 768;
+      if ((_researchOn && _docViewOn) || _mobileComposer) {
         collapsibleBtns.forEach(btn => {
           btn.classList.add('toolbar-collapsed');
           const mirror = overflowMirrors.get(btn.id);
@@ -2157,6 +2212,18 @@ function initializeEventListeners() {
   // TTS Mode toggle (separate from overflow IIFE for safety)
   (function initTTSToggle() {
     const ttsBtn = document.getElementById('overflow-tts-btn');
+    const ttsControlsOverflow = document.getElementById('overflow-tts-controls-btn');
+    if (ttsControlsOverflow) {
+      ttsControlsOverflow.addEventListener('click', () => {
+        const menu = el('overflow-menu');
+        if (menu && !menu.classList.contains('hidden')) {
+          menu.classList.add('hidden');
+        }
+        if (ttsControlsModule.openTtsControls) {
+          ttsControlsModule.openTtsControls(ttsControlsOverflow);
+        }
+      });
+    }
     if (!ttsBtn) return;
     try {
       const st = loadToggleState();
@@ -2424,6 +2491,8 @@ function initializeEventListeners() {
     'tool-memory':         '#tool-memory-btn',
     'tool-notes':          '#tool-notes-btn',
     'tool-tasks':          '#tool-tasks-btn',
+    'tool-agent-bin':      '#tool-agent-bin-btn, #rail-agent-bin',
+    'tool-cmd-center':     '#tool-cmd-center-btn, #rail-cmd-center',
     'tool-theme':          '#tool-theme-btn',
     'user-bar':            '#user-bar-profile',
     'sidebar-settings-btn':'#user-bar-settings',
@@ -3051,6 +3120,7 @@ function initializeEventListeners() {
       if (chatModule && chatModule.showWelcomeScreen) {
         chatModule.showWelcomeScreen();
       }
+      if (homeDashboardModule?.refreshHomeDashboard) homeDashboardModule.refreshHomeDashboard();
       document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
     });
   }
@@ -3094,6 +3164,7 @@ function initializeEventListeners() {
       const box = el('chat-history');
       if (box) box.innerHTML = '';
       if (chatModule && chatModule.showWelcomeScreen) chatModule.showWelcomeScreen();
+      if (homeDashboardModule?.refreshHomeDashboard) homeDashboardModule.refreshHomeDashboard();
       document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
     });
   }
@@ -3354,7 +3425,9 @@ function initializeEventListeners() {
     adminModule, settingsModule, searchChatModule,
     _closeCompareIfActive, _deactivateIncognito, API_BASE
   });
-  
+
+  // Hold Space 3s → voice recording (VAD auto-stop); Esc stops recording.
+  initVoiceKeyboardPtt();
 }
 
 // ============================================
@@ -3400,6 +3473,8 @@ function startOdysseusApp() {
   searchModule.init(API_BASE);
   chatModule.init(API_BASE);
   chatModule.initListeners();
+  if (homeDashboardModule?.initHomeDashboard) homeDashboardModule.initHomeDashboard();
+  initSelectionActions({ chatModule, sessionModule, splitChatModule, handoffModule });
   groupModule.init(API_BASE);
   // Initialize compare module
   if (compareModule) {
@@ -3436,6 +3511,8 @@ function startOdysseusApp() {
     'rail-archive':   'tool-library-btn',
     'rail-gallery':   'tool-gallery-btn',
     'rail-tasks':     'tool-tasks-btn',
+    'rail-agent-bin': 'tool-agent-bin-btn',
+    'rail-cmd-center': 'tool-cmd-center-btn',
     'rail-calendar':  'tool-calendar-btn',
     'rail-notes':     'tool-notes-btn',
     'rail-memory':    'tool-memory-btn',
@@ -3577,8 +3654,25 @@ function startOdysseusApp() {
   // Expose icons globally so chat.js updateSubmitButton can use them
   window._odysseusBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
 
+  const _micBtnEl = el('mic-btn');
+
   function _isSttEnabled() {
     return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
+  }
+
+  function _beginVoiceRecording(opts = {}) {
+    if (_micBtnEl) {
+      _micBtnEl.innerHTML = _stopIcon;
+      _micBtnEl.title = 'Stop recording';
+      _micBtnEl.classList.add('recording');
+      _micBtnEl.classList.remove('active');
+    }
+    voiceRecorderModule.startRecording(
+      (audioFile) => fileHandlerModule.addFiles([audioFile]),
+      uiModule.showToast,
+      uiModule.showError,
+      opts
+    );
   }
 
   function _hasAttachments() {
@@ -3587,58 +3681,43 @@ function startOdysseusApp() {
 
   function _updateSendBtnIcon() {
     if (!sendBtn) return;
-    // Don't override if streaming (stop button) or recording
-    if (sendBtn.dataset.mode === 'streaming' || sendBtn.dataset.mode === 'recording') return;
+    if (sendBtn.dataset.mode === 'streaming') return;
     const prevMode = sendBtn.dataset.mode || '';
     const hasText = messageInput && messageInput.value.trim().length > 0;
     const hasFiles = _hasAttachments();
     let newMode;
-    if (!hasText && !hasFiles && _isSttEnabled()) {
+    if (!hasText && !hasFiles) {
       clearTimeout(sendBtn._collapseTimer);
-      sendBtn.innerHTML = _micIcon;
-      sendBtn.title = 'Record voice';
-      newMode = 'mic';
-      sendBtn.classList.add('mic-mode');
-      sendBtn.classList.remove('newchat-mode', 'newchat-expanded');
-    } else if (!hasText && !hasFiles && !_isSttEnabled()) {
-      clearTimeout(sendBtn._collapseTimer);
-      // Group chat: always show send button, never newchat mode
       if (groupModule && groupModule.isActive()) {
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send to group';
         newMode = 'idle';
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded');
       } else {
-      // Check if we're already on a fresh empty session (welcome screen visible)
-      const isEmptySession = document.getElementById('chat-container')?.classList.contains('welcome-active');
-      if (isEmptySession) {
-        // Already on new chat — show arrow in muted style (ready to type)
-        sendBtn.innerHTML = _sendIcon;
-        sendBtn.title = 'Send message';
-        newMode = 'idle';
-        sendBtn.classList.add('newchat-mode'); // muted gray style
-        sendBtn.classList.remove('mic-mode', 'newchat-expanded');
-        clearTimeout(sendBtn._expandTimer);
-      } else {
-        sendBtn.innerHTML = _newChatIcon + '<span class="send-btn-label">+ New</span>';
-        sendBtn.title = 'New chat';
-        newMode = 'newchat';
-        sendBtn.classList.add('newchat-mode');
-        sendBtn.classList.remove('mic-mode');
-        // The button stays a 32px compact icon (no auto-expand to label —
-        // the "+ New" label inside is for screen readers only; sighted users
-        // see the spinning + on hover + the title tooltip).
-        clearTimeout(sendBtn._expandTimer);
-        sendBtn.classList.remove('newchat-expanded');
+        const isEmptySession = document.getElementById('chat-container')?.classList.contains('welcome-active');
+        if (isEmptySession) {
+          sendBtn.innerHTML = _sendIcon;
+          sendBtn.title = 'Send message';
+          newMode = 'idle';
+          sendBtn.classList.add('newchat-mode');
+          sendBtn.classList.remove('mic-mode', 'newchat-expanded');
+          clearTimeout(sendBtn._expandTimer);
+        } else {
+          sendBtn.innerHTML = _newChatIcon + '<span class="send-btn-label">+ New</span>';
+          sendBtn.title = 'New chat';
+          newMode = 'newchat';
+          sendBtn.classList.add('newchat-mode');
+          sendBtn.classList.remove('mic-mode');
+          clearTimeout(sendBtn._expandTimer);
+          sendBtn.classList.remove('newchat-expanded');
+        }
       }
-      } // close group-else
     } else {
       newMode = 'send';
       clearTimeout(sendBtn._expandTimer);
       const wasExpanded = sendBtn.classList.contains('newchat-expanded');
-      const wasNewchat = prevMode === 'newchat' || prevMode === 'mic';
+      const wasNewchat = prevMode === 'newchat';
       if (wasExpanded || wasNewchat) {
-        // Collapse pill if expanded, then spin arrow in (same as + spin-in)
         if (wasExpanded) sendBtn.classList.remove('newchat-expanded');
         const delay = wasExpanded ? 300 : 0;
         setTimeout(() => {
@@ -3655,13 +3734,7 @@ function startOdysseusApp() {
         sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'anim-spin', 'anim-launch', 'anim-land');
       }
     }
-    // Animate icon spin — when switching TO newchat or mic (the + or mic
-    // appearing). The previous `prevMode && ...` guard skipped this after
-    // streaming ended (dataset.mode is reset to '' there, an empty falsy
-    // string), which let the lingering anim-land class from the stop icon's
-    // entry replay on the +, making it look like the + comes from below.
-    // Never animate into send mode (arrow) — it should just appear instantly.
-    if (newMode !== prevMode && (newMode === 'newchat' || newMode === 'mic')) {
+    if (newMode !== prevMode && newMode === 'newchat') {
       if (!sendBtn.classList.contains('anim-spin')) {
         sendBtn.classList.remove('anim-launch', 'anim-land');
         sendBtn.classList.add('anim-spin');
@@ -3669,22 +3742,140 @@ function startOdysseusApp() {
       }
     }
     sendBtn.dataset.mode = newMode;
+    window._syncMicBtn?.();
   }
 
   if (sendBtn) {
+    voiceChatModule.registerStartRecording(_beginVoiceRecording);
+
+    // Mic button — single voice control; caret opens arm/disarm popover
+    const _micCaretEl = el('mic-dropdown-caret');
+    const _micPopoverEl = el('voice-mode-popover');
+    const _micPillToggle = el('voice-mode-toggle');
+
+    function _syncMicBtn() {
+      if (!_micBtnEl) return;
+      const active = voiceChatModule.isActive();
+      const recording = voiceRecorderModule.getIsRecording();
+      const realtimeListening = voiceChatModule.isRealtimeActive();
+      _micBtnEl.classList.toggle('active', active && !recording);
+      _micBtnEl.classList.toggle('recording', recording);
+      _micBtnEl.classList.toggle('realtime', realtimeListening);
+      if (!recording) {
+        _micBtnEl.innerHTML = _micIcon;
+        _micBtnEl.title = realtimeListening
+          ? 'Listening — speak naturally'
+          : active ? 'Tap to speak' : 'Record voice';
+      }
+      if (_micPillToggle) _micPillToggle.checked = active;
+    }
+    window._syncMicBtn = _syncMicBtn;
+
+    async function _voiceFirstTimeSetup() {
+      if (_isSttEnabled()) return;
+      try {
+        await fetch('/api/auth/settings', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stt_enabled: true, stt_provider: 'browser', stt_model: 'base', stt_language: '' }),
+        });
+      } catch (_e) {}
+      voiceRecorderModule._sttProvider = 'browser';
+      if (!window.aiTTSManager?.available) {
+        try {
+          await fetch('/api/auth/settings', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tts_enabled: true, tts_provider: 'browser', tts_voice: '', tts_speed: '1', tts_model: 'tts-1' }),
+          });
+        } catch (_e) {}
+        await window.aiTTSManager?.checkAvailability?.();
+      }
+    }
+
+    function _syncMicPopoverModelPicker(open) {
+      if (!modelPickerWrap) return;
+      if (open) {
+        modelPickerWrap.classList.add('model-picker-autohide');
+      } else if (window._syncModelPickerAutohide) {
+        window._syncModelPickerAutohide();
+      } else {
+        modelPickerWrap.classList.remove('model-picker-autohide');
+      }
+    }
+
+    function _setMicPopoverOpen(open) {
+      if (!_micPopoverEl) return;
+      _micPopoverEl.hidden = !open;
+      _syncMicPopoverModelPicker(open);
+    }
+
+    function _closeMicPopover() {
+      _setMicPopoverOpen(false);
+    }
+
+    function _toggleMicPopover() {
+      if (!_micPopoverEl) return;
+      _setMicPopoverOpen(_micPopoverEl.hidden);
+    }
+
+    if (_micCaretEl) {
+      _micCaretEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _toggleMicPopover();
+      });
+    }
+
+    if (_micPillToggle) {
+      _micPillToggle.addEventListener('change', async () => {
+        _closeMicPopover();
+        if (_micPillToggle.checked) {
+          await _voiceFirstTimeSetup();
+          await voiceChatModule.setActive(true, { showToast: uiModule.showToast, showError: uiModule.showError });
+        } else {
+          await voiceChatModule.setActive(false, { showToast: uiModule.showToast });
+        }
+      });
+    }
+
+    if (_micBtnEl) {
+      if ('ontouchstart' in window) {
+        _micBtnEl.addEventListener('pointerdown', (e) => e.preventDefault());
+      }
+
+      _micBtnEl.addEventListener('click', async () => {
+        if (voiceRecorderModule.getIsRecording()) {
+          voiceRecorderModule.stopRecording();
+          return;
+        }
+        if (voiceChatModule.isRealtimeActive()) {
+          voiceChatModule.setActive(false, { showToast: uiModule.showToast }).catch(() => {});
+          return;
+        }
+        if (voiceChatModule.isActive()) {
+          voiceChatModule.startLocalListening({ interrupt: true, reason: 'mic_tap' }).catch(() => {});
+          return;
+        }
+        _toggleMicPopover();
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!_micPopoverEl || _micPopoverEl.hidden) return;
+      if (_micBtnEl?.contains(e.target) || _micCaretEl?.contains(e.target) || _micPopoverEl.contains(e.target)) return;
+      _closeMicPopover();
+    });
+
+    document.addEventListener('odysseus:voice-chat-changed', _syncMicBtn);
+    _syncMicBtn();
+
     sendBtn.addEventListener('click', (e) => {
       e.preventDefault();
-
-      // If recording, stop recording
-      if (sendBtn.dataset.mode === 'recording' || voiceRecorderModule.getIsRecording()) {
-        voiceRecorderModule.stopRecording();
-        return;
-      }
 
       const hasText = messageInput && messageInput.value.trim().length > 0;
       const hasFiles = _hasAttachments();
 
-      // New chat mode — empty input, no attachments, no STT
+      // New chat mode — empty input, no attachments
       if (!hasText && !hasFiles && sendBtn.dataset.mode === 'newchat') {
         if (sessionModule) {
           const sessions = sessionModule.getSessions();
@@ -3693,25 +3884,10 @@ function startOdysseusApp() {
           if (current && current.endpoint_url && current.model) {
             sessionModule.createDirectChat(current.endpoint_url, current.model, current.endpoint_id);
           } else {
-            // Fallback to rail button
             const railNew = el('rail-new-session');
             if (railNew) railNew.click();
           }
         }
-        return;
-      }
-
-      // If input is empty and STT is enabled, start recording
-      if (!hasText && !hasFiles && _isSttEnabled()) {
-        sendBtn.innerHTML = _stopIcon;
-        sendBtn.title = 'Stop recording';
-        sendBtn.dataset.mode = 'recording';
-        sendBtn.classList.add('recording');
-        voiceRecorderModule.startRecording(
-          (audioFile) => fileHandlerModule.addFiles([audioFile]),
-          uiModule.showToast,
-          uiModule.showError
-        );
         return;
       }
 
@@ -3942,6 +4118,9 @@ function startOdysseusApp() {
           try { window._odysseusRouteOpener(); } catch (_) {}
           window._odysseusRouteOpener = null;
         }
+        if (homeDashboardModule?.refreshHomeDashboard) {
+          homeDashboardModule.refreshHomeDashboard();
+        }
       });
   } else {
     console.error('Session module not loaded!');
@@ -3967,6 +4146,20 @@ function startOdysseusApp() {
   
   // Ensure proper initial state
   voiceRecorderModule.init();
+  voiceChatModule.initVoiceChat();
+  voiceRealtimeModule.fetchStats().catch(() => {});
+  initVoiceDebugPanel();
+  window.voiceRecorderModule = voiceRecorderModule;
+  window.voiceRealtimeModule = voiceRealtimeModule;
+  window.voiceTelemetry = voiceTelemetry;
+  voiceVisualizerModule.initVoiceVisualizer();
+  voiceStatusModule.initVoiceStatus();
+  ttsControlsModule.initTtsControls();
+  (window.aiTTSManager?._readyPromise || window.aiTTSManager?.checkAvailability?.() || Promise.resolve())
+    .then(() => {
+      ttsModule.refreshAllTTSButtons?.();
+      window.refreshTtsControls?.();
+    });
   if (censorModule) censorModule.init();
 
   // Auto-focus message input on load

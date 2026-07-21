@@ -486,6 +486,10 @@ export function initSidebarLayout(Storage, opts) {
 // NON-passive and calls preventDefault() once the gesture is locked
 // horizontal — without that, Firefox (and others) treat the horizontal swipe
 // as their own scroll/navigation gesture and our handler never gets to act.
+//
+// Intentionally narrow: only a LEFTWARD swipe that starts in a thin RIGHT
+// edge zone opens the sidebar (on the right, matching the mobile hamburger).
+// Mid-screen / left-edge / rightward swipes used to pop the nav constantly.
 function _initChatSwipeToOpenSidebar() {
   if (window.__odySwipeWired) return;
   window.__odySwipeWired = true;
@@ -497,6 +501,13 @@ function _initChatSwipeToOpenSidebar() {
     'pre', 'table', '.agent-tool-output', '.agent-thread-cmd',
     'input', 'textarea', 'select',
   ].join(', ');
+
+  // Thin right-edge hit zone (px). Keep smaller than a thumb-width so casual
+  // scrolling near the margin doesn't claim the gesture.
+  const EDGE_ZONE_PX = 24;
+  // Require a clear leftward pull before opening (reduces false opens).
+  const OPEN_DX_PX = 56;
+  const HORIZ_RATIO = 1.5; // adx must beat ady by this factor
 
   let sx = 0, sy = 0, track = false, decided = false;
 
@@ -526,6 +537,9 @@ function _initChatSwipeToOpenSidebar() {
     if (!(t && t.closest && t.closest('#chat-container'))) return;
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;
+    // Only accept starts in the right edge — left-edge / mid-screen swipes
+    // were opening the nav far too often on phones.
+    if (sx < window.innerWidth - EDGE_ZONE_PX) return;
     track = true;
   }, { passive: true, capture: true });
 
@@ -537,19 +551,19 @@ function _initChatSwipeToOpenSidebar() {
     const dy = e.touches[0].clientY - sy;
     const adx = Math.abs(dx), ady = Math.abs(dy);
     if (!decided) {
-      if (adx < 10 && ady < 10) return;          // not enough travel to judge
-      if (ady > adx) { track = false; return; }   // vertical-dominant → let it scroll
-      decided = true;                             // locked into a horizontal swipe
+      if (adx < 12 && ady < 12) return;          // not enough travel to judge
+      // Must be clearly horizontal-left; vertical or diagonal scrolls pass through.
+      if (ady * HORIZ_RATIO >= adx) { track = false; return; }
+      // Left-swipe only (finger moves left). Rightward swipes never open the nav.
+      if (dx >= 0) { track = false; return; }
+      decided = true;                             // locked into a leftward swipe
     }
     // Claim the gesture from the browser so it doesn't scroll/navigate instead.
     if (e.cancelable) e.preventDefault();
-    if (adx >= 40) {
+    if (adx >= OPEN_DX_PX) {
       track = false;
-      // Direction picks the side (per user preference): swipe LEFT → sidebar
-      // on the left, swipe RIGHT → sidebar on the right. dx<0 is a leftward
-      // finger motion; mapping it to 'right' (and dx>0 to 'left') is what makes
-      // it feel correct in practice.
-      const side = dx < 0 ? 'right' : 'left';
+      // Mobile hamburger always opens from the right — keep swipe consistent.
+      const side = 'right';
       // Use the deliberate-open helper (sets _userToggledSidebar so the
       // auto-collapse observer doesn't instantly re-hide it). Fall back to a
       // plain unhide if the helper isn't wired yet.
@@ -557,7 +571,11 @@ function _initChatSwipeToOpenSidebar() {
         window._odyOpenSidebar(side);
       } else {
         const sb = document.getElementById('sidebar');
-        if (sb) { sb.classList.remove('hidden'); try { syncRailSide(); } catch (_) {} }
+        if (sb) {
+          sb.classList.add('right-side');
+          sb.classList.remove('hidden');
+          try { syncRailSide(); } catch (_) {}
+        }
       }
     }
   }, { passive: false, capture: true });

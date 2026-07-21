@@ -89,13 +89,14 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
     "manage_memory": "Memory management: list, add, edit, delete, or search persistent memories.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
-    "manage_tasks": "Scheduled task management: list, create, edit, delete, pause, resume, or run cron tasks.",
+    "manage_tasks": "Manage SCHEDULED BACKGROUND AI JOBS (recurring automations in the Tasks panel) — NOT the user's todo list. An empty list here does NOT mean the user has no todos; call manage_notes action=list for user todos/checklists. Use for: list, create, edit, delete, pause, resume, or run cron tasks.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
     "manage_mcp": "MCP server management: list, add, delete, reconnect servers, or list available tools.",
     "manage_webhooks": "Webhook management: list, add, delete, enable, or disable webhooks.",
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
     "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content. action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
+    "process_job_application": "Job search pipeline: ingest postings, evaluate rubric gate (4.0+ proceeds), dispatch Cursor tailoring handoffs, list/status jobs, build Handshake apply packages, mark applied. NEVER auto-submits to Handshake.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
     "list_sessions": "List all chats with their metadata (the UI calls these 'chats'). Use for 'list my chats', 'rename all my chats' (list first, then manage_session to rename each).",
@@ -103,7 +104,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "search_chats": "Search past session transcripts across chats.",
     "ask_user": "Ask the user a multiple-choice question to get a decision or clarification. Use this when the task is genuinely ambiguous and the answer changes what you do next — pick between approaches, confirm an assumption, choose among options — instead of guessing. Provide a clear `question` and 2-6 `options` (each with a short `label`, optional `description`). Calling this ENDS your turn: the user sees clickable buttons and their choice arrives as your next message. Don't use it for things you can decide from context or sensible defaults, or for irreversible-action confirmation if a dedicated flow exists.",
     "update_plan": "Write back to the ACTIVE PLAN while executing an approved plan: mark steps done or revise them. After finishing a step call this with the full checklist and that step marked done; when the user asks to change the plan call it with the revised checklist. Always pass the COMPLETE markdown checklist (`- [ ]` / `- [x]`), not a diff. The user's docked plan window updates live. No effect when there is no active plan.",
-    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, email inbox, sessions, notes, memories/brain, skills, settings, cookbook) via `open_panel <name>`. Use `open_email_reply <uid> <folder> reply` to open an email reply draft document without sending. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
+    "ui_control": "Control the UI and toggle tools on/off. Use this to turn off / turn on / disable / enable individual tools and features: shell (bash), search (web), research, browser, documents, incognito. Open panels (documents library, gallery, email inbox, sessions, notes, memories/brain, skills, settings, cookbook, cmd-center/vault) via `open_panel <name>`. Use `open_email_reply <uid> <folder> reply` to open an email reply draft document without sending. Also switches between chat/agent modes, changes the current model, and applies/creates themes.",
     "list_email_accounts": "List configured email accounts and default status. Use before reading or sending mail when the user mentions Gmail, work mail, custom domain mail, another mailbox, or asks to compare/check multiple inboxes.",
     "list_emails": "List emails for a folder/account, newest first, including read messages by default. Shows subject, sender, date, UID, account, and AI summary. Check inbox, find emails needing replies. Supports account from list_email_accounts for Gmail/work/custom mailboxes. For last/latest/newest email, use max_results=1 and unread_only=false.",
     "read_email": "Read the full content of a specific email by UID or Message-ID. View email body, check details. Supports account from list_email_accounts when the UID belongs to a non-default mailbox.",
@@ -115,7 +116,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "bulk_email": "Perform one action on many emails at once. Use for delete all those, archive these, mark all read, move spam to junk. Takes explicit UIDs from list_emails or all_unread=true. Always pass account for Gmail/work/custom mailbox results.",
     "resolve_contact": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]', 'email [name]', or 'send to [name]' without an email address.",
     "manage_contact": "Create, update, delete, or list CardDAV contacts. Use to save a new contact, change an existing one's email/phone, or remove one. Action=list returns uids needed for update/delete. Use when the user says 'save this contact', 'add [name] to contacts', 'update [name]'s email', 'delete [name] from contacts'. Do not use for user identity facts like 'my name is <name>'; those are memory.",
-    "manage_notes": "Create and manage notes and checklists (Google Keep-style). ALWAYS use this for note/todo/checklist/reminder creation — NEVER hit /api/notes via app_api. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
+    "manage_notes": "List, create, and manage the user's notes, todos, checklists, and reminders (Odysseus Notes panel). ALWAYS call action=list when the user asks to see/analyze/categorize their todo list — this is the canonical source of user todos. NEVER use manage_tasks or Notion for user todos. Accepts natural-language `due_date` like 'tomorrow at 9am' or '11pm today' (parsed in the USER'S timezone). The due_date IS the reminder — it fires a notification at that time, so do NOT also create a calendar event for the same reminder. Set colors, labels, pin, archive. Do NOT use manage_memory for note content.",
     "manage_calendar": "Calendar event management: list, create, update, delete. Each event can carry a tag/category (event_type — work/personal/health/travel/meal/social/admin/other) and importance (low/normal/high/critical). Resolve today/tomorrow using the Current date and time context, then use ISO datetimes in the user's local wall time; supports all-day events. For event reminders/alarms, pass reminder_minutes; this creates the Notes reminder, so do not also call manage_notes for the same reminder.",
     "download_model": "Download a HuggingFace model to a local or remote server. Specify repo_id (e.g. 'Qwen/Qwen3-8B'), optional server host, and optional include filter for specific files.",
     "serve_model": "Start serving a model with vLLM, SGLang, llama.cpp, Ollama, or Diffusers. cmd MUST start with the binary directly — e.g. `vllm serve /mnt/HADES/models/Qwen3.5-397B-A17B-AWQ --port 8003 --tensor-parallel-size 8 …`. NEVER prefix with `cd …`, `source …`, or chain with `&&`/`||` — those get rejected by the validator. The venv activation (env_prefix) and CUDA env are added automatically from the target host's saved settings. For image/inpainting/diffusion use python3 scripts/diffusion_server.py --model <repo> --port 8100. After launch, call list_served_models for readiness/errors and retry suggestions. If serve_model fails with 'Invalid characters in cmd', simplify to the bare binary + args.",
@@ -130,9 +131,16 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "serve_preset": "Launch a saved Cookbook serve preset by name. Reuses the exact tmux command + host the user already saved. Use for 'run stable diffusion 3.5', 'serve vllm-qwen', 'start the inpaint model' — preset-name matches the user's UI labels.",
     "adopt_served_model": "Register an existing tmux model server (one started manually or outside the cookbook flow) into Cookbook tracking AND add it as a chat endpoint. Use when the user (or a previous turn) launched something via ssh+tmux and now wants it visible in the UI, stoppable via stop_served_model, and usable in the model picker.",
     "list_cookbook_servers": "List the cookbook's configured servers (remote GPU boxes + local) and which is the current default. Use this BEFORE download_model/serve_model when the user didn't name a host — to decide where to run, or to ask the user which server when ambiguous. Downloads/serves default to the cookbook's selected server, NOT localhost.",
-    "app_api": "Generic loopback to allowed Odysseus internal endpoints. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — allowed UI buttons hit /api/* endpoints and you can hit them too. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked; do NOT use app_api for shell commands, package installs, engine rebuilds, or PID signalling. Use named command tooling for shell commands. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead.",
+    "app_api": "Generic loopback to allowed Odysseus internal endpoints. Use this when the user wants something the UI can do but there's no named tool for it. Covers calendar, gallery, library/documents, memory, notes, tasks, settings, research, compare, cookbook GPUs/state — allowed UI buttons hit /api/* endpoints and you can hit them too. Sensitive auth/user/admin/shell paths and host-control Cookbook mutation routes are blocked; do NOT use app_api for shell commands, package installs, engine rebuilds, or PID signalling. Use named command tooling for shell commands. action='endpoints' with filter=<keyword> lists available endpoints. action='call' takes method+path+body. Hits same routes the UI uses — auth flows free. NOTE: themes are NOT an API endpoint — use the ui_control tool (create_theme / set_theme), not app_api. SESSIONS/CHATS: do NOT use app_api for these — GET /api/sessions returns EMPTY for tool calls (it's owner-filtered and tool calls authenticate as a different identity). EMAIL ACCOUNTS: do NOT use /api/email/accounts via app_api; use list_email_accounts, list_emails, and read_email instead. To list/rename/archive/delete/fork chats use the list_sessions and manage_session tools instead. DISABLED (Docker): do NOT use app_api POST /api/clicky/start to launch Clicky — container cannot spawn Windows WPF; host script deploy/scripts/start-clicky.ps1 instead.",
     "edit_image": "Edit an image in the gallery: upscale (increase resolution), remove background (rembg), inpaint (fill selected area), or harmonize (blend edits). Specify image ID and action.",
     "trigger_research": "Start a deep research job on any topic — appears in the Deep Research sidebar, streams progress, produces a detailed report. Use for 'research X', 'look into Y', 'do deep research on Z', 'investigate'. NOT a scheduled task — it runs now and surfaces in the sidebar.",
+    "transcribe_video": "Get the FULL transcript of a video from its URL — YouTube or any yt-dlp-supported site. Tries YouTube captions first, then the Aether local server (yt-dlp + Whisper STT) for caption-less videos. Use for 'transcribe this video', 'get the transcript of this YouTube link', 'summarize/brief this video', 'CEO brief of this talk'. Returns full plain text plus title/channel/duration; can save the transcript as a document.",
+    "screen_look": "See what is on the user's screen RIGHT NOW or in the last few minutes via Screenpipe OCR. Use for 'what am I looking at', 'what's on my screen', 'read the error on my screen', 'what app am I in', 'find <text> on my screen'. Optional SHORT keyword query (1-4 words — never the full spoken sentence) + minutes lookback (max 120). For 'a few minutes ago' prefer this over screen_recall. Read-only; not for past days (use screen_recall).",
+    "screen_recall": "Search the user's INDEXED screen history semantically (PixelRAG visual tiles + agent memories + notes) — 'when did I see that stripe dashboard', 'find the article I had open yesterday'. If visual_results are empty, immediately fall back to screen_look with minutes + a short keyword. For the current screen or last few minutes use screen_look instead.",
+    "spec_trace": "Read UI element context the user captured with the SpecTracer browser extension — DOM hierarchy, CSS selector, classes, position, console errors and events for a specific element they picked while developing. Use for 'the element I just grabbed/traced/captured/inspected', 'look at that button I picked', 'fix the element in my trace'. action=latest/list/get.",
+    "desktop_act": "Control the user's desktop through the Clicky worker: move/click/double_click/drag the mouse at coordinates or at visible on-screen text (target_text, resolved via screen OCR), speak text aloud. Use for 'click the submit button', 'click on X', 'move the mouse to', 'double click'. Consent-gated per session — ask the user first when it returns consent_required. Pair with screen_look to see the screen before acting.",
+    "browser_act": "Control the user's running Chrome via DevTools: list tabs, snapshot a page's interactive elements, navigate to a URL, click/type by selector, or run JS with evaluate. Use for 'open <url> in my browser', 'what tabs do I have open', 'click the login button on the page', 'fill in the form', 'what's on this page' (structured, not OCR). Reads are free; navigate/click/type/evaluate are consent-gated. Needs Chrome on --remote-debugging-port=9222.",
+    "operator_research": "Fan out ONE web query across TinyFish + Perplexity + Firecrawl at once and return merged, deduplicated, ranked results with per-provider attribution. Use for 'search everywhere for X', 'cross-check X across engines', 'give me a broad web sweep of X' — broader than web_search but NOT the deep-research sidebar (trigger_research). Heavier than web_search (multiple APIs); prefer web_search for a single quick fact.",
 }
 
 
@@ -349,6 +357,10 @@ class ToolIndex:
             {"manage_calendar"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
+        frozenset({"todo list", "to-do list", "to do list", "my todos", "todo items",
+                   "analyze todos", "list todos", "check todos", "categorize todos",
+                   "what's on my todo", "what is on my todo"}):
+            {"manage_notes"},
         # Chat/session management. "rename" alone maps to documents below, so a
         # request like "rename the last 12 sessions/chats" needs these session
         # keywords to surface the right tools (NOT app_api — /api/sessions is
@@ -387,6 +399,34 @@ class ToolIndex:
                    "deep dive", "deep research", "find out about", "study up on",
                    "report on", "do research", "look up everything"}):
             {"trigger_research"},
+        # Multi-provider fan-out intent (operator_research).
+        frozenset({"search everywhere", "cross-check", "cross check",
+                   "all the engines", "every engine", "multiple engines",
+                   "broad web sweep", "fan out", "search all providers",
+                   "compare sources", "check multiple sources"}):
+            {"operator_research"},
+        # Screen perception/recall intent (operator tools). Phrases only —
+        # a bare "screen" would fire on "screenshot"/"fullscreen" requests.
+        frozenset({"my screen", "on screen", "on the screen", "what am i looking",
+                   "am i looking at", "screenpipe", "did i see", "when did i see",
+                   "saw earlier", "had open", "screen history", "screen recall"}):
+            {"screen_look", "screen_recall"},
+        # SpecTracer element captures ("the element/button I just grabbed").
+        frozenset({"spec trace", "spectracer", "spec tracer", "element i grabbed",
+                   "element i just", "i just grabbed", "just captured", "just traced",
+                   "i just inspected", "my trace", "the trace i"}):
+            {"spec_trace"},
+        # Desktop control intent (operator desktop_act via Clicky).
+        frozenset({"click the", "click on", "double click", "double-click",
+                   "move the mouse", "move my mouse", "drag the", "click that",
+                   "press the button on", "control my desktop", "control the mouse"}):
+            {"desktop_act", "screen_look"},
+        # Browser control intent (operator browser_act via CDP).
+        frozenset({"my browser", "in chrome", "open tabs", "my tabs",
+                   "in my browser", "on the page", "on this page", "browser tab",
+                   "navigate to", "fill in the form", "fill the form",
+                   "the login button", "in the browser"}):
+            {"browser_act"},
         # Settings-change intent — "change my…/set my…/use X for…/turn on…".
         frozenset({"change my", "set my", "use the voice", "change the voice",
                    "my voice", "tts voice", "search engine", "default model",
@@ -472,6 +512,11 @@ class ToolIndex:
         frozenset({"write a", "create a doc", "draft", "compose", "poem", "story",
                    "essay", "outline", "letter"}):
             {"create_document", "edit_document", "update_document"},
+        # Video transcription / video-brief intent
+        frozenset({"transcribe", "transcript", "transcription",
+                   "youtube video", "this video", "the video", "youtube link",
+                   "brief this video", "summarize this video", "video brief"}):
+            {"transcribe_video"},
     }
 
     def get_tools_for_query(

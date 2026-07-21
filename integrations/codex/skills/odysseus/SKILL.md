@@ -14,7 +14,23 @@ Expect these environment variables:
 - `ODYSSEUS_URL`: Base URL for the user's Odysseus instance, for example `http://127.0.0.1:7000`.
 - `ODYSSEUS_API_TOKEN`: Scoped API token created in Odysseus Settings > Integrations > Add Integration > Codex Agent.
 
-If either value is missing, do not guess credentials. Tell the user to create a Codex Agent token in Odysseus Settings and expose both values to the terminal session.
+**If either value is missing in the terminal session:**
+
+1. **Prefer running the bundled helper** (`odysseus_api.py` or `handoff_api.py`) — it auto-loads `ODYSSEUS_*` from the project `.env` (`~/code/odysseus/.env`, or `ODYSSEUS_HOME/.env` when set).
+2. **Or load manually** before other shell commands (PowerShell does not auto-source `.env`):
+
+```powershell
+Get-Content "$HOME\code\odysseus\.env" | Where-Object { $_ -match '^ODYSSEUS_' } | ForEach-Object {
+  $parts = $_ -split '=', 2; [System.Environment]::SetEnvironmentVariable($parts[0], $parts[1]) }
+```
+
+```bash
+set -a && source ~/code/odysseus/.env && set +a
+```
+
+3. **Only if both fail**, ask the user to set User-level env vars (see `integrations/codex/README.md`) or create a new Codex Agent token in Odysseus Settings.
+
+Do not invent credentials. Do not read tokens from chat context.
 
 ## When to use what
 

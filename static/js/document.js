@@ -16,6 +16,8 @@ import spinnerModule from './spinner.js';
 import { openLibrary, closeLibrary, isLibraryOpen, initLibrary } from './documentLibrary.js';
 import signatureModule from './signature.js';
 import * as Modals from './modalManager.js';
+import { sendMessageToFormFlow } from './formflowFromChat.js';
+import { openHandoffTargetMenu } from './handoff.js';
 
   let API_BASE = '';
   let isOpen = false;
@@ -1942,6 +1944,24 @@ import * as Modals from './modalManager.js';
       clearTimeout(_pdfPaneSaveTimer);
       _savePdfPaneToMarkdown({ keepalive: true });
     }
+    if (activeDocId) {
+      clearTimeout(_autoSaveDebounce);
+      _autoSaveDebounce = null;
+      saveCurrentToMap();
+      const doc = docs.get(activeDocId);
+      const content = document.getElementById('doc-editor-textarea')?.value
+        ?? doc?.content
+        ?? '';
+      try {
+        // keepalive so the PUT survives tab close
+        fetch(`${API_BASE}/api/document/${activeDocId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+          keepalive: true,
+        });
+      } catch (_) { /* best-effort */ }
+    }
   });
 
   async function _refreshPdfPreviewIframe() {
@@ -3448,10 +3468,9 @@ import * as Modals from './modalManager.js';
     _hideLoadingOverlay();
     if (_diffModeActive) exitDiffMode(true);
 
-    // Save current doc state before switching
+    // Save current doc state before switching — flush to server so a
+    // pending 2s autosave can't leave the previous tab empty on reload.
     saveCurrentToMap();
-
-    // Auto-delete the doc we're leaving if it's completely empty
     const prevId = activeDocId;
     if (prevId && prevId !== docId && docs.has(prevId)) {
       const prev = docs.get(prevId);
@@ -3459,6 +3478,9 @@ import * as Modals from './modalManager.js';
         fetch(`${API_BASE}/api/document/${prevId}`, { method: 'DELETE' }).catch(() => {});
         docs.delete(prevId);
         _syncDocIndicator();
+      } else {
+        clearTimeout(_autoSaveDebounce);
+        saveDocument({ silent: true, docId: prevId, content: prev.content || '' }).catch(() => {});
       }
     }
 
@@ -3605,8 +3627,21 @@ import * as Modals from './modalManager.js';
   }
 
   async function closeTab(docId) {
-    // Save current editor content to map so the check below uses fresh data
+    // Persist editor content to the server BEFORE unlink/delete — otherwise
+    // a doc created empty and typed into (autosave not yet fired) is either
+    // deleted as "empty" or unlinked with blank server content.
     saveCurrentToMap();
+    if (docId === activeDocId || docs.has(docId)) {
+      clearTimeout(_autoSaveDebounce);
+      const snap = docs.get(docId);
+      try {
+        await saveDocument({
+          silent: true,
+          docId,
+          content: snap?.content ?? document.getElementById('doc-editor-textarea')?.value ?? '',
+        });
+      } catch (_) { /* best-effort */ }
+    }
     _detachDocFromSession(docId, { toast: true });
     // Find next tab in the current session
     const curSession = sessionModule?.getCurrentSessionId() || '';
@@ -3955,9 +3990,10 @@ import * as Modals from './modalManager.js';
            pinned to the bottom no matter which pane (editor / md-preview /
            csv / html / pdf) is the one growing to fill. -->
       <div id="doc-actions-footer" class="doc-email-actions">
+        <button type="button" id="doc-footer-save-btn" class="email-send-btn" title="Save document (Ctrl+S)" aria-label="Save document"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Save</span></button>
         <span class="email-send-split" id="doc-copy-export-split">
           <button type="button" id="doc-footer-copy-btn" class="email-send-btn email-send-main" title="Copy document"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</button>
-          <button type="button" id="doc-footer-export-btn" class="email-send-btn email-send-caret" title="Export as…" aria-label="Export options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
+          <button type="button" id="doc-footer-export-btn" class="email-send-btn email-send-caret" title="Export, fork & handoff" aria-label="Export, fork and handoff options"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg></button>
         </span>
       </div>
       <div id="doc-version-panel" class="doc-version-panel hidden">
@@ -3970,6 +4006,7 @@ import * as Modals from './modalManager.js';
       <div id="doc-mobile-footer" class="doc-mobile-footer">
         <button id="doc-mobile-close" class="doc-mobile-footer-btn" type="button">Unlink</button>
         <span style="flex:1"></span>
+        <button id="doc-mobile-save" class="doc-mobile-footer-btn" type="button">Save</button>
         <button id="doc-mobile-copy" class="doc-mobile-footer-btn" type="button">Copy</button>
       </div>
     `;
@@ -4153,16 +4190,25 @@ import * as Modals from './modalManager.js';
     document.getElementById('doc-close-btn')?.addEventListener('click', () => closePanel('down'));
     document.getElementById('doc-footer-close-btn')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
     document.getElementById('doc-import-btn')?.addEventListener('click', () => openLibrary());
+    document.getElementById('doc-footer-save-btn')?.addEventListener('click', () => saveDocument());
     document.getElementById('doc-footer-copy-btn')?.addEventListener('click', (e) => {
       if (e.currentTarget.dataset.mode === 'reply') { if (activeDocId) _sendSignedReply(activeDocId); }
       else copyDocument();
     });
     document.getElementById('doc-footer-export-btn')?.addEventListener('click', (e) => showExportMenu(null, e.currentTarget.getBoundingClientRect()));
+    // Ctrl/Cmd+S anywhere in the doc pane (not only the textarea)
+    pane.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || (e.key !== 's' && e.key !== 'S')) return;
+      if (!activeDocId) return;
+      e.preventDefault();
+      saveDocument();
+    });
     // Mobile footer: Close the current doc + Copy its content (replaces the
     // per-tab × on small screens, mirroring the email reader's Close footer).
     document.getElementById('doc-mobile-close')?.addEventListener('click', () => { if (activeDocId) closeTab(activeDocId); });
+    document.getElementById('doc-mobile-save')?.addEventListener('click', () => saveDocument());
     document.getElementById('doc-mobile-copy')?.addEventListener('click', () => copyDocument());
-    // Save, copy, run, export, delete, preview toggles are now in per-tab context menu
+    // Copy/run/export/delete/preview also live in the per-tab context menu
     document.getElementById('doc-version-badge').addEventListener('click', toggleVersionHistory);
     document.getElementById('doc-version-close').addEventListener('click', _closeVersionPanel);
     // Reflect the current language as a small icon left of the type select.
@@ -4708,6 +4754,12 @@ import * as Modals from './modalManager.js';
       });
       // Tab key inserts a real tab; Escape clears selection
       ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          e.stopPropagation();
+          saveDocument();
+          return;
+        }
         if (e.key === 'Escape') {
           if (_diffModeActive) { exitDiffMode(true); return; }
           // First Esc clears any pinned selection without closing the
@@ -5710,8 +5762,13 @@ import * as Modals from './modalManager.js';
       requestAnimationFrame(_dropKb);
       setTimeout(_dropKb, 80);
     }
-    // Save current state
+    // Save current state — map + server flush so minimize/close doesn't
+    // drop edits still sitting in the 2s autosave debounce window.
     saveCurrentToMap();
+    if (activeDocId) {
+      clearTimeout(_autoSaveDebounce);
+      saveDocument({ silent: true }).catch(() => {});
+    }
 
     // A "down" close means minimize, not close. Register the chip and flip
     // the dock state to minimized so a chip appears at the bottom. Any
@@ -8109,31 +8166,68 @@ import * as Modals from './modalManager.js';
     if (uiModule) uiModule.showToast(`Reply draft ready — "${att.filename}" attached`);
   }
 
-  /** Save manual edits */
-  export async function saveDocument({ silent = false } = {}) {
-    if (!activeDocId) return;
-    const textarea = document.getElementById('doc-editor-textarea');
-    if (!textarea) return;
+  /** Save manual edits.
+   *  Optional docId/content let callers flush a non-active (or about-to-be-
+   *  torn-down) doc without racing the textarea / activeDocId. */
+  export async function saveDocument({ silent = false, docId = null, content = null } = {}) {
+    const id = docId || activeDocId;
+    if (!id) return false;
+    clearTimeout(_autoSaveDebounce);
+
+    let body = content;
+    if (body == null) {
+      const textarea = document.getElementById('doc-editor-textarea');
+      if (textarea && (!docId || docId === activeDocId)) {
+        body = textarea.value;
+      } else if (docs.has(id)) {
+        body = docs.get(id).content || '';
+      } else {
+        return false;
+      }
+    }
+
+    const saveBtn = document.getElementById('doc-footer-save-btn');
+    const saveLabel = saveBtn?.querySelector('span');
+    if (saveBtn && !silent) {
+      saveBtn.disabled = true;
+      if (saveLabel) saveLabel.textContent = 'Saving…';
+    }
 
     try {
-      const res = await fetch(`${API_BASE}/api/document/${activeDocId}`, {
+      const res = await fetch(`${API_BASE}/api/document/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: textarea.value }),
+        body: JSON.stringify({ content: body }),
       });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(errText || `Save failed (${res.status})`);
+      }
       const doc = await res.json();
-      const badge = document.getElementById('doc-version-badge');
-      if (badge) { const _v = doc.version_count || 1; badge.textContent = `v${_v}`; badge.style.display = _v > 1 ? '' : 'none'; }
-      // Update map
-      if (docs.has(activeDocId)) {
-        docs.get(activeDocId).version = doc.version_count || 1;
-        docs.get(activeDocId).content = textarea.value;
+      if (id === activeDocId) {
+        const badge = document.getElementById('doc-version-badge');
+        if (badge) { const _v = doc.version_count || 1; badge.textContent = `v${_v}`; badge.style.display = _v > 1 ? '' : 'none'; }
+      }
+      if (docs.has(id)) {
+        docs.get(id).version = doc.version_count || 1;
+        docs.get(id).content = body;
       }
       _syncDocIndicator();
       if (!silent && uiModule) uiModule.showToast('Document saved');
+      if (saveBtn && !silent) {
+        if (saveLabel) saveLabel.textContent = 'Saved';
+        setTimeout(() => {
+          if (saveLabel && saveLabel.textContent === 'Saved') saveLabel.textContent = 'Save';
+        }, 1200);
+      }
+      return true;
     } catch (e) {
       console.error('Failed to save document:', e);
       if (!silent && uiModule) uiModule.showError('Failed to save document');
+      if (saveLabel) saveLabel.textContent = 'Save';
+      return false;
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
     }
   }
 
@@ -8291,6 +8385,152 @@ import * as Modals from './modalManager.js';
     fi.click();
   }
 
+  /** Send the active document into FormFlow (parse questions or paste text). */
+  async function forkDocToFormFlow() {
+    if (!activeDocId) return;
+    saveCurrentToMap();
+    const doc = docs.get(activeDocId);
+    if (!doc) return;
+    const textarea = document.getElementById('doc-editor-textarea');
+    const content = textarea?.value ?? doc.content ?? '';
+    if (!content.trim()) {
+      if (uiModule) uiModule.showToast('Document is empty');
+      return;
+    }
+    try {
+      await sendMessageToFormFlow(content);
+    } catch (e) {
+      console.error('Fork to FormFlow failed:', e);
+      if (uiModule) uiModule.showError('Fork to FormFlow failed: ' + (e.message || e));
+    }
+  }
+
+  /**
+   * Build a handoff payload from the live editor (including a version preview
+   * currently shown in the textarea). Does not write back to the docs map so
+   * previewing an older version cannot clobber the latest in-memory content.
+   */
+  function buildDocHandoffPayload() {
+    if (!activeDocId) return null;
+    const doc = docs.get(activeDocId);
+    if (!doc) return null;
+
+    const textarea = document.getElementById('doc-editor-textarea');
+    const titleInput = document.getElementById('doc-title-input');
+    const langSelect = document.getElementById('doc-language-select');
+    const title = (titleInput?.value || doc.title || 'Untitled').trim() || 'Untitled';
+    const language = langSelect?.value || doc.language || 'markdown';
+    const content = (textarea?.value ?? doc.content ?? '').trim();
+    if (!content && title === 'Untitled') return null;
+
+    const firstLine = content.split('\n').find((l) => l.trim()) || title;
+    const goal = (title !== 'Untitled' ? title : firstLine).slice(0, 120);
+
+    const sessionId = doc.sessionId || sessionModule?.getCurrentSessionId?.() || '';
+    const sessions = sessionModule?.getSessions?.() || [];
+    const session = sessions.find((s) => s.id === sessionId);
+    const sessionName = session?.name || 'Untitled';
+
+    const context = [
+      'Source: Odysseus document',
+      `Document ID: ${activeDocId}`,
+      `Language: ${language}`,
+    ];
+    if (sessionId) context.push(`Odysseus session: ${sessionName} (${sessionId})`);
+    const previewVer = document.querySelector('#doc-version-list .doc-version-item.active')?.dataset?.version;
+    if (previewVer) context.push(`Version preview: v${previewVer}`);
+    else if (doc.version != null) context.push(`Version: v${doc.version}`);
+
+    const noteBodyParts = [];
+    if (title) noteBodyParts.push(`# ${title}`);
+    if (content) noteBodyParts.push(content);
+
+    return {
+      title: goal,
+      goal,
+      context,
+      noteBody: noteBodyParts.join('\n\n').trim(),
+      sessionId,
+    };
+  }
+
+  /** Open the shared handoff target menu (Cursor / Claude Code / Odysseus / search). */
+  function handoffActiveDoc(anchorRect) {
+    const payload = buildDocHandoffPayload();
+    if (!payload) {
+      if (uiModule) uiModule.showToast('Nothing to hand off — add content first');
+      return;
+    }
+    openHandoffTargetMenu(anchorRect, payload, {
+      apiBase: API_BASE || (typeof window !== 'undefined' ? window.location.origin : ''),
+      selectionText: payload.goal,
+      selectionSource: {
+        label: `Document: ${payload.title}`,
+        sessionId: payload.sessionId,
+      },
+    });
+  }
+
+  /** Clone the active document into a fresh chat session and switch to it. */
+  async function forkDocToChat() {
+    if (!activeDocId) return;
+    saveCurrentToMap();
+    await saveDocument({ silent: true });
+
+    const doc = docs.get(activeDocId);
+    if (!doc) return;
+
+    const textarea = document.getElementById('doc-editor-textarea');
+    const titleInput = document.getElementById('doc-title-input');
+    const langSelect = document.getElementById('doc-language-select');
+    const title = (titleInput?.value || doc.title || 'Untitled').trim() || 'Untitled';
+    const language = langSelect?.value || doc.language || 'markdown';
+    const content = textarea?.value ?? doc.content ?? '';
+
+    try {
+      const sessions = sessionModule?.getSessions?.() || [];
+      const currentSession = sessionModule?.getCurrentSessionId?.();
+      const currentMeta = sessions.find(s => s.id === currentSession);
+      const curModel = sessionModule?.getCurrentModel?.();
+      const match = currentMeta
+        || (curModel && sessions.find(s => s.model === curModel && s.endpoint_url))
+        || sessions.find(s => s.endpoint_url && s.model);
+
+      const forkName = `\u2ADD ${title}`;
+      const fd = new FormData();
+      fd.append('name', forkName);
+      fd.append('skip_validation', 'true');
+      if (match?.endpoint_url) fd.append('endpoint_url', match.endpoint_url);
+      if (match?.model) fd.append('model', match.model);
+      if (match?.endpoint_id) fd.append('endpoint_id', match.endpoint_id);
+
+      const sRes = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: fd });
+      if (!sRes.ok) throw new Error('Failed to create session');
+      const sPayload = await sRes.json();
+      const newSessionId = sPayload.id;
+
+      const dRes = await fetch(`${API_BASE}/api/document`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: newSessionId, title, language, content }),
+      });
+      if (!dRes.ok) throw new Error('Failed to clone document');
+      const newDoc = await dRes.json();
+
+      _markDocVisibleState(newSessionId, 'open');
+      if (sessionModule?.loadSessions) await sessionModule.loadSessions();
+      if (sessionModule?.setSessionHasDocs) sessionModule.setSessionHasDocs(newSessionId, true);
+      if (sessionModule?.selectSession) await sessionModule.selectSession(newSessionId);
+      await loadSessionDocs(newSessionId);
+      switchToDoc(newDoc.id);
+      if (uiModule) uiModule.showToast(`Forked to chat \u2192 ${forkName}`);
+    } catch (e) {
+      console.error('Fork to chat failed:', e);
+      if (uiModule) uiModule.showError('Fork to chat failed: ' + (e.message || e));
+    }
+  }
+
   function showExportMenu(e, anchorRect) {
     if (e) e.stopPropagation();
     // Remove existing menu if any
@@ -8334,6 +8574,9 @@ import * as Modals from './modalManager.js';
     // getting too cramped for dedicated icons.
     options.push({ label: 'Import from library', fn: () => openLibrary() });
     options.push({ label: 'Import from device', fn: () => _importFromDevice(), _divider: true });
+    options.push({ label: 'Fork to chat', fn: () => forkDocToChat() });
+    options.push({ label: 'Fork to FormFlow', fn: () => forkDocToFormFlow() });
+    options.push({ label: 'Handoff…', fn: () => handoffActiveDoc(rect), _divider: true });
     if (isForm) options.push({ label: 'Filled PDF (.pdf)', fn: _downloadFilledPdf });
     options.push(
       { label: 'Export Markdown', fn: exportDocument },

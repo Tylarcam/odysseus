@@ -15,6 +15,10 @@ venv/
 .env.bak.*
 !.env.example
 
+# Local autostart wrappers may embed ODYSSEUS_API_TOKEN
+scripts/.handoff-relay-*.cmd
+scripts/.docker-mcp-gateway.cmd
+
 # Data — all user data stays local
 data/
 !services/hwfit/data/
@@ -90,3 +94,16 @@ compound.config.json
 *.error.log
 _scratch/
 /odysseus/
+
+# Agent skills installed via skills.sh (node_modules / local .env)
+.agents/skills/**/node_modules/
+.agents/skills/**/.env
+.agents/skills/**/bun.lock
+# Keep SKILL.md + scripts trackable via skills-lock.json; ignore runtime installs
+.agents/skills/last30flames/node_modules/
+
+# archivist.ai runtime artifacts
+/tiles/
+/my_index/
+/embeddings/
+/data/archivist/

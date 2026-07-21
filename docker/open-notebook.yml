@@ -1,0 +1,54 @@
+# Open Notebook overlay — self-hosted NotebookLM alternative that narrates
+# the Document Library "Listen" audio briefs. Enable via COMPOSE_FILE in .env:
+#   COMPOSE_FILE=docker-compose.yml:docker/open-notebook.yml
+#   COMPOSE_FILE=docker-compose.yml;docker/open-notebook.yml    #(Windows)
+#
+# First-boot setup (one time, in the Open Notebook UI at :8502):
+#   1. Add an AI provider credential (OpenAI, Ollama, etc.)
+#   2. Set default models under Settings > Models — the Listen feature needs
+#      a default text-to-speech model and a default chat/transformation model.
+# Odysseus auto-creates its single-narrator speaker/episode profiles on
+# first use.
+#
+# Alternatively skip this overlay and point OPEN_NOTEBOOK_URL in .env at an
+# Open Notebook instance you already run.
+services:
+  odysseus:
+    environment:
+      - OPEN_NOTEBOOK_URL=http://open-notebook:5055
+
+  open-notebook-surrealdb:
+    image: docker.io/surrealdb/surrealdb:v2
+    command: start --log info --user ${SURREAL_USER:-root} --pass ${SURREAL_PASSWORD:-root} rocksdb:/mydata/mydatabase.db
+    user: root
+    volumes:
+      - open-notebook-surreal:/mydata
+    environment:
+      - SURREAL_EXPERIMENTAL_GRAPHQL=true
+    restart: unless-stopped
+
+  open-notebook:
+    image: docker.io/lfnovo/open_notebook:v1-latest
+    ports:
+      - "${OPEN_NOTEBOOK_UI_BIND:-127.0.0.1}:8502:8502"   # Web UI
+      - "${OPEN_NOTEBOOK_API_BIND:-127.0.0.1}:5055:5055"  # REST API
+    environment:
+      # Encrypts provider API keys stored in Open Notebook's database.
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${OPEN_NOTEBOOK_ENCRYPTION_KEY:-change-me-to-a-secret-string}
+      # Optional API/UI password — mirror it into Odysseus's
+      # OPEN_NOTEBOOK_PASSWORD so the Listen feature can authenticate.
+      - OPEN_NOTEBOOK_PASSWORD=${OPEN_NOTEBOOK_PASSWORD:-}
+      - SURREAL_URL=ws://open-notebook-surrealdb:8000/rpc
+      - SURREAL_USER=${SURREAL_USER:-root}
+      - SURREAL_PASSWORD=${SURREAL_PASSWORD:-root}
+      - SURREAL_NAMESPACE=open_notebook
+      - SURREAL_DATABASE=open_notebook
+    volumes:
+      - open-notebook-data:/app/data
+    depends_on:
+      - open-notebook-surrealdb
+    restart: unless-stopped
+
+volumes:
+  open-notebook-surreal:
+  open-notebook-data:

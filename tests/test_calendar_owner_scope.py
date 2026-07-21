@@ -23,6 +23,17 @@ import pytest
 from fastapi import HTTPException
 
 
+def test_calendar_owner_key_maps_empty_to_fallback(monkeypatch):
+    from core.database import calendar_owner_key
+
+    monkeypatch.delenv("ODYSSEUS_FALLBACK_OWNER", raising=False)
+    assert calendar_owner_key(None) is None
+    assert calendar_owner_key("alice") == "alice"
+    assert calendar_owner_key("") == "owner@localhost"
+    monkeypatch.setenv("ODYSSEUS_FALLBACK_OWNER", "custom@local")
+    assert calendar_owner_key("") == "custom@local"
+
+
 def test_get_upcoming_events_is_owner_scoped():
     source = Path("core/database.py").read_text()
     tree = ast.parse(source)
@@ -33,8 +44,9 @@ def test_get_upcoming_events_is_owner_scoped():
     body = ast.unparse(fn)
 
     assert "join(CalendarCal)" in body
-    assert "if owner is not None:" in body
-    assert "q.filter(CalendarCal.owner == owner)" in body
+    assert "owner_key = calendar_owner_key(owner)" in body
+    assert "if owner_key is not None:" in body
+    assert "q.filter(CalendarCal.owner == owner_key)" in body
 
 
 class _Expr:

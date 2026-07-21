@@ -15,6 +15,7 @@ import {
   _isCalBgImage, _calBgImageUrl, _calBgCss,
   _calReadableTextColor,
   _ds, _addDays, _shiftDT, _tzOffset, _localDateOf,
+  _localParts, _localMinutes, _localTimeHHMM,
 } from './calendar/utils.js';
 
 const API_BASE = window.location.origin;
@@ -92,6 +93,17 @@ function _showCalUndoToast(label, undoFn) {
 
 // ── API ──
 
+function _defaultCalendarHref() {
+  const caldav = _calendars.find(c => c.source === 'caldav');
+  return (caldav || _calendars[0])?.href || '';
+}
+
+function _toastWritebackFailure(writeback, actionLabel) {
+  if (!writeback || writeback.ok !== false || !writeback.error) return;
+  const label = actionLabel || 'Event saved locally';
+  uiModule?.showToast?.(`${label}, but remote calendar push failed: ${writeback.error}`, 7000);
+}
+
 function _rangeIsCached(start, end) {
   // Check if [start, end] is fully covered by any single fetched range
   for (const [s, e] of _fetchedRanges) {
@@ -134,9 +146,10 @@ async function _fetchEvents(start, end, force) {
       if (_open && hasCache) _render();
     })
     .catch(e => { console.error('Calendar: failed to fetch events', e); });
-  // If we have cache, don't block on fetch — return immediately so render is instant
-  if (hasCache) return;
-  // No cache — must await the fetch
+  // If we have cache, don't block on fetch — return immediately so render is instant.
+  // Forced refresh (sync button / calendar-refresh) must await so the UI picks up
+  // server-side changes instead of rendering stale in-memory events.
+  if (hasCache && !force) return;
   await fetchPromise;
 }
 
@@ -172,10 +185,24 @@ function _prefetchAdjacent() {
 }
 
 let _calendarsError = null;
-// Guard so we only trigger an on-open CalDAV pull once per page load —
-// every list/render path calls _fetchCalendars, but we only want to
-// hit the remote server lazily on the first user open.
-let _caldavSyncedOnce = false;
+// Whether the signed-in user has CalDAV accounts in Settings → Integrations.
+let _caldavConfigured = null;
+
+async function _refreshCaldavConfigured() {
+  try {
+    const res = await fetch(`${API_BASE}/api/calendar/config/accounts`, { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    _caldavConfigured = (data.accounts || []).length > 0;
+  } catch {
+    _caldavConfigured = false;
+  }
+  return _caldavConfigured;
+}
+
+// Throttle on-open CalDAV pulls — _fetchCalendars runs on many renders.
+let _caldavLastSyncAt = 0;
+const _CALDAV_OPEN_SYNC_MIN_MS = 5 * 60 * 1000;
+
 async function _fetchCalendars() {
   _calendarsError = null;
   try {
@@ -188,11 +215,10 @@ async function _fetchCalendars() {
     });
   } catch (e) { _calendars = []; _calendarsError = e.message || 'Connection failed'; }
 
-  // First open: fire a background CalDAV pull. We don't await — the
-  // initial render uses whatever's already cached locally, and the
-  // sync's writes show up on the next paint after it resolves.
-  if (!_caldavSyncedOnce) {
-    _caldavSyncedOnce = true;
+  await _refreshCaldavConfigured();
+  const now = Date.now();
+  if (_caldavConfigured && now - _caldavLastSyncAt > _CALDAV_OPEN_SYNC_MIN_MS) {
+    _caldavLastSyncAt = now;
     _syncCaldav(false);
   }
 }
@@ -206,6 +232,10 @@ async function _syncCaldav(interactive) {
       method: 'POST', credentials: 'same-origin',
     });
     const data = await res.json().catch(() => ({}));
+    if (data.configured === false) {
+      if (interactive) return data;
+      return;
+    }
     if (interactive) return data;
     // Background path: if the pull actually changed anything, drop
     // local caches and re-render so new events appear.
@@ -222,7 +252,9 @@ async function _syncCaldav(interactive) {
 }
 
 function _optimisticEvent(data, uid) {
-  const cal = _calendars.find(c => c.href === data.calendar_href) || _calendars[0];
+  const cal = _calendars.find(c => c.href === data.calendar_href)
+    || _calendars.find(c => c.source === 'caldav')
+    || _calendars[0];
   return {
     uid,
     summary: data.summary || '',
@@ -261,6 +293,7 @@ async function _createEvent(data) {
       _saveCache && _saveCache();
       if (_open) _render();
     }
+    _toastWritebackFailure(d.writeback, 'Event saved locally');
   }).catch((e) => {
     delete _allEvents[tempUid];
     if (_open) _render();
@@ -281,14 +314,16 @@ async function _updateEvent(uid, data) {
   fetch(`${API_BASE}/api/calendar/events/${encodeURIComponent(uid)}`, {
     method: 'PUT', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-  }).then(r => {
+  }).then(async r => {
     if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json().catch(() => ({}));
     if (isRecurring) {
       _fetchedRanges = [];
       localStorage.removeItem(LS_KEY);
     } else {
       _saveCache && _saveCache();
     }
+    _toastWritebackFailure(d.writeback, 'Event updated locally');
   }).catch((e) => {
     if (_preMergeBackup) _allEvents[uid] = _preMergeBackup;
     else delete _allEvents[uid];
@@ -327,18 +362,20 @@ async function _deleteEvent(uid) {
   const isRecurring = uid.includes('::');
   fetch(`${API_BASE}/api/calendar/events/${encodeURIComponent(uid)}`, {
     method: 'DELETE', credentials: 'same-origin',
-  }).then(r => {
+  }).then(async r => {
     // 404 = the event was already deleted by another session/device. That's
     // exactly the state we want, so treat it as success — don't restore the
     // row, otherwise the user can never clear stale cached events that were
     // deleted from desktop while mobile was open (and vice versa).
     if (!r.ok && r.status !== 404) throw new Error('HTTP ' + r.status);
+    const d = await r.json().catch(() => ({}));
     if (isRecurring) {
       _fetchedRanges = [];
       localStorage.removeItem(LS_KEY);
     } else {
       _saveCache && _saveCache();
     }
+    _toastWritebackFailure(d.writeback, 'Event deleted locally');
   }).catch((e) => {
     // Server rejected — restore every uid we optimistically stripped.
     for (const [k, ev] of Object.entries(backups)) {
@@ -831,7 +868,7 @@ function _headerHTML() {
         ).join('')}
       </div>
       <button class="cal-nav" id="cal-settings" title="Calendar settings" style="position:relative;top:-3px;"><svg width="13" height="13" style="position:relative;top:2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.68 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-      <button class="cal-nav${window._calSyncing ? ' cal-syncing' : ''}${window._calSyncDone ? ' cal-sync-done' : ''}" id="cal-sync" title="Refresh from database" style="position:relative;top:-3px;">${window._calSyncDone ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>'}</button>
+      <button class="cal-nav${window._calSyncing ? ' cal-syncing' : ''}${window._calSyncDone ? ' cal-sync-done' : ''}" id="cal-sync" title="${_caldavConfigured ? 'Sync CalDAV calendars' : 'Refresh calendar'}" style="position:relative;top:-3px;">${window._calSyncDone ? '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>'}</button>
       ${_filtersToggleHTML()}
       <button class="cal-add-btn cal-add-btn-text" id="cal-add" title="New event"><span class="cal-add-plus">+</span><span class="cal-add-label">New</span></button>
     </div>
@@ -1134,23 +1171,17 @@ function _wkFormatHourLabel(h) {
   return `${hh} ${ampm}`;
 }
 function _wkEventTopHeight(ev, dayStr) {
-  // Convert event start/end (local) into top/height in px relative to the
-  // day's grid origin. Clamp to visible window.
-  // The dtstart/dtend strings are like "2026-05-11T09:00:00" (no tz), so
-  // pull the time portion directly to avoid TZ math drift; falls back to
-  // Date math if the string isn't shaped as expected.
+  // Convert event start/end into top/height in px relative to the day's
+  // grid origin. Clamp to visible window.
+  // CRITICAL: use local wall-clock parts, not raw ISO digits. UTC rows
+  // serialize as "...T16:00:00Z" for a 10:00 MST event — regex on those
+  // digits places the block at 4 PM while _fmtTime correctly shows 10:00.
   const _toMin = (iso, fallbackDate) => {
-    if (!iso) return null;
-    const m = iso.match(/T(\d{2}):(\d{2})/);
-    if (m) {
-      // If the event spans into a previous/next day, clamp to today's bounds.
-      const evDate = iso.slice(0, 10);
-      if (evDate < fallbackDate) return 0;             // event started before today
-      if (evDate > fallbackDate) return 24 * 60;       // event ends after today
-      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-    }
-    // All-day or date-only — treat as start of day.
-    return 0;
+    const p = _localParts(iso);
+    if (!p) return null;
+    if (p.date < fallbackDate) return 0;       // started before this day
+    if (p.date > fallbackDate) return 24 * 60; // ends after this day
+    return p.hours * 60 + p.minutes;
   };
   const startMin = _toMin(ev.dtstart, dayStr);
   const endMin   = _toMin(ev.dtend, dayStr) ?? (startMin + 60);
@@ -1286,11 +1317,9 @@ async function _renderWeek() {
       if (!ev) return;
       const cols = Array.from(body.querySelectorAll('.cal-wk-grid'));
       if (!cols.length) return;
-      // Original timing
-      const m1 = (ev.dtstart || '').match(/T(\d{2}):(\d{2})/);
-      const m2 = (ev.dtend || '').match(/T(\d{2}):(\d{2})/);
-      const startMin0 = m1 ? parseInt(m1[1], 10) * 60 + parseInt(m1[2], 10) : 0;
-      const endMin0   = m2 ? parseInt(m2[1], 10) * 60 + parseInt(m2[2], 10) : startMin0 + 60;
+      // Original timing — local wall-clock, not UTC digits from "...Z"
+      const startMin0 = _localMinutes(ev.dtstart) ?? 0;
+      const endMin0   = _localMinutes(ev.dtend) ?? (startMin0 + 60);
       const durationMin = Math.max(15, endMin0 - startMin0);
 
       // Where did the cursor grab the block? (offset from block-top in px)
@@ -1365,7 +1394,7 @@ async function _renderWeek() {
         // a plain click (no movement) must still open the event.
         if (moved) block.dataset.justResized = '1';
         // Decide whether anything actually moved.
-        const oldDs = (ev.dtstart || '').slice(0, 10);
+        const oldDs = _localDateOf(ev.dtstart);
         if (!nextDs) return;
         if (nextDs === oldDs && nextStartMin === startMin0) return;
         // Snapshot the original times so we can offer an Undo.
@@ -1410,10 +1439,7 @@ async function _renderWeek() {
       const uid = block.dataset.uid;
       const ev = _events.find(x => x.uid === uid);
       if (!ev || !grid || !ds) return;
-      const startMin = (() => {
-        const m = (ev.dtstart || '').match(/T(\d{2}):(\d{2})/);
-        return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : 0;
-      })();
+      const startMin = _localMinutes(ev.dtstart) ?? 0;
       const initialTop = parseFloat(block.style.top || '0');
       const gridRect = grid.getBoundingClientRect();
       let newEndMin = startMin;
@@ -1954,8 +1980,8 @@ function _wireAll(body) {
         }
         // Open the bespoke event form, then push the parsed fields in.
         const ev = data.event;
-        const ds = (ev.dtstart || '').slice(0, 10);
-        const de = (ev.dtend   || '').slice(0, 10) || ds;
+        const ds = _localDateOf(ev.dtstart) || (ev.dtstart || '').slice(0, 10);
+        const de = _localDateOf(ev.dtend) || (ev.dtend || '').slice(0, 10) || ds;
         _showEventForm(null, ds, de);
         requestAnimationFrame(() => {
           const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
@@ -1966,10 +1992,10 @@ function _wireAll(body) {
             const ad = document.getElementById('cal-f-allday');
             if (ad && !ad.checked) { ad.checked = true; ad.dispatchEvent(new Event('change')); }
           } else {
-            const t1 = (ev.dtstart || '').match(/T(\d{2}:\d{2})/);
-            const t2 = (ev.dtend || '').match(/T(\d{2}:\d{2})/);
-            if (t1) set('cal-f-start', t1[1]);
-            if (t2) set('cal-f-end', t2[1]);
+            const t1 = _localTimeHHMM(ev.dtstart);
+            const t2 = _localTimeHHMM(ev.dtend);
+            if (t1) set('cal-f-start', t1);
+            if (t2) set('cal-f-end', t2);
             document.getElementById('cal-f-start')?.dispatchEvent(new Event('input'));
           }
           // Make sure the details panel is open so the user can verify time.
@@ -2104,12 +2130,6 @@ function _wireAll(body) {
   document.getElementById('cal-today')?.addEventListener('click', () => { _currentDate = new Date(); _selectedDay = _today(); _render(); });
   document.getElementById('cal-settings')?.addEventListener('click', () => _showCalSettings());
   document.getElementById('cal-sync')?.addEventListener('click', async () => {
-    // Visible feedback: toggle a CSS class on the button so the spin runs
-    // even if the network round-trip is too fast to perceive. We hold it
-    // for at least 700ms (one full rotation) AND for as long as the actual
-    // fetch is in flight, then clear. Previously `await _render()`
-    // resolved instantly because _render is synchronous, so the spinner
-    // was set→cleared in the same tick and you saw nothing.
     const btn = document.getElementById('cal-sync');
     btn?.classList.add('cal-syncing');
     window._calSyncing = true;
@@ -2117,31 +2137,45 @@ function _wireAll(body) {
     _fetchedRanges = [];
     localStorage.removeItem(LS_KEY);
 
-    // Compute the visible range and force-refetch — _render() kicks off
-    // a fetch internally but doesn't return a promise, so we await our
-    // own one to actually serialize on the network.
     const _range = (_view === 'year')
       ? [`${_currentDate.getFullYear()}-01-01`, `${_currentDate.getFullYear() + 1}-01-01`]
       : (_view === 'week') ? _weekRange(_currentDate) : _monthRange(_currentDate);
     const minSpin = new Promise(r => setTimeout(r, 700));
+    const hasCaldav = await _refreshCaldavConfigured();
+    let syncData = null;
     try {
-      await Promise.all([
-        _fetchEvents(_range[0], _range[1], /*force*/ true).catch(() => {}),
-        minSpin,
-      ]);
+      if (hasCaldav) {
+        [syncData] = await Promise.all([
+          _syncCaldav(true),
+          minSpin,
+        ]);
+        _caldavLastSyncAt = Date.now();
+      } else {
+        await minSpin;
+      }
+      await _fetchCalendars();
+      await _fetchEvents(_range[0], _range[1], /*force*/ true).catch(() => {});
     } finally {
       window._calSyncing = false;
-      // Flash a checkmark for ~900ms. Drive it through a flag the toolbar
-      // template reads (not a one-off innerHTML on the button), so a stray
-      // _render() — the calendar re-renders mid-flow — can't wipe it. Same
-      // reason the spin is flag-driven.
       window._calSyncDone = true;
       _render();
       setTimeout(() => {
         window._calSyncDone = false;
         if (_open) _render();
       }, 900);
-      if (uiModule?.showToast) uiModule.showToast('Calendar refreshed');
+      if (uiModule?.showToast) {
+        if (!hasCaldav) {
+          uiModule.showToast('Calendar refreshed (connect CalDAV in Settings → Integrations to sync Google/Apple)');
+        } else if (syncData?.errors?.length) {
+          uiModule.showToast(`Calendar sync failed: ${syncData.errors[0]}`);
+        } else {
+          const parts = [];
+          if (syncData?.events) parts.push(`${syncData.events} updated`);
+          if (syncData?.deleted) parts.push(`${syncData.deleted} removed`);
+          if (syncData?.orphans_pushed) parts.push(`${syncData.orphans_pushed} pushed to remote`);
+          uiModule.showToast(parts.length ? `Calendar synced — ${parts.join(', ')}` : 'Calendar synced');
+        }
+      }
     }
   });
   // Brief spin on the "+" glyph before the new-event form opens. The
@@ -2613,6 +2647,12 @@ async function _showCalSettings() {
     const btn = e.currentTarget;
     const status = overlay.querySelector('#cal-settings-sync-status');
     btn.disabled = true;
+    const hasCaldav = await _refreshCaldavConfigured();
+    if (!hasCaldav) {
+      status.textContent = 'No CalDAV account — connect in Settings → Integrations';
+      btn.disabled = false;
+      return;
+    }
     status.textContent = 'Syncing…';
     const data = await _syncCaldav(true) || {};
     if (data.errors && data.errors.length) {
@@ -3015,7 +3055,7 @@ function _showEventForm(existing, defaultDate, defaultEndDate) {
       description: document.getElementById('cal-f-desc').value,
       location: document.getElementById('cal-f-loc').value,
       rrule: document.getElementById('cal-f-rrule').value || undefined,
-      calendar_href: document.getElementById('cal-f-cal')?.value || (_calendars[0]?.href || ''),
+      calendar_href: document.getElementById('cal-f-cal')?.value || _defaultCalendarHref(),
       color: colorVal || undefined,
     };
     try {
@@ -3203,17 +3243,9 @@ function _nowClock() {
   return new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 function _fmtTime(s) {
-  if (!s || s.length < 16) return '';
-  // Tz-aware timestamps from CalDAV/import are stored as UTC instants and
-  // serialized with Z/offset. Display them in the browser's local timezone;
-  // legacy naive timestamps keep their written wall-clock time.
-  if (/[Zz]$|[+\-]\d{2}:?\d{2}$/.test(s)) {
-    const d = new Date(s);
-    if (!isNaN(d)) {
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    }
-  }
-  return s.slice(11, 16);
+  if (!s || typeof s !== 'string' || s.length < 16) return '';
+  // Shared with week-grid positioning so labels and block tops never diverge.
+  return _localTimeHHMM(s);
 }
 function _e(s) { return uiModule.esc ? uiModule.esc(s || '') : (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
@@ -3441,40 +3473,41 @@ window.addEventListener('calendar-refresh', () => {
 
 // Cross-session catch-up: when the tab/app becomes visible again (you alt-tab
 // back, the mobile app comes to the foreground, or you switch back from
-// another browser session), drop the range cache and re-fetch. Without this,
-// a delete or add on desktop never propagates to the still-open mobile tab
-// until the user does a full reload — so stale events sit there undeletable
-// (they 404 on the server). Triggers on every visibility change but the
-// fetch is cheap and already de-duped by _fetchPromise on line ~120.
+// another browser session), pull CalDAV then re-fetch. Without this, events
+// added in Google/Apple Calendar overnight never appear until a full reload.
 let _lastVisRefetchAt = 0;
 const _VIS_REFETCH_MIN_MS = 10 * 1000;  // throttle if user is rapidly tab-flipping
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
-  const now = Date.now();
-  if (now - _lastVisRefetchAt < _VIS_REFETCH_MIN_MS) return;
-  _lastVisRefetchAt = now;
-  _fetchedRanges = [];
+
+async function _catchUpCalendarFromExternal() {
   const range = (_view === 'year')
     ? [`${_currentDate.getFullYear()}-01-01`, `${_currentDate.getFullYear() + 1}-01-01`]
     : (_view === 'week') ? _weekRange(_currentDate) : _monthRange(_currentDate);
-  _fetchEvents(range[0], range[1], /*force*/ true)
-    .then(() => { if (_open) _render(); _updateBadge(); })
-    .catch(() => {});
+  _fetchedRanges = [];
+  try {
+    const hasCaldav = await _refreshCaldavConfigured();
+    if (hasCaldav) await _syncCaldav(false);
+    await _fetchEvents(range[0], range[1], /*force*/ true);
+    if (_open) _render();
+    _updateBadge();
+  } catch (_) {}
+}
+
+function _maybeCatchUpCalendarFromExternal() {
+  const now = Date.now();
+  if (now - _lastVisRefetchAt < _VIS_REFETCH_MIN_MS) return;
+  _lastVisRefetchAt = now;
+  _catchUpCalendarFromExternal();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  _maybeCatchUpCalendarFromExternal();
 });
 
 // Same idea for window-level focus — covers desktop alt-tabbing back to a
 // browser that already had the tab visible (visibilitychange won't fire).
 window.addEventListener('focus', () => {
-  const now = Date.now();
-  if (now - _lastVisRefetchAt < _VIS_REFETCH_MIN_MS) return;
-  _lastVisRefetchAt = now;
-  _fetchedRanges = [];
-  const range = (_view === 'year')
-    ? [`${_currentDate.getFullYear()}-01-01`, `${_currentDate.getFullYear() + 1}-01-01`]
-    : (_view === 'week') ? _weekRange(_currentDate) : _monthRange(_currentDate);
-  _fetchEvents(range[0], range[1], /*force*/ true)
-    .then(() => { if (_open) _render(); _updateBadge(); })
-    .catch(() => {});
+  _maybeCatchUpCalendarFromExternal();
 });
 
 // Calendar reminders are stored as Notes. The Notes reminder loop owns

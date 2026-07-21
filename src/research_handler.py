@@ -240,6 +240,7 @@ class ResearchHandler:
         extraction_timeout: int = None,
         extraction_concurrency: int = None,
         owner: str = "",
+        research_engine: str = None,
     ) -> dict:
         """Start research as a background task. Returns task info dict.
 
@@ -286,6 +287,9 @@ class ResearchHandler:
             "result": None,
             "started_at": time.time(),
             "category": category,
+            "llm_endpoint": llm_endpoint,
+            "llm_model": llm_model,
+            "llm_headers": llm_headers or {},
             # SECURITY: track ownership so all reads / saves can filter by user.
             "owner": owner or "",
         }
@@ -323,17 +327,24 @@ class ResearchHandler:
                         category=category,
                         extraction_timeout=extraction_timeout,
                         extraction_concurrency=extraction_concurrency,
+                        research_engine=research_engine,
                     ),
                     timeout=hard_timeout,
                 )
                 entry["result"] = result
                 entry["status"] = "done"
                 self._save_result(session_id, entry)
+                self._kickoff_audio_brief(session_id, entry)
+                self._kickoff_hero_image(session_id, entry)
                 # Persist to DB via callback (ensures result survives even if SSE disconnected)
                 try:
-                    sources = entry.get("sources", [])
+                    sources = entry.get("sources") or []
+                    findings = entry.get("raw_findings") or []
                     researcher = entry.get("researcher")
-                    findings = self._extract_raw_findings(researcher.findings) if researcher and researcher.findings else []
+                    if not sources and researcher and researcher.findings:
+                        sources = self._extract_sources(researcher.findings)
+                    if not findings and researcher and researcher.findings:
+                        findings = self._extract_raw_findings(researcher.findings)
                     _guarded_complete(session_id, result, sources, findings)
                 except Exception as cb_err:
                     logger.error(f"on_complete callback failed: {cb_err}")
@@ -349,6 +360,8 @@ class ResearchHandler:
                     )
                     entry["status"] = "done"
                     self._save_result(session_id, entry)
+                    self._kickoff_audio_brief(session_id, entry)
+                    self._kickoff_hero_image(session_id, entry)
                     try:
                         sources = self._extract_sources(researcher.findings) if researcher.findings else []
                         findings = self._extract_raw_findings(researcher.findings) if researcher.findings else []
@@ -373,6 +386,8 @@ class ResearchHandler:
                     )
                     entry["status"] = "done"
                     self._save_result(session_id, entry)
+                    self._kickoff_audio_brief(session_id, entry)
+                    self._kickoff_hero_image(session_id, entry)
                     try:
                         sources = self._extract_sources(researcher.findings) if researcher.findings else []
                         findings = self._extract_raw_findings(researcher.findings) if researcher.findings else []
@@ -583,13 +598,15 @@ class ResearchHandler:
                 logger.error("Refusing to save research result for invalid session_id: %r", session_id)
                 return
             # Extract and cache sources + raw findings
-            sources = []
-            raw_findings = []
+            sources = entry.get("sources") or []
+            raw_findings = entry.get("raw_findings") or []
             researcher = entry.get("researcher")
-            if researcher and researcher.findings:
+            if not sources and researcher and researcher.findings:
                 sources = self._extract_sources(researcher.findings)
+            if not raw_findings and researcher and researcher.findings:
                 raw_findings = self._extract_raw_findings(researcher.findings)
             entry["sources"] = sources
+            entry["raw_findings"] = raw_findings
 
             data = {
                 "query": entry["query"],
@@ -600,11 +617,20 @@ class ResearchHandler:
                 "raw_findings": raw_findings,
                 "stats": entry.get("stats"),
                 "category": entry.get("category"),
+                "research_engine": entry.get("research_engine"),
                 "started_at": entry["started_at"],
                 "completed_at": time.time(),
                 # SECURITY: stamp owner so route handlers can filter by user.
                 "owner": entry.get("owner", ""),
             }
+            try:
+                from src.settings import load_settings
+                if load_settings().get("image_gen_enabled", True) is not False:
+                    data["hero_image_status"] = "pending"
+                else:
+                    data["hero_image_status"] = "skipped"
+            except Exception:
+                data["hero_image_status"] = "pending"
             path.write_text(json.dumps(data), encoding="utf-8")
             logger.info(f"Research result saved to {path}")
             try:
@@ -614,6 +640,25 @@ class ResearchHandler:
                 logger.debug("research_completed event dispatch failed", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to save research result: {e}")
+
+    def _kickoff_audio_brief(self, session_id: str, entry: dict) -> None:
+        if entry.get("status") != "done":
+            return
+        try:
+            from services.research.audio_brief import kickoff_audio_brief
+            from services.tts import get_tts_service
+            kickoff_audio_brief(session_id, entry, get_tts_service())
+        except Exception as e:
+            logger.debug("Audio brief kickoff failed for %s: %s", session_id, e)
+
+    def _kickoff_hero_image(self, session_id: str, entry: dict, *, force: bool = False) -> None:
+        if entry.get("status") != "done" and not force:
+            return
+        try:
+            from services.research.hero_image import kickoff_hero_image
+            kickoff_hero_image(session_id, entry, force=force)
+        except Exception as e:
+            logger.debug("Hero image kickoff failed for %s: %s", session_id, e)
 
     def _get_session_json(self, session_id: str) -> Optional[dict]:
         """Load the saved research JSON for a session, if it exists."""
@@ -649,6 +694,8 @@ class ResearchHandler:
                 category=data.get("category"),
                 session_id=session_id,
                 hidden_images=data.get("hidden_images") or [],
+                hero_image_url=data.get("hero_image_url") or None,
+                hero_image_status=data.get("hero_image_status") or None,
             )
             logger.info(f"Visual report generated for {session_id}")
             return html_content
@@ -731,23 +778,39 @@ class ResearchHandler:
         category: str = None,
         extraction_timeout: int = None,
         extraction_concurrency: int = None,
+        research_engine: str = None,
     ) -> str:
         """
-        Run iterative deep research using the LLM-in-the-loop DeepResearcher.
+        Run deep research — either IterResearch (DeepResearcher) or Perplexity Agent.
 
         Args:
             query: Research question
-            llm_endpoint: LLM endpoint URL for chat completions
-            llm_model: Model name/ID
+            llm_endpoint: LLM endpoint URL for chat completions (iterative engine)
+            llm_model: Model name/ID (iterative engine)
             max_time: Maximum research time in seconds (default 5 minutes)
             _task_entry: Internal - registry entry to store researcher ref
             prior_report: Previous report to continue from.
             prior_findings: Previous findings to build on.
             prior_urls: URLs already visited (won't re-fetch).
+            research_engine: ``iterative`` or ``perplexity_agent`` (falls back to setting)
 
         Returns:
             Formatted research report with expandable section and summary
         """
+        from src.perplexity_agent import resolve_research_engine
+
+        engine = resolve_research_engine(research_engine)
+        if _task_entry is not None:
+            _task_entry["research_engine"] = engine
+
+        if engine == "perplexity_agent":
+            return await self._run_perplexity_research(
+                query,
+                max_time=max_time,
+                progress_callback=progress_callback,
+                _task_entry=_task_entry,
+            )
+
         is_continuation = bool(prior_report)
         logger.info(f"{'Continuing' if is_continuation else 'Starting'} IterResearch Deep Research")
         logger.info(f"Query: {query}")
@@ -835,6 +898,50 @@ class ResearchHandler:
             logger.error(f"DeepResearcher failed: {e}", exc_info=True)
             return await self._fallback_research(query, llm_endpoint, llm_model, max_time, str(e))
 
+    async def _run_perplexity_research(
+        self,
+        query: str,
+        max_time: int = 300,
+        progress_callback=None,
+        _task_entry: dict = None,
+    ) -> str:
+        """Fast deep research via Perplexity Agent API (Search-as-Code preset)."""
+        from src.perplexity_agent import run_deep_research
+        from src.settings import get_setting
+
+        logger.info("Starting Perplexity Agent deep research")
+        logger.info("Query: %s", query)
+        logger.info("Max time: %ss", max_time)
+
+        preset = (get_setting("perplexity_research_preset") or "deep-research").strip()
+        # max_time is the iterative-research round budget, not the Perplexity HTTP
+        # call timeout. Perplexity deep-research typically takes 5–10 min; use a
+        # dedicated setting (default 900s) so a 300s panel budget doesn't abort it.
+        try:
+            pplx_timeout = int(get_setting("perplexity_agent_timeout_seconds", 900) or 900)
+        except (TypeError, ValueError):
+            pplx_timeout = 900
+        pplx_timeout = max(300, pplx_timeout)
+        start_time = time.time()
+        parsed = await run_deep_research(
+            query,
+            preset=preset,
+            timeout=pplx_timeout,
+            progress_callback=progress_callback,
+        )
+        elapsed = time.time() - start_time
+
+        report = strip_thinking(parsed["report"])
+        stats = parsed.get("stats") or {}
+
+        if _task_entry is not None:
+            _task_entry["raw_report"] = report
+            _task_entry["stats"] = stats
+            _task_entry["sources"] = parsed.get("sources") or []
+            _task_entry["raw_findings"] = parsed.get("findings") or []
+
+        return self._format_research_report(query, report, stats, elapsed)
+
     async def _fallback_research(
         self, query: str, llm_endpoint: str, llm_model: str,
         max_time: int, primary_error: str,
@@ -878,12 +985,21 @@ class ResearchHandler:
     ) -> str:
         """Format research report (markdown only — sources/findings handled by frontend)."""
         full_report = strip_thinking(full_report)
-        summary_lines = [
-            f"**Duration:** {elapsed:.1f}s",
-            f"**Rounds:** {stats.get('Rounds', stats.get('Findings', '?'))}",
-            f"**Queries:** {stats.get('Queries', stats.get('Searches', '?'))}",
-            f"**URLs Analyzed:** {stats.get('URLs', '?')}",
-        ]
+        if stats.get("Engine") == "Perplexity Agent":
+            summary_lines = [
+                f"**Engine:** Perplexity Agent ({stats.get('Preset', 'deep-research')})",
+                f"**Duration:** {elapsed:.1f}s",
+                f"**Sources:** {stats.get('URLs', '?')}",
+            ]
+            if stats.get("Cost USD"):
+                summary_lines.append(f"**Cost:** {stats['Cost USD']}")
+        else:
+            summary_lines = [
+                f"**Duration:** {elapsed:.1f}s",
+                f"**Rounds:** {stats.get('Rounds', stats.get('Findings', '?'))}",
+                f"**Queries:** {stats.get('Queries', stats.get('Searches', '?'))}",
+                f"**URLs Analyzed:** {stats.get('URLs', '?')}",
+            ]
         summary_text = " | ".join(summary_lines)
 
         formatted = f"""---

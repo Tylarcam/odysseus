@@ -1,0 +1,230 @@
+{
+  "ok": true,
+  "engine": "perplexity_agent_direct",
+  "odysseus_route": "blocked_scope_aware_403",
+  "preset": "pro-search",
+  "result": {
+    "report": "# Research Report: Smoosh AI Identity & Synthesis\n\n### 1. Identity Reconciliation: Smoosh AI (smoosh.app)\n**Smoosh AI** is a fan-data unification platform headquartered in **Los Angeles, California**. It is distinct from *smoosh.dev* (a UK-based calendar/scheduling SaaS) and *Smoosh* (a UK baby skincare brand). \n\n*   **Product Thesis:** Unifying fragmented fan data (merch, tickets, streams, social media, gaming) into a single AI-powered platform.\n*   **Jobs-to-be-Done (JTBD):** Building a \"universal data layer for fandom\" to unlock insights and monetization opportunities for the music, fashion, and entertainment industries.\n*   **Target ICP:** Talent managers, record labels, fashion brands, and entertainment conglomerates seeking first-party audience insights.\n\n### 2. Digital Footprint & Leadership\n| Entity | Detail | Source |\n| :--- | :--- | :--- |\n| **Official Domain** | [smoosh.app](https://smoosh.app) | LinkedIn, GetLatka |\n| **LinkedIn** | [linkedin.com/company/smooshai](https://www.linkedin.com/company/smooshai) | LinkedIn |\n| **Headquarters** | Los Angeles, CA | LinkedIn, GetLatka |\n| **Founder / CEO** | **Sophie Poultney** | GetLatka, LinkedIn |\n| **Key Recruiter** | **Janice Nam** (associated via Handshake/Recruiting outreach) | User Prompt, LinkedIn |\n\n### 3. Team, Funding, and Stage Signals\n*   **Stage:** Early-stage / Pre-launch to Seed. Sources indicate a founding year around **2025**.\n*   **Funding:** Listed as a **Microsoft for Startups** participant, which typically provides Azure credits and technical support to high-growth AI ventures.\n*   **Team Size:** Small/Lean (estimated <10-15 people based on \"pre-launch\" signals and startup stage).\n*   **Leadership Context:** While Sophie Poultney is the public-facing CEO, the company is actively recruiting for a **CTO** to lead the technical build-out of the \"universal data layer.\"\n*   **Janice Nam Role:** Janice Nam appears as a primary recruiting contact (Handshake/LinkedIn outreach) for Smoosh AI, specifically targeting high-level engineering and CTO roles. \n\n### 4. Technical Ownership for CTO Candidates\nA CTO joining Smoosh AI should anticipate ownership over:\n*   **Data Architecture:** Designing a scalable \"universal data layer\" capable of ingesting high-volume, heterogeneous data from Spotify, Ticketmaster, Shopify, and social APIs.\n*   **AI/LLM Integration:** Implementing AI agents or models to normalize fragmented data and generate predictive insights into fan behavior.\n*   **GTM Tech Stack:** Building the interface for enterprise clients (labels/brands) to query and visualize complex audience datasets.\n*   **Security/Privacy:** Handling sensitive PII (Personally Identifiable Information) across various fan platforms while maintaining compliance.\n\n### 5. Critical Distinction: Smoosh AI vs. Others\n| Brand | Domain | Location | Industry |\n| :--- | :--- | :--- | :--- |\n| **Smoosh AI** | **smoosh.app** | Los Angeles, US | Fan Data / Entertainment AI |\n| **Smoosh.dev** | smoosh.dev | United Kingdom | Calendar / Scheduling SaaS |\n| **Smoosh Skincare** | smoosh.store | United Kingdom | Baby Skincare (Sophie Poultney co-founded) |\n\n*Note: There is a name collision with a UK-based Sophie Poultney who co-founded a baby skincare brand. However, the Smoosh AI (smoosh.app) CEO is specifically linked to the Los Angeles entity and the Microsoft for Startups fan-data platform.*",
+    "sources": [
+      {
+        "url": "https://getlatka.com/companies/smoosh.app",
+        "title": "Smoosh AI Revenue, Valuation & Funding (2026)"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-b334212ba",
+        "title": "Sophie Poultney | LinkedIn"
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=W6vdNo2tYKA",
+        "title": "Sophie Rain: The $43 Million AI Scandal Exposed"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/sophie-poultney-b334212ba_this-past-month-has-shown-me-that-doing-things-activity-7201222040454897664-SPNZ",
+        "title": "This past month has shown me that doing things out of my usual day-to-day\u2026 | Sophie Poultney"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-29177337",
+        "title": "Sophie Poultney | LinkedIn"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-749a17269",
+        "title": "Sophie Poultney | LinkedIn"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-15905bb8",
+        "title": "Sophie Poultney | LinkedIn"
+      },
+      {
+        "url": "https://www.buywomenbuilt.com/brands/smoosh",
+        "title": "Smoosh | Women-Founded Brand"
+      },
+      {
+        "url": "https://www.linkedin.com/company/smooshai",
+        "title": "Smoosh"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/rehrenberg_exclusive-how-college-photo-sharing-app-activity-7472694788811571200-ygpT",
+        "title": "Roger Ehrenberg's Post - LinkedIn"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/walker7_sports-innovation-lab-activity-7317864328362156033-19GV",
+        "title": "Sports Innovation Lab | Josh Walker | 15 comments"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/dataforseo_dataforseo-aioptimization-seo-activity-7396188263117389824-5DGZ",
+        "title": "How to uncover hidden queries for AI content optimization - LinkedIn"
+      },
+      {
+        "url": "https://www.linkedin.com/company/shmooz-ai",
+        "title": "Shmooz AI - LinkedIn"
+      },
+      {
+        "url": "https://play.google.com/store/apps/details?id=com.curiousmedia.smoosh&hl=en_AU",
+        "title": "Smoosh! \u2013 Apps on Google Play"
+      },
+      {
+        "url": "https://play.google.com/store/apps/details?id=com.curiousmedia.smoosh&hl=it",
+        "title": "Smoosh! - App su Google Play"
+      },
+      {
+        "url": "https://www.linkedin.com/in/janice-nam",
+        "title": "Janice Nam - Executive Assistant at LinkedIn"
+      },
+      {
+        "url": "https://www.linkedin.com/in/janice-nam-bb465b91",
+        "title": "Janice Nam | LinkedIn"
+      },
+      {
+        "url": "https://www.jobtwine.com/ai-avatar-recruiter",
+        "title": "AI Recruiter & Interviewer Platform | Automated Candidate Screening"
+      },
+      {
+        "url": "https://find-and-update.company-information.service.gov.uk/officers/ES8I0JvNb8FgBXCWH-Uvqctik5E/appointments",
+        "title": "Sophie Grace POULTNEY personal appointments"
+      },
+      {
+        "url": "https://djinni.co/jobs/714723-chief-technology-officer-cto-fan-subscription/",
+        "title": "Chief Technology Officer (CTO) \u2013 Fan Subscription Platform (Pre-Launch) at Next Influencer"
+      },
+      {
+        "url": "https://www.iimjobs.com/j/cofounderchief-technology-officer-influencer-marketing-startup-3-10-yrs-1675623",
+        "title": "Cofounder/Chief Technology Officer - Influencer Marketing Startup"
+      },
+      {
+        "url": "https://www.shine.com/jobs/chief-technology-officer-cto-co-founder/digitalrecruiter-app/17572600",
+        "title": "Chief Technology Officer (CTO) & Co-founder"
+      },
+      {
+        "url": "https://in.talent.com/view?id=616672559380569043",
+        "title": "Chief Technology Officer \u2013 Domnic Lewis \u2013 Job Chennai, TN"
+      }
+    ],
+    "findings": [
+      {
+        "url": "https://getlatka.com/companies/smoosh.app",
+        "title": "Smoosh AI Revenue, Valuation & Funding (2026)",
+        "summary": "We unify fragmented fan data, from merch and tickets to streams, socials, and gaming, into one AI-powered platform.\nBy bridging commerce, culture, and community, we\u2019re building the universal data layer for fandom, unlocking deeper connections, smarter insights, and billion-dollar opportunities across music, fashion, and entertainment.\n...\nSophie Poultney is listed as Founder / CEO at Smoosh AI.\n...\nWe do not have customer count information for Smoosh AI yet.\n...\nGetLatka has not confirmed a public revenue figure for Smoosh AI.\n...\nSmoosh AI was founded by Sophie Poultney.\n### Who is the CEO of Smoosh AI?\nThe CEO of Smoosh AI is Sophie Poultney.\n...\nSmoosh AI is headquartered in Los Angeles, California, United States."
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-b334212ba",
+        "title": "Sophie Poultney | LinkedIn",
+        "summary": "**Sophie Poultney**\n**Co-Founder**\n**Co\u2011Founder, Smoosh \u2013 Elevated Baby Skincare | Business Owner | Brand & Hospitality Experience**\nBirmingham, England, United Kingdom\n395 followers \u00b7 352 connections\n### About"
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=W6vdNo2tYKA",
+        "title": "Sophie Rain: The $43 Million AI Scandal Exposed",
+        "summary": "Sophie Rain just became the #1 earner in the world, but is it all a lie?\nWe\u2019re breaking down the leaked receipts and agency logs that suggest her $43 million empire is actually being run by a sophisticated AI \"Digital Twin.\"\nFrom the $2 million refund wave to the leaked prompts that show how fans were being manipulated, this is the reality behind the Blue Site\u2019s biggest star.\n...\n{ts:0} Sophie Rain is officially the highest earning creator on the blue site, but\n{ts:4} new evidence suggests the $43 million she reportedly brought in last year might be built on a digital lie.\n...\nAccording to financial records leaked on January\n{ts:92} 15th, 2026, Sophie's account isn't just a profile.\nIt is a corporate entity managed by a rotating team of 24-hour\n{ts:102} chatters and a customized artificial intelligence model.\nThis isn't just about efficiency.\nIt is about a\n{ts:108} multi-million dollar business model that views the audience as data points rather than people.\nWe have the internal logs,\n...\nThe log showed that the management team wasn't just\n{ts:223} using AI to help with grammar.\nThey had programmed a specific personality matrix titled the Florida girl.\nThis program\n{ts:231} was instructed to reference specific weather patterns in Miami and pretend to be tired from recent photooots that\n{ts:238} Sophie hadn't even attended.\nAccording to an unverified insider who spoke out on February 11th, the AI was so advanced\n{ts:246} it could analyze a fan's previous spending habits and tailor its emotional response to trigger a higher tip.\nIf a\n{ts:253} fan mentioned a recent promotion at work, the bot was allegedly programmed to offer a celebratory exclusive clip\n{ts:260} for a specific price point.\nAll without Sophie ever seeing the message.\nThis level of automated deception is what\n...\nThese were the so-called\n{ts:299} whales, the top 0.01% of spenders who dropped five figures on a single creator.\nPer the communications\n{ts:307} from early February, these high rollers claimed"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/sophie-poultney-b334212ba_this-past-month-has-shown-me-that-doing-things-activity-7201222040454897664-SPNZ",
+        "title": "This past month has shown me that doing things out of my usual day-to-day\u2026 | Sophie Poultney",
+        "summary": "Founder social media manager knocking out career-changing content for entrepreneurs & their businesses."
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-29177337",
+        "title": "Sophie Poultney | LinkedIn",
+        "summary": "**Sophie Poultney**\n**Primary/Secondary Education Professional**\nUnited Kingdom"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-749a17269",
+        "title": "Sophie Poultney | LinkedIn",
+        "summary": "**Sophie Poultney**\n**Assistant Bar Manager**\n**Assistant Bar Manager at COOKLEY SPORTS CLUB**\nKidderminster, England, United Kingdom"
+      },
+      {
+        "url": "https://www.linkedin.com/in/sophie-poultney-15905bb8",
+        "title": "Sophie Poultney | LinkedIn",
+        "summary": "**Sophie Poultney**\n**Playworker**\n**playworker at Bournemouth Collegiate school**\nBournemouth, England, United Kingdom\n### Experience"
+      },
+      {
+        "url": "https://www.buywomenbuilt.com/brands/smoosh",
+        "title": "Smoosh | Women-Founded Brand",
+        "summary": "Sophie and Victoria were friends first, then mothers and are now co\u2011founders of Smoosh, an elevated baby skincare brand specialising in sensitive skin.\n...\nFounder\nSophie Poultney and Victoria Georgiou"
+      },
+      {
+        "url": "https://www.linkedin.com/company/smooshai",
+        "title": "Smoosh",
+        "summary": "Smoosh | LinkedIn\n...\nWe unify fragmented fan data \u2014 from merch and tickets to streams, socials, and gaming \u2014 into one AI-powered platform.\nBy bridging commerce, culture, and community, we\u2019re building the universal data layer for fandom, unlocking deeper connections, smarter insights, and billion-dollar opportunities across music, fashion, and entertainment.\n- **Website**\nhttp://smoosh.app External link for Smoosh\n- **Industry**\n...\nLos Angeles, California\n...\nLos Angeles, California, US"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/rehrenberg_exclusive-how-college-photo-sharing-app-activity-7472694788811571200-ygpT",
+        "title": "Roger Ehrenberg's Post - LinkedIn",
+        "summary": "Exclusive: How college photo-sharing app Swsh became an AI-powered fan data business backed by Scooter Braun | Fortune | Roger Ehrenberg\n...\nYet much of the participation, content, and audience engagement generated at those events remains fragmented, difficult to measure, and largely inaccessible once the experience ends.\nswsh is here to help organizations turn live participation into owned content, first-party audience insights, and stronger communities."
+      },
+      {
+        "url": "https://www.linkedin.com/posts/walker7_sports-innovation-lab-activity-7317864328362156033-19GV",
+        "title": "Sports Innovation Lab | Josh Walker | 15 comments",
+        "summary": "The new Sports Innovation Lab is grounded in fan data.\nWe're learning from millions of fans by observing how they behave each day.\n...\nIntroducing the new Sports Innovation Lab: Access the data that makes sports passion personal, at scale.\nOur new website is live: https://lnkd.in/eAG7kFRn 1) Insights that let you know who your Fluid Fans are.\n2) Audiences that let you target the right Fluid Fan communities.\n3) Enrichment services that let you augment your own first party data.\nThree simple services.\nThree easy ways to ready your organization for the future of sport when AI drives even greater content production and even wider content distribution.\nSports Innovation Lab sportsilab.com"
+      },
+      {
+        "url": "https://www.linkedin.com/posts/dataforseo_dataforseo-aioptimization-seo-activity-7396188263117389824-5DGZ",
+        "title": "How to uncover hidden queries for AI content optimization - LinkedIn",
+        "summary": "To help you uncover those hidden queries, we\u2019ve built a new feature into the DataForSEO AI Optimization API \u2014 fan-out query extraction via the LLM Scraper endpoint."
+      },
+      {
+        "url": "https://www.linkedin.com/company/shmooz-ai",
+        "title": "Shmooz AI - LinkedIn",
+        "summary": "https://shmooz.ai/\nExternal link for Shmooz AI"
+      },
+      {
+        "url": "https://play.google.com/store/apps/details?id=com.curiousmedia.smoosh&hl=en_AU",
+        "title": "Smoosh! \u2013 Apps on Google Play",
+        "summary": "+1 208-461-5551"
+      },
+      {
+        "url": "https://play.google.com/store/apps/details?id=com.curiousmedia.smoosh&hl=it",
+        "title": "Smoosh! - App su Google Play",
+        "summary": "Indirizzo email per assistenza\ndevelopment@curiousmedia.com\n...\nsupport@curiousmedia.com\n1228 1st St S\nNampa, ID 83651\nUnited States\n+1 208-461-5551"
+      },
+      {
+        "url": "https://www.linkedin.com/in/janice-nam",
+        "title": "Janice Nam - Executive Assistant at LinkedIn",
+        "summary": "**Janice Nam**\n**Executive Assistant 2**\n**Executive Assistant at LinkedIn**\nSan Francisco Bay Area United States\n769 followers \u00b7 500+ connections\n...\nDetail oriented with a background in project management and executive support with a proven track record of thriving in ambiguity, driving operational efficiency, and achieving company objectives.\n...\n- **Executive Assistant 2**\n**LinkedIn**\nMarch 2021 - Present\nSan Francisco, California, United States\nExecutive Assistant to VP, Product and Sr. Director, Product."
+      },
+      {
+        "url": "https://www.linkedin.com/in/janice-nam-bb465b91",
+        "title": "Janice Nam | LinkedIn",
+        "summary": "**Janice Nam**\n**Resident Doctor**\n**Resident Physician**\nSeattle, Washington, United States\n68 followers \u00b7 66 connections\n...\nJuly 2023 - Present\n...\n**American Medical Association**"
+      },
+      {
+        "url": "https://www.jobtwine.com/ai-avatar-recruiter",
+        "title": "AI Recruiter & Interviewer Platform | Automated Candidate Screening",
+        "summary": "JayT is an AI recruiter and interviewer, built as an avatar that runs your first-round interviews live.\nIt saves up to 20 hours per hire and gets your round-two shortlist ready as soon as the interview ends."
+      },
+      {
+        "url": "https://find-and-update.company-information.service.gov.uk/officers/ES8I0JvNb8FgBXCWH-Uvqctik5E/appointments",
+        "title": "Sophie Grace POULTNEY personal appointments",
+        "summary": "## Total number of appointments 5\n- Date of birth\n- May 1989\n...\n- Company Director"
+      },
+      {
+        "url": "https://djinni.co/jobs/714723-chief-technology-officer-cto-fan-subscription/",
+        "title": "Chief Technology Officer (CTO) \u2013 Fan Subscription Platform (Pre-Launch) at Next Influencer",
+        "summary": "**Apply now or DM me to chat!**"
+      },
+      {
+        "url": "https://www.iimjobs.com/j/cofounderchief-technology-officer-influencer-marketing-startup-3-10-yrs-1675623",
+        "title": "Cofounder/Chief Technology Officer - Influencer Marketing Startup",
+        "summary": "- An Influencer marketing startup founded by professionals with VC funding and media background is inviting interest for Chief Technology Officer who would be responsible for the entire technological backbone, from defining the product's architecture to leveraging cutting-edge AI for data-driven insights and ensuring the platform can scale to handle global campaigns."
+      },
+      {
+        "url": "https://www.shine.com/jobs/chief-technology-officer-cto-co-founder/digitalrecruiter-app/17572600",
+        "title": "Chief Technology Officer (CTO) & Co-founder",
+        "summary": "You will be part of a team that is developing an enterprise-grade, AI-powered agentic platform for the recruitment industry."
+      },
+      {
+        "url": "https://in.talent.com/view?id=616672559380569043",
+        "title": "Chief Technology Officer \u2013 Domnic Lewis \u2013 Job Chennai, TN",
+        "summary": "We are seeking a Chief Technology Officer (CTO) to lead our technology strategy and execution with a strong focus on **AI and Data Science platforms **."
+      }
+    ],
+    "stats": {
+      "Engine": "Perplexity Agent",
+      "Preset": "pro-search",
+      "Queries": 19,
+      "URLs": 23,
+      "Rounds": 1,
+      "Cost USD": "$0.0437"
+    },
+    "total_cost_usd": 0.04367,
+    "response_id": "resp_cd3bbe42-d4f9-480d-b4a1-2318346e6da0"
+  }
+}

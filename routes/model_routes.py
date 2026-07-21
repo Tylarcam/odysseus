@@ -226,12 +226,20 @@ _PROVIDER_CURATED = {
         "claude-sonnet-4-5", "claude-haiku-3-5",
     ],
     "zai": [
-        "glm-5", "glm-5.1", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
+        "glm-5.2", "glm-5", "glm-5.1", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
         "glm-4.6", "glm-4.6v",
         "glm-4.5", "glm-4.5v", "glm-4.5-air", "glm-4.5-flash",
     ],
     "zai-coding": [
-        "glm-5.1", "glm-5v-turbo", "glm-5-turbo", "glm-4.7", "glm-4.5-air",
+        "glm-5.2", "glm-5.1", "glm-5v-turbo", "glm-5-turbo", "glm-4.7", "glm-4.5-air",
+    ],
+    "ollama-cloud": [
+        "glm-5.2:cloud",
+        "gpt-oss:120b", "gpt-oss:20b",
+        "qwen3:235b", "qwen3:32b",
+        "deepseek-v3.1:671b", "deepseek-r1:671b",
+        "llama3.3:70b", "llama4:scout",
+        "minimax-m2.5:cloud", "kimi-k2.5:cloud",
     ],
     "deepseek": [
         "deepseek-chat", "deepseek-reasoner",
@@ -246,6 +254,13 @@ _PROVIDER_CURATED = {
     ],
     "mistral": [
         "mistral-large-latest", "mistral-medium-latest", "mistral-small-latest",
+    ],
+    "minimax": [
+        "MiniMax-M3",
+        "MiniMax-M2.7", "MiniMax-M2.7-highspeed",
+        "MiniMax-M2.5", "MiniMax-M2.5-highspeed",
+        "MiniMax-M2.1", "MiniMax-M2.1-highspeed",
+        "MiniMax-M2",
     ],
     "together": [
         "meta-llama/Llama-4-Scout-17B-16E-Instruct",
@@ -265,6 +280,17 @@ _PROVIDER_CURATED = {
     "xai": [
         "grok-4.3", "grok-4", "grok-4-fast", "grok-3", "grok-3-fast",
     ],
+    "cloudflare": [
+        "@cf/zai-org/glm-5.2",
+        "@cf/meta/llama-3-8b-instruct",
+        "@cf/meta/llama-3.1-8b-instruct",
+        "@cf/meta/llama-3.3-70b-instruct",
+        "@cf/openai/gpt-oss-120b",
+        "@cf/openai/gpt-oss-20b",
+        "@cf/qwen/qwen3-30b-a3b",
+        "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+        "@cf/mistral/mistral-small-3.1-24b-instruct",
+    ],
 }
 
 # Map hostnames → curated-list keys for providers whose _detect_provider()
@@ -278,6 +304,9 @@ _HOST_TO_CURATED = (
     ("deepseek.com", "deepseek"),
     ("groq.com", "groq"),
     ("mistral.ai", "mistral"),
+    ("minimax.io", "minimax"),
+    ("minimaxi.com", "minimax"),
+    ("minimax.chat", "minimax"),
     ("together.xyz", "together"),
     ("together.ai", "together"),
     ("fireworks.ai", "fireworks"),
@@ -285,7 +314,8 @@ _HOST_TO_CURATED = (
     ("x.ai", "xai"),
     ("nvidia.com", "nvidia"),
     ("openrouter.ai", "openrouter"),
-    ("ollama.com", "ollama"),
+    ("ollama.com", "ollama-cloud"),
+    ("cloudflare.com", "cloudflare"),
 )
 
 
@@ -556,6 +586,67 @@ def _safe_build_headers(api_key: Optional[str], base_url: str) -> dict:
         return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
+def _is_cloudflare_workers_ai(base_url: str) -> bool:
+    try:
+        from src.endpoint_resolver import is_cloudflare_workers_ai_base
+        return is_cloudflare_workers_ai_base(base_url)
+    except Exception:
+        return False
+
+
+def _cloudflare_curated_models() -> List[str]:
+    return list(_PROVIDER_CURATED.get("cloudflare") or [])
+
+
+def _cloudflare_workers_ai_ping(
+    base_url: str,
+    api_key: Optional[str],
+    timeout: float = 15.0,
+    model: str = "@cf/zai-org/glm-5.2",
+) -> Dict[str, Any]:
+    """Workers AI has no GET /v1/models — validate with a tiny chat completion."""
+    if not api_key:
+        return {"reachable": False, "status_code": None, "error": "API key required"}
+    from src.endpoint_resolver import resolve_url
+    base = resolve_url(_normalize_base(base_url))
+    headers = _safe_build_headers(api_key, base)
+    headers["Content-Type"] = "application/json"
+    chat_url = build_chat_url(base)
+    try:
+        r = httpx.post(
+            chat_url,
+            headers=headers,
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "OK"}],
+                "max_tokens": 5,
+            },
+            timeout=max(timeout, 15),
+            verify=llm_verify(),
+        )
+        if r.is_success:
+            return {"reachable": True, "status_code": r.status_code, "error": None}
+        if r.status_code in (401, 403):
+            return {
+                "reachable": False,
+                "status_code": r.status_code,
+                "error": f"HTTP {r.status_code} — check Workers AI API token",
+            }
+        last_error = f"HTTP {r.status_code}"
+        try:
+            body = r.json()
+            err = body.get("error") or body.get("errors")
+            if isinstance(err, dict) and err.get("message"):
+                last_error = str(err["message"])[:120]
+            elif isinstance(err, list) and err and isinstance(err[0], dict):
+                last_error = str(err[0].get("message") or err[0])[:120]
+        except Exception:
+            pass
+        return {"reachable": False, "status_code": r.status_code, "error": last_error}
+    except Exception as e:
+        return {"reachable": False, "status_code": None, "error": str(e)[:120]}
+
+
 def _is_discovery_only_provider(provider: str) -> bool:
     return provider == "chatgpt-subscription"
 
@@ -617,6 +708,10 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
         latency = round((_time.time() - t0) * 1000)
         if r.is_success:
             return {"status": "ok", "latency_ms": latency}
+        # Rate limits during a bulk probe are not evidence the model is broken —
+        # hiding every model on a 429 wave is how endpoints end up at 0/N enabled.
+        if r.status_code == 429:
+            return {"status": "skip", "latency_ms": latency, "error": "HTTP 429 rate limited"}
         else:
             # Extract error detail from response body
             error_msg = f"HTTP {r.status_code}"
@@ -720,6 +815,18 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
                 return []
             logger.warning(f"Anthropic /v1/models failed, using hardcoded list: {e}")
         return list(ANTHROPIC_MODELS)
+    if _is_cloudflare_workers_ai(base):
+        models = _cloudflare_curated_models()
+        if api_key:
+            ping = _cloudflare_workers_ai_ping(base, api_key, timeout=max(timeout, 15))
+            if not ping.get("reachable"):
+                logger.warning(
+                    "Cloudflare Workers AI probe failed for %s: %s",
+                    base,
+                    ping.get("error"),
+                )
+                return []
+        return [m for m in models if _is_chat_model(m)]
     url = _safe_build_models_url(base)
     headers = _safe_build_headers(api_key, base)
     try:
@@ -732,25 +839,29 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         if not models:
             models = [m.get("name") or m.get("model") for m in (data.get("models") or []) if m.get("name") or m.get("model")]
         if models:
-            # Z.AI coding plan omits some working models from /models;
-            # append curated-only entries for that endpoint only.
-            if _host_match(base, "z.ai") and "/api/coding" in (urlparse(base).path or ""):
+            # Z.AI coding plan and Ollama Cloud omit brand-new models from /tags
+            # briefly; append curated-only entries for those endpoints only.
+            _append_curated = (
+                (_host_match(base, "z.ai") and "/api/coding" in (urlparse(base).path or ""))
+                or _host_match(base, "ollama.com")
+            )
+            if _append_curated:
                 _ck = _match_provider_curated(base, None)
                 for _e in _PROVIDER_CURATED.get(_ck, []):
                     if _e not in set(models) and not any(m.startswith(_e) for m in models):
                         models.append(_e)
             return [m for m in models if _is_chat_model(m)]
     except httpx.HTTPStatusError as e:
+        status = e.response.status_code if e.response is not None else "unknown"
         if api_key:
-            status = e.response.status_code if e.response is not None else "unknown"
             logger.warning(f"Failed to probe {url} with API key: HTTP {status}")
-            return []
-        logger.warning(f"Failed to probe {url}: {e}")
+        else:
+            logger.warning(f"Failed to probe {url}: {e}")
     except Exception as e:
         if api_key:
             logger.warning(f"Failed to probe {url} with API key: {e}")
-            return []
-        logger.warning(f"Failed to probe {url}: {e}")
+        else:
+            logger.warning(f"Failed to probe {url}: {e}")
 
     # Older Ollama builds and some proxies expose native /api/tags even when
     # the OpenAI-compatible /v1/models path is unavailable.
@@ -763,6 +874,11 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
             data = r.json()
             models = [m.get("name") or m.get("model") for m in (data.get("models") or []) if m.get("name") or m.get("model")]
             if models:
+                if _host_match(base, "ollama.com"):
+                    _ck = _match_provider_curated(base, None)
+                    for _e in _PROVIDER_CURATED.get(_ck, []):
+                        if _e not in set(models) and not any(m.startswith(_e) for m in models):
+                            models.append(_e)
                 return [m for m in models if _is_chat_model(m)]
     except Exception as e:
         logger.debug(f"Ollama /api/tags probe failed for {base}: {e}")
@@ -779,6 +895,10 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
     """Reachability probe that does not require installed/listed models."""
     from src.endpoint_resolver import resolve_url
     base = resolve_url(_normalize_base(base_url))
+
+    if _is_cloudflare_workers_ai(base):
+        return _cloudflare_workers_ai_ping(base, api_key, timeout=max(timeout, 15))
+
     headers = _safe_build_headers(api_key, base)
 
     # Ollama exposes /v1/models (OpenAI-compatible) AND native /api/version,
@@ -1777,7 +1897,10 @@ def setup_model_routes(model_discovery):
         configured_timeout = _parse_positive_int(model_refresh_timeout, minimum=1, maximum=60)
         probe_timeout = _explicit_model_list_timeout(base_url, requested_kind, configured_timeout)
         models = _probe_endpoint(base_url, api_key.strip() or None, timeout=probe_timeout)
-        ping = {"reachable": True, "error": None} if models else _ping_endpoint(base_url, api_key.strip() or None, timeout=min(probe_timeout, 2.0))
+        ping_timeout = max(probe_timeout, 20) if _is_cloudflare_workers_ai(base_url) else min(probe_timeout, 2.0)
+        ping = {"reachable": True, "error": None} if models else _ping_endpoint(
+            base_url, api_key.strip() or None, timeout=ping_timeout
+        )
         return {
             "base_url": base_url,
             "online": bool(models) or bool(ping.get("reachable")),
@@ -1811,6 +1934,7 @@ def setup_model_routes(model_discovery):
             yield f"data: {json.dumps({'type': 'probe_start', 'endpoint': ep_data['name'], 'model_count': len(chat_models), 'skipped': skipped})}\n\n"
             failed = []
             ok_count = 0
+            skipped = 0
             for mid in chat_models:
                 result = _probe_single_model(base, ep_data["api_key"], mid, timeout=8)
                 result["model"] = mid
@@ -1818,6 +1942,8 @@ def setup_model_routes(model_discovery):
                 result["endpoint"] = ep_data["name"]
                 if result["status"] == "ok":
                     ok_count += 1
+                elif result["status"] == "skip":
+                    skipped += 1
                 else:
                     failed.append(mid)
                 yield f"data: {json.dumps(result)}\n\n"
@@ -1827,7 +1953,17 @@ def setup_model_routes(model_discovery):
             try:
                 ep_obj = db2.query(ModelEndpoint).filter(ModelEndpoint.id == ep_id).first()
                 if ep_obj:
-                    ep_obj.hidden_models = json.dumps(failed) if failed else None
+                    # If every probe failed or was skipped (common when the
+                    # provider is rate-limiting a bulk run), do not replace the
+                    # admin's visibility with "hide everything".
+                    if ok_count > 0 or (failed and len(failed) < len(chat_models)):
+                        ep_obj.hidden_models = json.dumps(failed) if failed else None
+                    elif failed:
+                        logger.warning(
+                            "Skipping hidden_models update for %s: all %d probes failed "
+                            "(%d skipped) — keeping previous visibility",
+                            ep_id, len(failed), skipped,
+                        )
                     if all_models:
                         ep_obj.cached_models = json.dumps(all_models)
                     db2.commit()

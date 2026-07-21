@@ -1,0 +1,28 @@
+{
+  "name": "realtime_happy_turn",
+  "description": "Hands-free realtime turn: speak, pause, agent audio out",
+  "steps": [
+    ["turn.start"],
+    ["realtime.connect.start", "mic.start"],
+    ["speech.start", "input_audio_buffer.speech_started"],
+    ["speech.stop", "input_audio_buffer.speech_stopped"],
+    ["turn.committed", "input_audio_buffer.committed"],
+    ["response.created"],
+    ["first_audio_out", "response.first_audio_out"],
+    ["response.done"]
+  ],
+  "forbidden_after": {
+    "response.done": ["loop.stuck", "turn.failed", "realtime.reconnect.exhausted"]
+  },
+  "sample_events": [
+    {"event": "turn.start", "elapsedMs": 0},
+    {"event": "realtime.connect.start", "elapsedMs": 5},
+    {"event": "mic.start", "elapsedMs": 120},
+    {"event": "speech.start", "elapsedMs": 800},
+    {"event": "speech.stop", "elapsedMs": 3200},
+    {"event": "turn.committed", "elapsedMs": 3350},
+    {"event": "response.created", "elapsedMs": 3600},
+    {"event": "first_audio_out", "elapsedMs": 4100},
+    {"event": "response.done", "elapsedMs": 9200}
+  ]
+}

@@ -557,6 +557,8 @@ app.include_router(setup_admin_wipe_routes(session_manager))
 from routes.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)
 app.include_router(memory_router)
+from routes.agentmemory_routes import setup_agentmemory_routes
+app.include_router(setup_agentmemory_routes())
 from routes.skills_routes import setup_skills_routes
 app.include_router(setup_skills_routes(skills_manager))
 
@@ -572,7 +574,7 @@ app.include_router(setup_chat_routes(
 
 # Research (background deep-research tasks)
 from routes.research_routes import setup_research_routes
-app.include_router(setup_research_routes(research_handler, session_manager=session_manager))
+app.include_router(setup_research_routes(research_handler, session_manager=session_manager, tts_service=tts_service))
 
 # History
 from routes.history_routes import setup_history_routes
@@ -589,6 +591,10 @@ app.include_router(setup_preset_routes(preset_manager))
 # Diagnostics
 from routes.diagnostics_routes import setup_diagnostics_routes
 app.include_router(setup_diagnostics_routes(rag_manager, rag_available, research_handler, memory_vector))
+
+# Video transcription (YouTube captions -> Aether local server waterfall)
+from routes.transcribe_routes import setup_transcribe_routes
+app.include_router(setup_transcribe_routes())
 
 # Cleanup
 from routes.cleanup_routes import setup_cleanup_routes
@@ -624,6 +630,19 @@ stt_service = get_stt_service()
 from routes.stt_routes import setup_stt_routes
 app.include_router(setup_stt_routes(stt_service))
 logger.info("STT service initialized (provider managed via settings)")
+
+from routes.stt_stream_routes import setup_stt_stream_routes
+app.include_router(setup_stt_stream_routes(stt_service))
+
+# Realtime voice (WebRTC gateway)
+from services.voice.realtime_gateway import get_realtime_voice_gateway
+from routes.voice_routes import setup_voice_routes
+realtime_voice_gateway = get_realtime_voice_gateway()
+app.include_router(setup_voice_routes(realtime_voice_gateway))
+if realtime_voice_gateway.available:
+    logger.info("Realtime voice gateway enabled (OPENAI_API_KEY set)")
+else:
+    logger.info("Realtime voice gateway disabled (set OPENAI_API_KEY to enable)")
 
 # Documents (artifacts/canvas)
 from routes.document_routes import setup_document_routes
@@ -716,6 +735,24 @@ logger.info("Webhook & API token routes initialized")
 # Notes (Google Keep-style notes/todos)
 from routes.note_routes import setup_note_routes
 app.include_router(setup_note_routes(task_scheduler))
+
+from routes.home_routes import setup_home_routes
+app.include_router(setup_home_routes())
+
+from routes.clicky_routes import setup_clicky_routes
+app.include_router(setup_clicky_routes())
+
+from routes.operator_routes import setup_operator_routes
+app.include_router(setup_operator_routes())
+
+from routes.job_routes import setup_job_routes
+app.include_router(setup_job_routes())
+
+from routes.handoff_relay_routes import router as handoff_relay_router
+from src import handoff_relay as handoff_relay_module
+handoff_relay_module.set_session_manager(session_manager)
+handoff_relay_module.set_task_scheduler(task_scheduler)
+app.include_router(handoff_relay_router)
 
 # Saved prompts (Library → Prompts tab)
 from routes.prompt_routes import setup_prompt_routes

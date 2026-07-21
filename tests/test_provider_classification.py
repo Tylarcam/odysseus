@@ -87,6 +87,7 @@ class TestProviderLabel:
         ("https://api.groq.com/openai/v1", "Groq"),
         ("https://integrate.api.nvidia.com/v1", "NVIDIA"),
         ("https://api.mistral.ai/v1", "Mistral"),
+        ("https://api.minimax.io/v1", "MiniMax"),
         ("https://api.deepseek.com", "DeepSeek"),
         ("https://generativelanguage.googleapis.com/v1beta/openai", "Google"),
         ("https://api.together.xyz/v1", "Together"),

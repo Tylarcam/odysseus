@@ -20,10 +20,14 @@ from urllib import error, parse, request
 from services.operator.core import (
     CAP_DESKTOP_ACTION,
     clicky_worker_url,
+    consent_required_envelope,
     degraded_envelope,
     envelope,
+    grant_consent,
+    has_consent,
     record_audit,
     require_capability,
+    reset_consents,  # noqa: F401  (re-export for tests/back-compat)
     screenpipe_url,
 )
 
@@ -34,41 +38,6 @@ AUDIO_ACTIONS = {"speak", "listen"}
 MUTATING_ACTIONS = POINTER_ACTIONS | AUDIO_ACTIONS
 REQUEST_TIMEOUT = 15.0
 TARGET_LOOKBACK_MINUTES = 2
-
-# Per-session consent (process-local; the agent loop runs in this process).
-_consents: Dict[str, float] = {}
-CONSENT_TTL_SECONDS = 12 * 3600  # safety cap; sessions rarely live longer
-
-
-def _consent_key(session_id: Optional[str]) -> str:
-    return session_id or "_no_session"
-
-
-def has_consent(session_id: Optional[str]) -> bool:
-    granted_at = _consents.get(_consent_key(session_id))
-    return bool(granted_at and (time.time() - granted_at) < CONSENT_TTL_SECONDS)
-
-
-def grant_consent(session_id: Optional[str]) -> None:
-    _consents[_consent_key(session_id)] = time.time()
-
-
-def reset_consents() -> None:
-    """Test hook."""
-    _consents.clear()
-
-
-def _consent_required(action: str, session_id: Optional[str]) -> Dict[str, Any]:
-    record_audit(CAP_DESKTOP_ACTION, action, session_id=session_id, result="denied")
-    return envelope(
-        CAP_DESKTOP_ACTION, False, reason="consent_required",
-        hint=(
-            "Desktop control needs the user's approval for this session. "
-            "Ask with the ask_user tool (e.g. 'Allow me to control the mouse "
-            "for this session?') and retry with user_approved=true after an "
-            "explicit yes."
-        ),
-    )
 
 
 def _post_json(url: str, payload: Dict[str, Any], timeout: float = REQUEST_TIMEOUT) -> Tuple[int, Dict[str, Any]]:
@@ -236,7 +205,8 @@ def desktop_act(args: Dict[str, Any], session_id: Optional[str] = None) -> Dict[
     if args.get("user_approved") is True:
         grant_consent(session_id)
     if not has_consent(session_id):
-        return _consent_required(action, session_id)
+        record_audit(CAP_DESKTOP_ACTION, action, session_id=session_id, result="denied")
+        return consent_required_envelope(CAP_DESKTOP_ACTION)
 
     if action == "listen":
         return _do_listen(session_id)

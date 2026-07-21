@@ -6,6 +6,7 @@ Consolidates the 4+ copies of normalize_base / resolve_endpoint logic into one p
 
 import json
 import logging
+import re
 import socket
 import subprocess
 from typing import Optional, Tuple, Dict
@@ -152,6 +153,7 @@ def resolve_url(url: str) -> str:
 def normalize_base(url: str) -> str:
     """Strip known API path suffixes from a base URL."""
     url = (url or "").strip().rstrip("/")
+    url = _normalize_cloudflare_workers_ai_base(url)
     for suffix in ["/models", "/chat/completions", "/completions", "/v1/messages", "/responses"]:
         if url.endswith(suffix):
             url = url[: -len(suffix)].rstrip("/")
@@ -159,6 +161,50 @@ def normalize_base(url: str) -> str:
         if url.endswith("/api" + suffix):
             url = url[: -len(suffix)].rstrip("/")
     return url
+
+
+def _normalize_cloudflare_workers_ai_base(url: str) -> str:
+    """Cloudflare dashboard REST URLs use /ai/run; Odysseus needs OpenAI /ai/v1."""
+    raw = (url or "").strip().rstrip("/")
+    if not raw:
+        return url
+
+    # Path-only paste (narrow input / dashboard copy): "v4/accounts/{id}/ai/v1"
+    # becomes http://v4/... in the browser and DNS fails with "Name or service not known".
+    acct_match = re.search(r"(?i)accounts/([^/]+)/ai", raw)
+    if acct_match and not _host_match(raw, "cloudflare.com"):
+        try:
+            probe = raw if re.match(r"^https?://", raw, re.I) else f"http://{raw.lstrip('/')}"
+            parsed = urlparse(probe)
+            host = (parsed.hostname or "").lower()
+        except Exception:
+            host = ""
+        if host in ("v4", "") or raw.lstrip("/").lower().startswith("v4/"):
+            account_id = acct_match.group(1)
+            return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+
+    if not _host_match(raw, "cloudflare.com"):
+        return url
+
+    parsed = urlparse(raw)
+    path = (parsed.path or "").rstrip("/")
+    run_match = re.match(
+        r"(?i)^(/client/v4/accounts/[^/]+/ai)/run(?:/.*)?$",
+        path,
+    )
+    if run_match:
+        return urlunparse(parsed._replace(path=f"{run_match.group(1)}/v1"))
+    if re.search(r"(?i)/accounts/[^/]+/ai$", path):
+        return urlunparse(parsed._replace(path=f"{path}/v1"))
+    return url
+
+
+def is_cloudflare_workers_ai_base(base: str) -> bool:
+    """True for Cloudflare Workers AI OpenAI-compat bases (.../accounts/{id}/ai/v1)."""
+    base = normalize_base((base or "").strip())
+    if not _host_match(base, "cloudflare.com"):
+        return False
+    return "/ai/" in (urlparse(base).path or "")
 
 
 def _anthropic_api_root(base: str) -> str:
@@ -191,6 +237,8 @@ def build_models_url(base: str) -> Optional[str]:
     if provider == "ollama":
         return _ollama_api_root(base) + "/tags"
     if provider == "chatgpt-subscription":
+        return None
+    if is_cloudflare_workers_ai_base(base):
         return None
     return base + "/models"
 

@@ -129,4 +129,24 @@ def test_delete_rejects_cross_owner_without_unlinking_report(tmp_path, monkeypat
 
     assert exc.value.status_code == 404
     assert path.exists()
+
+
+def test_audio_brief_status_rejects_cross_owner(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data" / "deep_research"
+    _write_research(
+        data_dir,
+        "bob-report",
+        owner="bob",
+        status="done",
+        audio_brief={"status": "ready", "chunk_count": 1},
+    )
+
+    router = setup_research_routes(_research_handler())
+    target = _route(router, "/api/research/{session_id}/audio-brief/status", "GET")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(target(session_id="bob-report", request=_request("alice")))
+
+    assert exc.value.status_code == 404
     assert json.loads(path.read_text(encoding="utf-8"))["result"] == "bob secret"

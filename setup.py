@@ -148,9 +148,14 @@ def create_env():
         return
     if os.path.exists(example_path):
         import shutil
-        shutil.copy2(example_path, env_path)
-        print("  [ok] .env created from .env.example")
-        print("        ** Edit .env with your LLM host and API keys **")
+        try:
+            shutil.copy2(example_path, env_path)
+            print("  [ok] .env created from .env.example")
+            print("        ** Edit .env with your LLM host and API keys **")
+        except OSError as exc:
+            # Docker image filesystem is often read-only for non-root; env is
+            # injected via compose. Don't crash startup over a missing write.
+            print(f"  [skip] could not write .env ({exc})")
     else:
         print("  [warn] .env.example not found — create .env manually")
 

@@ -37,6 +37,16 @@ def test_note_todo_and_reminder_actions_promote_to_agent():
     assert message_needs_tools("set a reminder to call Pat at 4pm")
 
 
+def test_todo_list_read_requests_promote_to_agent():
+    assert message_needs_tools("list my todos")
+    assert message_needs_tools("show my todo list")
+    assert message_needs_tools("what's on my todo list")
+    assert message_needs_tools("Can you analyze my todos and categorize them?")
+    intent = classify_tool_intent("list my todos")
+    assert intent.needs_tools
+    assert intent.category == "notes"
+
+
 def test_email_and_ui_actions_promote_to_agent():
     assert message_needs_tools("reply to that email")
     assert message_needs_tools("mark those emails as read")

@@ -74,6 +74,13 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "list_cookbook_servers",
              # Other tools the agent reaches for that were also missing.
              "edit_image", "trigger_research", "manage_research",
+             "transcribe_video",
+             # Operator perception/recall (Screenpipe + PixelRAG) + SpecTracer
+             # + consent-gated desktop control (Clicky) + browser control (CDP)
+             # + multi-provider research fan-out
+             "screen_look", "screen_recall", "spec_trace", "desktop_act", "browser_act",
+             "operator_research",
+             "process_job_application",
              # Generic loopback to any UI-button endpoint (cookbook,
              # gallery, email folders, etc.) — agent uses this when
              # there's no named tool wrapper for the action.

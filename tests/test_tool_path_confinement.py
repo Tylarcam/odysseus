@@ -196,6 +196,34 @@ def test_extra_root_still_blocks_sensitive(tmp_path):
             _resolve_tool_path("~/.ssh/authorized_keys")
 
 
+def test_relative_path_resolves_under_data_dir():
+    """Relative paths anchor to DATA_DIR, not process CWD."""
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    target = os.path.join(DATA_DIR, "MemPalace", "sprint", "file.md")
+    resolved = _resolve_tool_path("MemPalace/sprint/file.md")
+    assert resolved == os.path.realpath(target)
+
+
+def test_docker_data_prefix_remapped_to_data_dir():
+    """Hardcoded /app/data/... paths map to the configured DATA_DIR."""
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    target = os.path.join(DATA_DIR, "MemPalace", "sprint", "file.md")
+    resolved = _resolve_tool_path("/app/data/MemPalace/sprint/file.md")
+    assert resolved == os.path.realpath(target)
+
+
+def test_extra_root_docker_prefix_remapped(tmp_path):
+    """tool_path_extra_roots entries using /app/data/... resolve locally."""
+    from src.tool_execution import _resolve_tool_path
+    from src.constants import DATA_DIR
+    target = os.path.join(DATA_DIR, "MemPalace", "sprint", "file.md")
+    with patch("src.settings.get_setting", return_value=["/app/data/MemPalace/sprint"]):
+        resolved = _resolve_tool_path("/app/data/MemPalace/sprint/file.md")
+    assert resolved == os.path.realpath(target)
+
+
 # ── Integration: dispatch-level tests ────────────────────────────────
 
 @pytest.mark.asyncio
@@ -280,3 +308,42 @@ async def test_write_file_dispatch_blocks_cron(monkeypatch):
     )
     assert "outside the allowed roots" in (result.get("error") or "")
     assert result.get("exit_code") == 1
+
+
+@pytest.mark.asyncio
+async def test_write_file_dispatch_allows_data_subdir(monkeypatch):
+    """End-to-end: write_file accepts /app/data/... and relative data paths."""
+    auth_mod = sys.modules.get("core.auth")
+    if auth_mod is None:
+        import core.auth as _real_auth
+        auth_mod = _real_auth
+
+    class _AdminAuth:
+        is_configured = True
+        def is_admin(self, username):
+            return True
+
+    monkeypatch.setattr(auth_mod, "AuthManager", lambda: _AdminAuth())
+    monkeypatch.setattr(
+        "src.tool_execution.owner_is_admin_or_single_user",
+        lambda owner: True,
+    )
+
+    from src.constants import DATA_DIR
+    from src.tool_execution import execute_tool_block
+    target = os.path.join(DATA_DIR, "MemPalace", "sprint", "handoff-test.txt")
+    try:
+        for raw_path in (
+            "/app/data/MemPalace/sprint/handoff-test.txt",
+            "MemPalace/sprint/handoff-test.txt",
+        ):
+            desc, result = await execute_tool_block(
+                _make_block("write_file", f"{raw_path}\nhello from handoff test\n"),
+                owner="admin-user",
+            )
+            assert result.get("exit_code") == 0, result
+            assert os.path.isfile(target)
+            assert "hello from handoff test" in open(target, encoding="utf-8").read()
+    finally:
+        if os.path.isfile(target):
+            os.unlink(target)

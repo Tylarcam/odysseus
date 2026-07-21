@@ -2,7 +2,7 @@
 
 import os
 from typing import Optional
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, WebSocket
 
 
 def get_current_user(request: Request) -> Optional[str]:
@@ -135,6 +135,71 @@ def require_privilege(request: Request, key: str) -> str:
     if not privs.get(key, True):
         raise HTTPException(403, f"Your account is not allowed to {key.replace('_', ' ')}.")
     return user
+
+
+def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
+    """WebSocket counterpart to require_authenticated_request.
+
+    Starlette's ``BaseHTTPMiddleware`` (AuthMiddleware in app.py) never runs
+    for WebSocket connections, so ``websocket.state.current_user`` is never
+    populated the way it is for HTTP requests — each WS route must check auth
+    itself. Mirrors the cookie/bearer-token checks in app.py's AuthMiddleware
+    but returns None instead of redirecting/raising HTTPException, since the
+    caller must close the socket with a WS close code, not an HTTP response.
+
+    Returns the resolved username ("" in single-user / anonymous / auth-off
+    modes), or None if the connection should be rejected.
+    """
+    auth_manager = getattr(websocket.app.state, "auth_manager", None)
+    if auth_manager is None:
+        # Auth disabled entirely (AUTH_ENABLED=false at startup — no
+        # auth_manager was attached to app.state at all).
+        return ""
+
+    if _auth_disabled():
+        return ""
+
+    # Bearer token (API clients) — same "ody_" scheme as HTTP.
+    auth_header = websocket.headers.get("authorization", "")
+    if auth_header.startswith("Bearer ody_"):
+        raw_token = auth_header[7:]
+        if len(raw_token) < 12 or len(raw_token) > 100:
+            return None
+        try:
+            from core.database import ApiToken, SessionLocal
+            import bcrypt
+
+            db = SessionLocal()
+            try:
+                prefix = raw_token[:8]
+                candidates = (
+                    db.query(ApiToken)
+                    .filter(ApiToken.token_prefix == prefix, ApiToken.is_active == True)  # noqa: E712
+                    .all()
+                )
+                for tok in candidates:
+                    if bcrypt.checkpw(raw_token.encode(), tok.token_hash.encode()):
+                        return tok.owner or ""
+            finally:
+                db.close()
+        except Exception:
+            return None
+        return None
+
+    # Cookie-based session — same cookie name as routes/auth_routes.py.
+    from routes.auth_routes import SESSION_COOKIE
+
+    token = websocket.cookies.get(SESSION_COOKIE)
+    if auth_manager.validate_token(token):
+        return auth_manager.get_username_for_token(token) or ""
+
+    if not getattr(auth_manager, "is_configured", False):
+        client = websocket.client
+        host = (client.host if client else "") or ""
+        if host in ("127.0.0.1", "::1", "localhost"):
+            return ""
+
+    return None
 
 
 def owner_filter(query, model_cls, user: str, *, include_shared: bool = True):

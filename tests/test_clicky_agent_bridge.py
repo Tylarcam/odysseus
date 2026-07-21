@@ -66,6 +66,44 @@ def test_non_data_and_bad_json_swallowed():
     assert cc.translate_agent_chunk("data: not-json\n\n") is None
 
 
+# ── image stripping (agent mode reads the screen via screen_look) ──
+
+def test_strip_images_removes_image_blocks():
+    msgs = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "click submit"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+        ]},
+        {"role": "assistant", "content": "ok"},
+    ]
+    out = cc._strip_images(msgs)
+    assert out[0]["content"] == "click submit"
+    assert out[1]["content"] == "ok"
+
+
+def test_strip_images_breadcrumb_when_image_only():
+    out = cc._strip_images([{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": "x"}},
+    ]}])
+    assert "screen_look" in out[0]["content"]
+
+
+def test_stream_agent_chat_strips_images(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("src.agent_loop.stream_agent_loop", _fake_loop_factory(["data: [DONE]\n\n"], captured))
+    monkeypatch.setattr(cc, "resolve_clicky_endpoint", lambda: ("http://x/v1", "m", None))
+
+    body = {"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "what's on my screen"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+    ]}], "max_tokens": 256}
+    asyncio.run(_collect(cc.stream_agent_chat(body)))
+
+    sent = captured["args"][2]  # messages positional arg
+    assert all(isinstance(m["content"], str) for m in sent)
+    assert not any("image_url" in str(m["content"]) for m in sent)
+
+
 # ── stream_agent_chat (integration, mocked loop) ──
 
 def _fake_loop_factory(chunks, captured):

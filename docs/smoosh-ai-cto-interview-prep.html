@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CTO Interview Prep — Smoosh AI / Janice Nam</title>
+  <meta name="description" content="Live interview prep — Tylar Campbell × Smoosh AI CTO — Janice Nam." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0f1724; --ink-soft: #3a4556; --muted: #6b7789;
+      --paper: #eef2f6; --surface: #f7f9fb; --white: #ffffff; --line: #d5dde8;
+      --teal: #0f766e; --teal-bright: #14b8a6; --teal-wash: rgba(15, 118, 110, 0.08);
+      --amber: #b45309; --amber-wash: rgba(180, 83, 9, 0.1);
+      --blue: #1e40af; --blue-wash: rgba(30, 64, 175, 0.08);
+      --radius: 10px;
+      --shadow: 0 1px 0 rgba(15, 23, 36, 0.04), 0 12px 32px rgba(15, 23, 36, 0.06);
+      --font-display: "Syne", system-ui, sans-serif;
+      --font-body: "IBM Plex Sans", system-ui, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --max: 1120px; --rail: 220px;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+    body {
+      margin: 0; font-family: var(--font-body); font-size: 16px; line-height: 1.55; color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, rgba(20, 184, 166, 0.12), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(30, 64, 175, 0.08), transparent 50%),
+        linear-gradient(180deg, #e8eef4 0%, var(--paper) 28%, #e9eef3 100%);
+      min-height: 100vh;
+    }
+    a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    .shell {
+      max-width: var(--max); margin: 0 auto; padding: 28px 20px 80px;
+      display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); gap: 36px; align-items: start;
+    }
+    .agenda {
+      position: sticky; top: 20px; background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+    }
+    .agenda-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #fafcfd, var(--surface)); }
+    .agenda-head .kicker { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .agenda-head h2 { margin: 4px 0 0; font-family: var(--font-display); font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+    .agenda-slots { list-style: none; margin: 0; padding: 6px 0; }
+    .agenda-slots a {
+      display: grid; grid-template-columns: 42px 1fr; gap: 8px; padding: 9px 12px;
+      text-decoration: none; color: var(--ink-soft); border-left: 3px solid transparent;
+    }
+    .agenda-slots a:hover, .agenda-slots a.active { background: var(--teal-wash); border-left-color: var(--teal); color: var(--ink); }
+    .agenda-slots .slot-time { font-family: var(--font-mono); font-size: 10px; color: var(--muted); padding-top: 2px; }
+    .agenda-slots .slot-label { font-size: 12.5px; font-weight: 500; line-height: 1.3; }
+    .live-banner {
+      margin: 0 0 16px; padding: 10px 14px; border-radius: 8px;
+      background: linear-gradient(90deg, #0f766e, #1e40af); color: #fff;
+      font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .live-banner strong { font-weight: 500; }
+    main { min-width: 0; }
+    .hero {
+      background: var(--white); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: var(--shadow); padding: 28px 28px 24px; margin-bottom: 16px; position: relative; overflow: hidden;
+    }
+    .hero::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: linear-gradient(180deg, var(--teal-bright), var(--teal), var(--blue)); }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .tag {
+      display: inline-flex; font-family: var(--font-mono); font-size: 11px; padding: 4px 10px;
+      border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-soft);
+    }
+    .tag.ok { background: var(--teal-wash); border-color: rgba(15, 118, 110, 0.25); color: var(--teal); }
+    .tag.warn { background: var(--amber-wash); border-color: rgba(180, 83, 9, 0.25); color: var(--amber); }
+    .hero h1 { margin: 0 0 10px; font-family: var(--font-display); font-size: clamp(1.85rem, 4vw, 2.55rem); font-weight: 800; letter-spacing: -0.035em; line-height: 1.08; }
+    .hero .lede { margin: 0; max-width: 54ch; color: var(--ink-soft); font-size: 1.05rem; }
+    .hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .stat { padding: 10px 12px; border-radius: 8px; background: var(--surface); }
+    .stat .label { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .stat .value { margin-top: 4px; font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em; }
+    .section {
+      background: var(--white); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 22px 24px 20px; margin-bottom: 14px; scroll-margin-top: 24px;
+    }
+    .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+    .section-head .num { font-family: var(--font-mono); font-size: 12px; color: var(--teal); font-weight: 500; }
+    .section h2 { margin: 0; font-family: var(--font-display); font-size: 1.35rem; font-weight: 700; letter-spacing: -0.025em; }
+    .section h3 { margin: 16px 0 8px; font-family: var(--font-display); font-size: 1rem; font-weight: 700; }
+    .section p { margin: 0 0 12px; }
+    .dim { color: var(--ink-soft); }
+    ul { margin: 0 0 12px; padding-left: 1.15rem; }
+    li { margin-bottom: 6px; }
+    li::marker { color: var(--teal); }
+    .callout {
+      border-left: 3px solid var(--teal); background: var(--teal-wash);
+      padding: 12px 14px; margin: 14px 0; border-radius: 0 8px 8px 0; font-size: 0.95rem;
+    }
+    .callout.warn { border-left-color: var(--amber); background: var(--amber-wash); }
+    .callout.blue { border-left-color: var(--blue); background: var(--blue-wash); }
+    .callout strong { display: block; margin-bottom: 4px; font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; font-family: var(--font-mono); color: var(--ink-soft); }
+    .q { font-weight: 600; }
+    .q-list { list-style: none; padding: 0; }
+    .q-list li { margin-bottom: 8px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+    .pill {
+      display: inline-block; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+      background: var(--surface); font-size: 12.5px; font-weight: 500; color: var(--ink-soft);
+    }
+    .pill.accent { background: var(--teal-wash); border-color: rgba(15, 118, 110, 0.3); color: var(--teal); }
+    .pill.danger { background: var(--amber-wash); border-color: rgba(180, 83, 9, 0.3); color: var(--amber); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card-lite { padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .card-lite h3 { margin: 0 0 8px; }
+    .script { font-size: 1.02rem; line-height: 1.65; }
+    .phase { display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .phase:last-child { border-bottom: 0; padding-bottom: 0; }
+    .phase-label { font-family: var(--font-mono); font-size: 11px; color: var(--teal); text-transform: uppercase; letter-spacing: 0.05em; }
+    .phase h3 { margin: 0 0 6px; }
+    .footer-note { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-align: center; }
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; gap: 16px; padding: 16px 14px 64px; }
+      .agenda { position: static; }
+      .agenda-slots { display: grid; grid-template-columns: 1fr 1fr; }
+      .hero-stats, .grid-2 { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav class="agenda" aria-label="Prep agenda">
+      <div class="agenda-head">
+        <div class="kicker">Live call</div>
+        <h2>Smoosh AI prep</h2>
+      </div>
+      <ul class="agenda-slots">
+        <li><a href="#model" data-slot><span class="slot-time">01</span><span class="slot-label">Company model</span></a></li>
+        <li><a href="#narrative" data-slot><span class="slot-time">02</span><span class="slot-label">Your narrative</span></a></li>
+        <li><a href="#intro" data-slot><span class="slot-time">03</span><span class="slot-label">60-sec intro</span></a></li>
+        <li><a href="#questions" data-slot><span class="slot-time">04</span><span class="slot-label">Ask Janice</span></a></li>
+        <li><a href="#scope" data-slot><span class="slot-time">05</span><span class="slot-label">CTO scope</span></a></li>
+        <li><a href="#plan" data-slot><span class="slot-time">06</span><span class="slot-label">30–60–90</span></a></li>
+        <li><a href="#cheatsheet" data-slot><span class="slot-time">07</span><span class="slot-label">Cheat sheet</span></a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <div class="live-banner">
+        <span><strong>MEETING NOW</strong> · Smoosh AI · Janice Nam · CTO</span>
+        <span id="clock"></span>
+      </div>
+
+      <header class="hero">
+        <div class="hero-meta">
+          <span class="tag ok">Fan data + AI platform</span>
+          <span class="tag">Janice Nam</span>
+          <span class="tag">LA · Remote CTO</span>
+          <span class="tag">Sophie Poultney · CEO</span>
+          <span class="tag warn">≠ smoosh.dev calendar</span>
+        </div>
+        <h1>Smoosh AI<br />CTO interview prep</h1>
+        <p class="lede">
+          Unified intelligence layer for fandom — merch, tickets, streams, socials, gaming → one AI-powered platform.
+          LinkedIn: <a href="https://www.linkedin.com/company/smooshai" target="_blank" rel="noopener">company/smooshai</a>
+          · Domain: <a href="https://smoosh.app" target="_blank" rel="noopener">smoosh.app</a>
+        </p>
+        <div class="hero-stats">
+          <div class="stat"><div class="label">Thesis</div><div class="value">Unified fan data</div></div>
+          <div class="stat"><div class="label">Founder / CEO</div><div class="value">Sophie Poultney</div></div>
+          <div class="stat"><div class="label">Your angle</div><div class="value">Data → product trust</div></div>
+        </div>
+      </header>
+
+      <section class="section" id="model">
+        <div class="section-head"><span class="num">01</span><h2>Company snapshot</h2></div>
+        <p><strong>Public thesis:</strong> Smoosh AI unifies fragmented fan data — merch, tickets, streams, socials, gaming — into one AI-powered platform for entertainment, sports, and creator ecosystems.</p>
+        <p><strong>CTO implication:</strong> Data + AI platform problem — ingest many event streams, unify identities, turn that into actionable insights and workflows customers trust.</p>
+        <div class="callout">
+          <strong>Say this</strong>
+          “From what I’ve seen, Smoosh AI is building the unified intelligence layer for fandom — pulling together messy, siloed fan signals and turning them into something teams can actually act on.”
+        </div>
+        <div class="callout warn">
+          <strong>Do not confuse</strong>
+          smoosh.dev is a different calendar product. You are interviewing for <strong>Smoosh AI</strong> (fan data / smoosh.app / LinkedIn smooshai).
+        </div>
+      </section>
+
+      <section class="section" id="narrative">
+        <div class="section-head"><span class="num">02</span><h2>Your CTO narrative</h2></div>
+        <p><strong>One-liner:</strong><br />
+          “I’m a CTO who turns fragmented data into a scalable, trustworthy product — aligning architecture, execution, and team communication with growth goals.”</p>
+        <div class="grid-2">
+          <div class="card-lite"><h3>Product-first</h3><p class="dim" style="margin:0">Start from user workflows and decisions, then design data/AI systems that support them.</p></div>
+          <div class="card-lite"><h3>Execution</h3><p class="dim" style="margin:0">Velocity + reliability — ship meaningful improvements without breaking trust.</p></div>
+          <div class="card-lite"><h3>Team clarity</h3><p class="dim" style="margin:0">Who owns what, what “good” looks like, how we trade speed / scope / risk.</p></div>
+          <div class="card-lite"><h3>Proof points</h3><p class="dim" style="margin:0">(Agentic Harness) pipelines · No Brainer co-founder · Ethos $1M+ delivery · Columbia teaching</p></div>
+        </div>
+      </section>
+
+      <section class="section" id="intro">
+        <div class="section-head"><span class="num">03</span><h2>60-second intro</h2></div>
+        <div class="callout">
+          <strong>Script — use now</strong>
+          <p class="script" style="margin:0">
+            “I come from building data and AI products where the hardest part isn’t just the model — it’s turning messy, fragmented signals into something customers trust and use. I’ve led end-to-end pipelines from ingestion and identity through to the product experiences on top, balancing fast iteration with data quality, privacy, and reliability. What excites me about Smoosh AI is you’re tackling that exact problem in fandom: helping orgs understand and serve fans by unifying data that’s usually stuck in silos. As CTO I’d focus on three things: architecture simple enough to scale, a delivery rhythm that ships meaningful improvements regularly, and communication so engineering through GTM stay aligned on what we’re solving and why.”
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="questions">
+        <div class="section-head"><span class="num">04</span><h2>Smart questions for Janice</h2></div>
+        <p class="dim">Pick 4–6. Lead with success definition.</p>
+        <ul class="q-list">
+          <li><span class="q">If we’re wildly successful in 24 months, what is Smoosh AI known for?</span></li>
+          <li><span class="q">What’s the single most important product outcome in the next 6–12 months?</span></li>
+          <li><span class="q">Which data sources are most critical today — and which are most painful?</span></li>
+          <li><span class="q">Where’s the bottleneck: data reliability, AI performance, product velocity, or GTM fit?</span></li>
+          <li><span class="q">How do customers describe the aha moment when Smoosh is really working?</span></li>
+          <li><span class="q">What are non-negotiables — privacy, latency, explainability?</span></li>
+          <li><span class="q">What does success look like for the CTO in the first 90 days?</span></li>
+          <li><span class="q">How do you like to work with a CTO weekly — decisions, updates, feedback?</span></li>
+          <li><span class="q">Any partnerships, investors, or customers that impose hard technical requirements?</span></li>
+          <li><span class="q">If I joined, what’s the first technical or product decision you’d want help with?</span></li>
+        </ul>
+      </section>
+
+      <section class="section" id="scope">
+        <div class="section-head"><span class="num">05</span><h2>Likely CTO responsibilities</h2></div>
+        <ul>
+          <li><strong>Architecture:</strong> Unified fan profiles, event pipelines, segmentation, activation.</li>
+          <li><strong>Delivery:</strong> Predictable ship cadence — roadmapping, release discipline.</li>
+          <li><strong>Data trust:</strong> Completeness, accuracy, latency — measurable quality.</li>
+          <li><strong>AI reliability:</strong> How models are trained, evaluated, and shipped.</li>
+          <li><strong>Translator:</strong> CEO/market goals → technical priorities in plain language.</li>
+          <li><strong>Team builder:</strong> Hire and structure 0→1 then 1→n.</li>
+        </ul>
+      </section>
+
+      <section class="section" id="plan">
+        <div class="section-head"><span class="num">06</span><h2>30–60–90 (draft)</h2></div>
+        <div class="phase">
+          <div class="phase-label">1–30<br />Listen</div>
+          <div>
+            <h3>Map reality</h3>
+            <ul>
+              <li>Product, ICP, roadmap deep-dive</li>
+              <li>Architecture map: sources → pipelines → models → product</li>
+              <li>1:1s; find no-regret data-quality wins</li>
+            </ul>
+          </div>
+        </div>
+        <div class="phase">
+          <div class="phase-label">31–60<br />Stabilize</div>
+          <div>
+            <h3>Focus delivery</h3>
+            <ul>
+              <li>12-month tech strategy tied to product bets</li>
+              <li>Light rituals; 1–2 customer-felt improvements</li>
+              <li>Clarify ownership across the stack</li>
+            </ul>
+          </div>
+        </div>
+        <div class="phase">
+          <div class="phase-label">61–90<br />Accelerate</div>
+          <div>
+            <h3>Hire + narrate</h3>
+            <ul>
+              <li>Hiring plan; architecture roadmap shared</li>
+              <li>KPIs: latency, uptime, release cadence, data quality</li>
+              <li>Partner with Janice on product/platform storytelling</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="cheatsheet">
+        <div class="section-head"><span class="num">07</span><h2>Cheat sheet</h2></div>
+        <div class="pill-row">
+          <span class="pill accent">unified fan data</span>
+          <span class="pill accent">signals → decisions</span>
+          <span class="pill accent">data quality &amp; trust</span>
+          <span class="pill">architecture serves product</span>
+          <span class="pill">fast but reliable shipping</span>
+          <span class="pill">fragmented → usable insight</span>
+        </div>
+        <p><strong>Answer shape:</strong> user workflow → data/AI pipeline → execution rhythm + team structure.</p>
+        <div class="pill-row">
+          <span class="pill danger">Don’t pitch smoosh.dev calendar</span>
+          <span class="pill danger">Don’t invent gen-AI/CV claims</span>
+        </div>
+      </section>
+
+      <p class="footer-note">Tylar × Smoosh AI · Janice Nam · fan-data platform · updated for live call</p>
+    </main>
+  </div>
+  <script>
+    (function () {
+      const clock = document.getElementById("clock");
+      function tick() {
+        clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+      tick(); setInterval(tick, 1000);
+      const slots = document.querySelectorAll("[data-slot]");
+      const sections = [...slots].map((a) => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+      function setActive() {
+        let current = sections[0];
+        const y = window.scrollY + 80;
+        for (const s of sections) { if (s.offsetTop <= y) current = s; }
+        slots.forEach((a) => a.classList.toggle("active", a.getAttribute("href") === "#" + current.id));
+      }
+      window.addEventListener("scroll", setActive, { passive: true });
+      setActive();
+    })();
+  </script>
+</body>
+</html>

@@ -147,7 +147,37 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
                 fire_event("document_created", doc.owner)
             except Exception:
                 logger.debug("document_created event dispatch failed", exc_info=True)
-            return _doc_to_dict(doc)
+            out = _doc_to_dict(doc)
+            try:
+                from src.handoff_materialize import maybe_materialize_handoff_jd
+                created_at = ""
+                if getattr(doc, "created_at", None):
+                    created_at = doc.created_at.isoformat()
+                materialized = maybe_materialize_handoff_jd(
+                    doc_id=doc.id,
+                    title=doc.title or "",
+                    content=doc.current_content or "",
+                    created_at=created_at,
+                )
+                if materialized:
+                    out["materialized_jd"] = materialized
+            except Exception:
+                logger.debug("handoff JD materialize skipped on create", exc_info=True)
+            try:
+                from src.handoff_packet import HANDOFF_TITLE_PREFIX
+                from src.handoff_relay import queue_handoff_relay_for_document
+
+                if (doc.title or "").startswith(HANDOFF_TITLE_PREFIX):
+                    relay_info = queue_handoff_relay_for_document(
+                        doc.id,
+                        owner=doc.owner or user,
+                        relay=True,
+                    )
+                    if relay_info.get("ok"):
+                        out["handoff_relay"] = relay_info
+            except Exception:
+                logger.debug("handoff relay queue skipped on create", exc_info=True)
+            return out
         except HTTPException:
             raise
         except Exception as e:
@@ -434,6 +464,75 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- Audio brief ("Listen") — CEO-level brief narrated via Open Notebook.
+    # Same endpoint contract as the deep-research audio brief
+    # (routes/research_routes.py) so the visual-report Listen client logic
+    # ports over unchanged: status / transcript / chunk/{index}.
+
+    def _load_doc_for_brief(request: Request, doc_id: str):
+        user = get_current_user(request)
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == doc_id).first()
+            if not doc:
+                raise HTTPException(404, "Document not found")
+            _verify_doc_owner(db, doc, user)
+            return {
+                "title": doc.title or "",
+                "content": doc.current_content or "",
+                "owner": doc.owner or (user or ""),
+            }
+        finally:
+            db.close()
+
+    @router.post("/api/document/{doc_id}/audio-brief")
+    async def document_audio_brief_start(request: Request, doc_id: str) -> Dict[str, Any]:
+        """Kick off (or reuse) the CEO-brief audio pipeline for a document.
+        Idempotent: an in-flight or up-to-date brief is returned as-is."""
+        info = _load_doc_for_brief(request, doc_id)
+        from services.documents.audio_brief import kickoff_doc_audio_brief
+        state = kickoff_doc_audio_brief(
+            doc_id, info["title"], info["content"], owner=info["owner"]
+        )
+        return {"ok": True, "status": state.get("status") or "generating"}
+
+    @router.get("/api/document/{doc_id}/audio-brief/status")
+    async def document_audio_brief_status(request: Request, doc_id: str) -> Dict[str, Any]:
+        _load_doc_for_brief(request, doc_id)
+        from services.documents.audio_brief import get_brief_state
+        state = get_brief_state(doc_id)
+        status = state.get("status") or "pending"
+        return {
+            "status": status,
+            "ready": status == "ready",
+            "chunk_count": int(state.get("chunk_count") or 0),
+            "mime": state.get("mime"),
+            "error": state.get("error"),
+            "generated_at": state.get("generated_at"),
+        }
+
+    @router.get("/api/document/{doc_id}/audio-brief/transcript")
+    async def document_audio_brief_transcript(request: Request, doc_id: str) -> Dict[str, Any]:
+        _load_doc_for_brief(request, doc_id)
+        from services.documents.audio_brief import get_brief_state
+        state = get_brief_state(doc_id)
+        return {"script": state.get("script") or "", "status": state.get("status") or "pending"}
+
+    @router.get("/api/document/{doc_id}/audio-brief/chunk/{index}")
+    async def document_audio_brief_chunk(request: Request, doc_id: str, index: int):
+        _load_doc_for_brief(request, doc_id)
+        from fastapi import Response
+        from services.documents.audio_brief import read_brief_audio
+        result = read_brief_audio(doc_id, index)
+        if result is None:
+            raise HTTPException(404, "Audio chunk not found")
+        data, mime = result
+        return Response(
+            content=data,
+            media_type=mime,
+            headers={"Content-Disposition": f"inline; filename=brief-{index}.{mime.split('/')[-1]}"},
+        )
+
     # ---- POST /api/document/{doc_id}/extract-pdf-text ----
     @router.post("/api/document/{doc_id}/extract-pdf-text")
     async def extract_pdf_text(request: Request, doc_id: str) -> Dict[str, Any]:
@@ -552,6 +651,92 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         finally:
             db.close()
 
+    # ---- POST /api/document/improve-sentence — polish one sentence in context ----
+    @router.post("/api/document/improve-sentence")
+    async def improve_document_sentence(request: Request) -> Dict[str, Any]:
+        """Rewrite a selected sentence using surrounding document context.
+
+        Lightweight utility call (no agent loop, no session history mutation).
+        Used by the document-library inline editor sparkle button.
+        """
+        from src.task_endpoint import resolve_task_endpoint
+        from src.endpoint_resolver import resolve_endpoint
+        from src.llm_core import llm_call_async
+        from src.research_utils import strip_thinking
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Invalid JSON")
+
+        text = (body.get("text") or "").strip()
+        context = (body.get("context") or "")[:4000]
+        doc_id = (body.get("doc_id") or "").strip()
+        if not text:
+            raise HTTPException(400, "text is required")
+        if len(text) > 2000:
+            raise HTTPException(400, "text too long (max 2000 chars)")
+
+        user = get_current_user(request)
+        if doc_id:
+            db = SessionLocal()
+            try:
+                doc = db.query(Document).filter(Document.id == doc_id).first()
+                if not doc:
+                    raise HTTPException(404, "Document not found")
+                _verify_doc_owner(db, doc, user)
+            finally:
+                db.close()
+
+        url, model, headers = resolve_task_endpoint(owner=user or None)
+        if not url or not model:
+            url, model, headers = resolve_endpoint("utility", owner=user or None)
+        if not url or not model:
+            url, model, headers = resolve_endpoint("default", owner=user or None)
+        if not url or not model:
+            raise HTTPException(500, "No endpoint configured for sentence improve")
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You improve writing. Rewrite the given sentence so it is clearer, "
+                    "more precise, and fits the surrounding context. Keep the same meaning "
+                    "and roughly the same length. Preserve markdown/code if present. "
+                    "Output ONLY the improved sentence — no quotes, no preamble, no explanation."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Surrounding context:\n---\n{context}\n---\n\n"
+                    f"Sentence to improve:\n{text}"
+                ),
+            },
+        ]
+
+        try:
+            raw = await llm_call_async(
+                url,
+                model,
+                messages,
+                headers=headers,
+                temperature=0.4,
+                max_tokens=512,
+                timeout=45,
+            )
+        except Exception as e:
+            logger.exception("improve-sentence LLM failed")
+            raise HTTPException(500, f"Improve failed: {e}") from e
+
+        improved = strip_thinking(raw or "").strip().strip('"').strip("'")
+        if not improved:
+            raise HTTPException(500, "Empty improvement from model")
+        # Guard against the model returning a multi-paragraph essay.
+        if len(improved) > max(len(text) * 4, 800):
+            improved = improved.split("\n", 1)[0].strip()
+        return {"text": improved}
+
     # ---- PUT /api/document/{doc_id} — user manual edit ----
     # Coalesce window: if the last user version was saved within this many
     # seconds, update it in-place (user is still actively editing).
@@ -610,7 +795,23 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
             doc.current_content = req.content
             db.commit()
             db.refresh(doc)
-            return _doc_to_dict(doc)
+            out = _doc_to_dict(doc)
+            try:
+                from src.handoff_materialize import maybe_materialize_handoff_jd
+                created_at = ""
+                if getattr(doc, "created_at", None):
+                    created_at = doc.created_at.isoformat()
+                materialized = maybe_materialize_handoff_jd(
+                    doc_id=doc.id,
+                    title=doc.title or "",
+                    content=doc.current_content or "",
+                    created_at=created_at,
+                )
+                if materialized:
+                    out["materialized_jd"] = materialized
+            except Exception:
+                logger.debug("handoff JD materialize skipped on update", exc_info=True)
+            return out
         except HTTPException:
             raise
         except Exception as e:

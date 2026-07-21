@@ -174,6 +174,11 @@ export function handleUIControl(uiData) {
           var fn = mod.openPanel || mod.openNotes || (mod.default && (mod.default.openPanel || mod.default.openNotes));
           if (fn) fn();
         }).catch(function(){});
+      } else if (panel === 'cmd-center') {
+        import('./cmdCenter.js').then(function(mod) {
+          var fn = mod.openCmdCenter || (mod.default && mod.default.openCmdCenter);
+          if (fn) fn();
+        }).catch(function(){});
       } else if (panel === 'memories' || panel === 'skills' || panel === 'settings') {
         // These live in the sidebar / settings drawer — most just need
         // an existing button click.

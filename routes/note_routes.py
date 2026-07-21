@@ -4,14 +4,24 @@
 import json
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from core.database import SessionLocal, Note
+from core.database import SessionLocal, Note, Document, DocumentVersion
 from src.auth_helpers import get_current_user
 from src.constants import DATA_DIR
+from src.handoff_bin import bucket_handoff_notes
+from src.handoff_packet import (
+    VALID_TARGETS,
+    build_handoff_content,
+    build_note_handoff_fields,
+    handoff_doc_title,
+    normalize_target,
+    pickup_hint,
+)
 from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
@@ -51,6 +61,21 @@ class NoteUpdate(BaseModel):
     repeat: Optional[str] = None
     sort_order: Optional[int] = None
     agent_session_id: Optional[str] = None
+    handoff_doc_id: Optional[str] = None
+    handoff_target: Optional[str] = None
+    handoff_at: Optional[str] = None
+
+
+class NoteHandoffRequest(BaseModel):
+    target: str
+    title: Optional[str] = None
+    content: Optional[str] = None
+    items: Optional[list] = None
+    note_type: Optional[str] = None
+    label: Optional[str] = None
+    due_date: Optional[str] = None
+    archive: bool = False
+    relay: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +116,14 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
         "ai_classification": ai_cls,
         "ai_content_hash": getattr(note, "ai_content_hash", None),
         "agent_session_id": getattr(note, "agent_session_id", None),
+        "handoff_doc_id": getattr(note, "handoff_doc_id", None),
+        "handoff_target": getattr(note, "handoff_target", None),
+        "handoff_at": getattr(note, "handoff_at", None),
+        "handoff_relay_status": getattr(note, "handoff_relay_status", None),
+        "handoff_outcome": getattr(note, "handoff_outcome", None),
+        "handoff_relay_session_id": getattr(note, "handoff_relay_session_id", None),
+        "handoff_relay_started_at": getattr(note, "handoff_relay_started_at", None),
+        "handoff_relay_completed_at": getattr(note, "handoff_relay_completed_at", None),
         "created_at": note.created_at.isoformat() if note.created_at else None,
         "updated_at": note.updated_at.isoformat() if note.updated_at else None,
     }
@@ -121,6 +154,54 @@ def _reminder_text_from_note(note: Note) -> tuple[str, str]:
             return title, f"{len(items)} item{'s' if len(items) != 1 else ''}"
     return title, (note.content or "").strip()[:400]
 
+
+def _merge_handoff_draft(note: Note, body: NoteHandoffRequest) -> None:
+    if body.title is not None:
+        note.title = body.title
+    if body.content is not None:
+        note.content = body.content
+    if body.items is not None:
+        note.items = json.dumps(body.items)
+        flag_modified(note, "items")
+    if body.note_type is not None:
+        note.note_type = body.note_type
+    if body.label is not None:
+        note.label = body.label
+    if body.due_date is not None:
+        note.due_date = body.due_date
+
+
+def _create_handoff_document(
+    db,
+    *,
+    owner: Optional[str],
+    title: str,
+    content: str,
+    session_id: Optional[str] = None,
+) -> Document:
+    doc_id = str(uuid.uuid4())
+    ver_id = str(uuid.uuid4())
+    doc = Document(
+        id=doc_id,
+        session_id=session_id,
+        title=title,
+        language="markdown",
+        current_content=content,
+        version_count=1,
+        is_active=True,
+        owner=owner,
+    )
+    ver = DocumentVersion(
+        id=ver_id,
+        document_id=doc_id,
+        version_number=1,
+        content=content,
+        summary="Handoff from note",
+        source="user",
+    )
+    db.add(doc)
+    db.add(ver)
+    return doc
 
 
 # ---------------------------------------------------------------------------
@@ -597,8 +678,9 @@ def setup_note_routes(task_scheduler=None):
         db = SessionLocal()
         try:
             q = db.query(Note)
-            if user is not None:
-                q = q.filter(Note.owner == user)
+            if user:
+                from src.auth_helpers import owner_filter
+                q = owner_filter(q, Note, user)
             if archived is not None:
                 q = q.filter(Note.archived == archived)
             else:
@@ -611,6 +693,22 @@ def setup_note_routes(task_scheduler=None):
             else:
                 notes = q.order_by(Note.pinned.desc(), Note.sort_order.asc(), Note.updated_at.desc()).all()
             return {"notes": [_note_to_dict(n) for n in notes]}
+        finally:
+            db.close()
+
+    # --- HANDOFF INBOX (Agent Bin) ---
+    @router.get("/handoffs")
+    def list_handoff_notes(request: Request):
+        """All note-backed handoffs, bucketed for the Agent Bin widget."""
+        user = _owner(request)
+        db = SessionLocal()
+        try:
+            q = db.query(Note).filter(Note.handoff_doc_id.isnot(None))
+            if user:
+                from src.auth_helpers import owner_filter
+                q = owner_filter(q, Note, user)
+            notes = q.order_by(Note.handoff_at.desc(), Note.updated_at.desc()).all()
+            return bucket_handoff_notes([_note_to_dict(n) for n in notes])
         finally:
             db.close()
 
@@ -702,12 +800,168 @@ def setup_note_routes(task_scheduler=None):
                 note.sort_order = body.sort_order
             if body.agent_session_id is not None:
                 note.agent_session_id = body.agent_session_id
+            if body.handoff_doc_id is not None:
+                note.handoff_doc_id = body.handoff_doc_id
+            if body.handoff_target is not None:
+                note.handoff_target = body.handoff_target
+            if body.handoff_at is not None:
+                note.handoff_at = body.handoff_at
 
             db.commit()
             db.refresh(note)
             return _note_to_dict(note)
         finally:
             db.close()
+
+    # --- HANDOFF ---
+    @router.post("/{note_id}/handoff")
+    def handoff_note(request: Request, note_id: str, body: NoteHandoffRequest):
+        """Create a cross-agent handoff document from a note (no documents UI privilege required)."""
+        from src.handoff_relay import is_external_relay_target
+
+        user = _owner(request)
+        target = normalize_target(body.target)
+        if target not in VALID_TARGETS:
+            raise HTTPException(400, f"Unknown handoff target '{body.target}'")
+
+        db = SessionLocal()
+        try:
+            note = db.query(Note).filter(Note.id == note_id).first()
+            if not note:
+                raise HTTPException(404, "Note not found")
+            if user is not None and note.owner != user:
+                raise HTTPException(404, "Note not found")
+
+            _merge_handoff_draft(note, body)
+            note_dict = _note_to_dict(note)
+            fields = build_note_handoff_fields(note_dict)
+            content = build_handoff_content(
+                source="odysseus",
+                target=target,
+                goal=fields["goal"],
+                context=fields["context"],
+                done=fields["done"],
+                next_steps=fields["next_steps"],
+                note_body=fields["note_body"],
+                session_id=fields["session_id"] or None,
+            )
+            doc_title = handoff_doc_title(target, fields["title"])
+            doc = _create_handoff_document(
+                db,
+                owner=note.owner or user,
+                title=doc_title,
+                content=content,
+                session_id=fields["session_id"] or None,
+            )
+
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            note.handoff_doc_id = doc.id
+            note.handoff_target = target
+            note.handoff_at = now
+            if body.relay:
+                note.handoff_relay_status = "queued"
+            if body.archive:
+                note.archived = True
+
+            db.commit()
+            db.refresh(note)
+            updated = _note_to_dict(note)
+
+            if body.relay:
+                from src.handoff_relay import schedule_relay, write_external_inbox
+
+                inbox_path = write_external_inbox(
+                    doc.id, target, doc_title, doc.current_content or "", note_id
+                )
+                if not is_external_relay_target(target):
+                    schedule_relay(note_id, doc.id, note.owner or user)
+            else:
+                inbox_path = None
+
+            if _scheduler_ref is not None:
+                try:
+                    if body.relay:
+                        if is_external_relay_target(target):
+                            msg = (
+                                f"{doc_title}\n"
+                                f"Queued for {target} — run handoff-relay-watcher.ps1 -RunAgent locally."
+                            )
+                        else:
+                            msg = f"{doc_title}\nOdysseus relay started."
+                    else:
+                        hint = pickup_hint(target, doc.id)
+                        msg = f"{doc_title}\nID: {doc.id}\n{hint}"
+                    _scheduler_ref.add_notification(
+                        task_name=f"Handoff → {target}",
+                        status="success",
+                        task_id=f"handoff-{doc.id}",
+                        owner=note.owner or user,
+                        body=msg,
+                    )
+                except Exception as exc:
+                    logger.debug("handoff note notification failed: %s", exc)
+
+            try:
+                from src.event_bus import fire_event
+                fire_event("document_created", note.owner or user)
+            except Exception:
+                logger.debug("document_created event dispatch failed", exc_info=True)
+
+            materialized = None
+            try:
+                from src.handoff_materialize import maybe_materialize_handoff_jd
+                materialized = maybe_materialize_handoff_jd(
+                    doc_id=doc.id,
+                    title=doc.title or "",
+                    content=doc.current_content or "",
+                    created_at=now,
+                )
+            except Exception:
+                logger.debug("handoff JD materialize skipped on note handoff", exc_info=True)
+
+            out = {
+                "ok": True,
+                "doc_id": doc.id,
+                "title": doc_title,
+                "target": target,
+                "pickup_hint": pickup_hint(target, doc.id),
+                "relay": body.relay,
+                "relay_status": updated.get("handoff_relay_status"),
+                "relay_executor": (
+                    "external"
+                    if body.relay and is_external_relay_target(target)
+                    else ("odysseus" if body.relay else None)
+                ),
+                "inbox_path": inbox_path,
+                "note": updated,
+            }
+            if materialized:
+                out["materialized_jd"] = materialized
+            return out
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error("Failed to create note handoff: %s", e)
+            raise HTTPException(500, f"Failed to create handoff: {e}")
+        finally:
+            db.close()
+
+    @router.post("/{note_id}/handoff/retry")
+    def retry_note_handoff(request: Request, note_id: str):
+        """Re-queue a failed handoff relay (Odysseus or external watcher)."""
+        from src.handoff_relay import retry_handoff_relay
+
+        user = _owner(request)
+        try:
+            return retry_handoff_relay(note_id, owner=user)
+        except ValueError as exc:
+            msg = str(exc)
+            if msg == "forbidden":
+                raise HTTPException(404, "Note not found") from exc
+            if msg == "not a handoff note":
+                raise HTTPException(400, "Note is not a handoff") from exc
+            raise HTTPException(404, msg) from exc
 
     # --- DELETE ---
     @router.delete("/{note_id}")

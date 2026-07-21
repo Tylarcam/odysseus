@@ -3,6 +3,10 @@ import * as Modals from './modalManager.js';
 import { makeWindowDraggable } from './windowDrag.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 import { wireSwipeDismiss, collapseSidebarForMobileSheet, isMobileSheet } from './panelSheet.js';
+import { BUILTIN_FLOWS, getBuiltinFlow, visibleQuestions } from './formflowFlows.js';
+import { buildHandoffOptions, handoffTargetLabel } from './formflowHandoffs.js';
+import { createHandoffDocument } from './handoff.js';
+import { parseFormFlowModelJson, parseQuestionsFromText } from './formflowFromChat.js';
 
 // ─── Module state ──────────────────────────────────────────────────────────
 let _open        = false;
@@ -11,6 +15,9 @@ let _answers     = {};
 let _currentIdx  = 0;
 let _activeTab   = 'paste';
 let _pendingFile = null;
+let _activeFlowId = null;
+let _flowPhases   = [];
+let _handoffOptions = [];
 
 // Live DOM refs — set each time the pane opens, cleared on close
 let _pane        = null;
@@ -205,6 +212,54 @@ textarea.ff-input { min-height:110px; resize:vertical; line-height:1.5; }
 .ff-restart-row { margin-top:20px; text-align:center; }
 .ff-restart-link { background:none; border:none; font-family:inherit; font-size:0.82rem; color:color-mix(in srgb,var(--fg) 38%,transparent); cursor:pointer; text-decoration:underline; transition:color .15s; }
 .ff-restart-link:hover { color:var(--fg); }
+/* ── Flow templates ── */
+.ff-flow-pick { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.ff-flow-chip {
+  padding:7px 12px; border-radius:999px; font-size:0.78rem; font-weight:500; cursor:pointer;
+  border:1px solid var(--border); background:var(--panel); color:var(--fg); font-family:inherit;
+  transition:border-color .15s,background .15s;
+}
+.ff-flow-chip:hover { border-color:var(--red); }
+.ff-flow-chip.recommended { border-color:color-mix(in srgb,var(--red) 55%,var(--border)); }
+/* ── Phase pills (form) ── */
+.ff-phases { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:12px; }
+.ff-phase-pill {
+  font-size:0.68rem; letter-spacing:.04em; padding:3px 8px; border-radius:999px;
+  border:1px solid var(--border); color:color-mix(in srgb,var(--fg) 45%,transparent);
+}
+.ff-phase-pill.active { border-color:var(--red); color:var(--fg); background:color-mix(in srgb,var(--red) 10%,var(--panel)); }
+.ff-q-hint { font-size:0.8rem; color:color-mix(in srgb,var(--fg) 48%,transparent); margin-bottom:10px; line-height:1.4; }
+/* ── Handoffs ── */
+.ff-handoff-title { font-size:1.2rem; font-weight:700; margin-bottom:5px; }
+.ff-handoff-sub { font-size:0.82rem; color:color-mix(in srgb,var(--fg) 45%,transparent); margin-bottom:16px; }
+.ff-handoff-card {
+  border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:10px;
+  background:var(--panel);
+}
+.ff-handoff-card.human { border-color:color-mix(in srgb,var(--red) 45%,var(--border)); }
+.ff-handoff-card-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.ff-handoff-badge {
+  font-size:0.68rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  padding:2px 7px; border-radius:4px; border:1px solid var(--border);
+}
+.ff-handoff-badge.human { border-color:var(--red); color:var(--red); }
+.ff-handoff-badge.cursor { border-color:#4a9eff; color:#4a9eff; }
+.ff-handoff-badge.odysseus { border-color:#7fff00; color:#7fff00; }
+.ff-handoff-badge.claude { border-color:#d4a574; color:#d4a574; }
+.ff-handoff-body {
+  font-size:0.78rem; white-space:pre-wrap; line-height:1.45;
+  color:color-mix(in srgb,var(--fg) 78%,transparent);
+  background:color-mix(in srgb,var(--bg,var(--panel)) 60%,var(--panel));
+  border:1px solid color-mix(in srgb,var(--border) 70%,transparent);
+  border-radius:6px; padding:9px 10px; margin-bottom:8px; max-height:140px; overflow:auto;
+}
+.ff-handoff-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.ff-handoff-btn {
+  padding:6px 12px; border-radius:6px; font-size:0.76rem; font-weight:500; cursor:pointer;
+  border:1px solid var(--border); background:var(--panel); color:var(--fg); font-family:inherit;
+}
+.ff-handoff-btn:hover { border-color:var(--red); }
+.ff-handoff-btn.primary { background:var(--red); border-color:var(--red); color:#fff; }
 `;
   document.head.appendChild(s);
 }
@@ -262,7 +317,8 @@ export function openPanel() {
       <!-- Input screen -->
       <div id="ff-screen-input" class="ff-screen active">
         <div class="ff-title">FormFlow</div>
-        <div class="ff-sub">Paste a form or upload a file — answer one question at a time.</div>
+        <div class="ff-sub">Paste a form or pick a decision flow — one question at a time, handoffs when done.</div>
+        <div class="ff-flow-pick" id="ff-flow-pick"></div>
         <div class="ff-tabs">
           <button class="ff-tab active" data-tab="paste">Paste text</button>
           <button class="ff-tab" data-tab="upload">Upload file</button>
@@ -296,8 +352,10 @@ export function openPanel() {
 
       <!-- Form screen -->
       <div id="ff-screen-form" class="ff-screen">
+        <div class="ff-phases" id="ff-phases"></div>
         <div class="ff-q-number" id="ff-q-number"></div>
         <div class="ff-q-label" id="ff-q-label"></div>
+        <div class="ff-q-hint" id="ff-q-hint"></div>
         <div class="ff-q-input-wrap" id="ff-q-input-wrap"></div>
         <div class="ff-limit-counter" id="ff-limit-counter"></div>
       </div>
@@ -307,12 +365,24 @@ export function openPanel() {
         <div class="ff-review-title">Review your answers</div>
         <div class="ff-review-sub" id="ff-review-sub"></div>
         <div class="ff-review-actions">
-          <button class="ff-review-btn primary" id="ff-copy-btn">Copy all</button>
+          <button class="ff-review-btn primary" id="ff-handoff-btn">Continue to handoffs →</button>
+          <button class="ff-review-btn" id="ff-copy-btn">Copy all</button>
           <button class="ff-review-btn" id="ff-download-btn">Download .txt</button>
         </div>
         <div id="ff-review-list"></div>
         <div class="ff-restart-row">
           <button class="ff-restart-link" id="ff-restart-btn">← Parse another form</button>
+        </div>
+      </div>
+
+      <!-- Handoff screen -->
+      <div id="ff-screen-handoff" class="ff-screen">
+        <div class="ff-handoff-title">Handoff options</div>
+        <div class="ff-handoff-sub" id="ff-handoff-sub"></div>
+        <div id="ff-handoff-list"></div>
+        <div class="ff-review-actions" style="margin-top:8px;">
+          <button class="ff-review-btn" id="ff-back-review-btn">← Back to review</button>
+          <button class="ff-review-btn" id="ff-handoff-restart-btn">Start over</button>
         </div>
       </div>
     </div>
@@ -420,13 +490,17 @@ export function togglePanel() {
 }
 
 // ─── Track current screen across re-opens ─────────────────────────────────
-let _screen = 'input'; // 'input' | 'loading' | 'form' | 'review'
+let _screen = 'input'; // 'input' | 'loading' | 'form' | 'review' | 'handoff'
 
 function _currentScreen() { return _screen; }
 
+function _visibleQs() {
+  return visibleQuestions(_questions, _answers);
+}
+
 function _showScreen(name) {
   _screen = name;
-  const screens = ['input', 'loading', 'form', 'review'];
+  const screens = ['input', 'loading', 'form', 'review', 'handoff'];
   screens.forEach(s => {
     const el = document.getElementById('ff-screen-' + s);
     if (el) el.classList.toggle('active', s === name);
@@ -443,6 +517,9 @@ function _syncScreen(name) {
   } else if (name === 'review' && _questions.length) {
     _renderReview();
     _showScreen('review');
+  } else if (name === 'handoff' && _questions.length) {
+    _renderHandoffs();
+    _showScreen('handoff');
   } else {
     _showScreen('input');
   }
@@ -452,11 +529,13 @@ function _updateProgress() {
   const bar = document.getElementById('ff-progress');
   if (!bar) return;
   let pct = 0;
+  const vis = _visibleQs();
   if (_screen === 'loading') pct = 15;
   else if (_screen === 'form') {
-    const n = _questions.length;
-    pct = n ? Math.round(((_currentIdx + 1) / n) * 80) + 15 : 15;
-  } else if (_screen === 'review') pct = 100;
+    const n = vis.length;
+    pct = n ? Math.round(((_currentIdx + 1) / n) * 65) + 15 : 15;
+  } else if (_screen === 'review') pct = 88;
+  else if (_screen === 'handoff') pct = 100;
   bar.style.width = pct + '%';
 }
 
@@ -518,7 +597,15 @@ function _wireEvents() {
   // Review actions
   document.getElementById('ff-copy-btn').addEventListener('click', _copyAnswers);
   document.getElementById('ff-download-btn').addEventListener('click', _downloadAnswers);
+  document.getElementById('ff-handoff-btn').addEventListener('click', () => {
+    _renderHandoffs();
+    _showScreen('handoff');
+  });
+  document.getElementById('ff-back-review-btn')?.addEventListener('click', () => _showScreen('review'));
+  document.getElementById('ff-handoff-restart-btn')?.addEventListener('click', _restart);
   document.getElementById('ff-restart-btn').addEventListener('click', _restart);
+
+  _renderFlowPicker();
 }
 
 // ─── File helpers ──────────────────────────────────────────────────────────
@@ -565,6 +652,11 @@ async function _handleSubmit() {
     if (_activeTab === 'paste') {
       const txt = document.getElementById('ff-paste').value.trim();
       if (!txt) { errEl.textContent = 'Please paste some form text first.'; return; }
+      const localQuestions = parseQuestionsFromText(txt);
+      if (localQuestions?.length) {
+        _applyQuestions(localQuestions);
+        return;
+      }
       await _startParse({ text: txt });
     } else {
       const file = _pendingFile;
@@ -659,22 +751,23 @@ async function _startParse(payload) {
     return;
   }
 
-  let questions;
-  try {
-    const cleaned = accumulated.trim().replace(/^```json\s*/i, '').replace(/```\s*$/, '');
-    questions = JSON.parse(cleaned);
-    if (!Array.isArray(questions) || !questions.length) throw new Error('empty');
-  } catch {
+  const questions = parseFormFlowModelJson(accumulated);
+  if (!questions) {
     _showScreen('input');
     const errEl = document.getElementById('ff-input-error');
     if (errEl) errEl.textContent = 'Could not parse the model\'s response. Try again or switch models.';
     return;
   }
 
-  _questions = questions.map((q, i) => ({
+  _applyQuestions(questions);
+}
+
+function _normalizeQuestionList(questions) {
+  if (!Array.isArray(questions)) return [];
+  return questions.map((q, i) => ({
     id:          q.id || ('q' + (i + 1)),
     type:        q.type || 'textarea',
-    label:       q.label || ('Question ' + (i + 1)),
+    label:       q.label || q.question || ('Question ' + (i + 1)),
     required:    q.required !== false,
     options:     Array.isArray(q.options) ? q.options : [],
     scaleMin:    q.scaleMin != null ? Number(q.scaleMin) : 1,
@@ -682,22 +775,116 @@ async function _startParse(payload) {
     wordLimit:   q.wordLimit  || null,
     charLimit:   q.charLimit  || null,
     placeholder: q.placeholder || '',
-  }));
-  _answers    = {};
-  _currentIdx = 0;
+    phase:       q.phase || null,
+    hint:        q.hint || null,
+    showIf:      q.showIf || null,
+  })).filter((q) => q.label);
+}
 
+function _renderFlowPicker() {
+  const wrap = document.getElementById('ff-flow-pick');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  BUILTIN_FLOWS.forEach((flow, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ff-flow-chip' + (i === 0 ? ' recommended' : '');
+    btn.textContent = flow.title;
+    btn.title = flow.subtitle || '';
+    btn.addEventListener('click', () => openWithFlow(flow.id));
+    wrap.appendChild(btn);
+  });
+}
+
+/** Load a built-in decision flow (e.g. gate-breaker). */
+export function openWithFlow(flowId) {
+  const flow = getBuiltinFlow(flowId);
+  if (!flow) return false;
+  if (!_open) openPanel();
+  _activeFlowId = flow.id;
+  _flowPhases = flow.phases || [];
+  requestAnimationFrame(() => _applyQuestions(flow.questions));
+  return true;
+}
+
+function _applyQuestions(questions) {
+  _questions = _normalizeQuestionList(questions);
+  if (!_questions.length) return false;
+  _answers = {};
+  _currentIdx = 0;
+  _handoffOptions = [];
   _renderQuestion(0);
   _showScreen('form');
+  return true;
+}
+
+function _switchTab(tab) {
+  _activeTab = tab;
+  if (!_pane) return;
+  _pane.querySelectorAll('.ff-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  _pane.querySelectorAll('.ff-tab-pane').forEach((p) => p.classList.toggle('active', p.id === 'ff-pane-' + tab));
+}
+
+/** Load pre-parsed questions and jump to the form screen. */
+export function openWithQuestions(questions) {
+  const normalized = _normalizeQuestionList(questions);
+  if (!normalized.length) return false;
+  if (!_open) openPanel();
+  requestAnimationFrame(() => _applyQuestions(normalized));
+  return true;
+}
+
+/** Paste text into FormFlow and run the parse pipeline. */
+export async function openWithText(text) {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return false;
+  if (!_open) openPanel();
+  await new Promise((r) => requestAnimationFrame(r));
+  const paste = document.getElementById('ff-paste');
+  if (paste) paste.value = trimmed;
+  _switchTab('paste');
+  await _startParse({ text: trimmed });
+  return true;
 }
 
 // ─── Form rendering ────────────────────────────────────────────────────────
-function _renderQuestion(index) {
-  _currentIdx = index;
-  const q = _questions[index];
-  const n = _questions.length;
+function _renderPhases(activePhase) {
+  const el = document.getElementById('ff-phases');
+  if (!el) return;
+  if (!_flowPhases.length) { el.innerHTML = ''; return; }
+  el.innerHTML = _flowPhases.map((p) =>
+    `<span class="ff-phase-pill${p.id === activePhase ? ' active' : ''}">${_esc(p.label)}</span>`
+  ).join('');
+}
 
+function _renderQuestion(index) {
+  const vis = _visibleQs();
+  if (!vis.length) {
+    _renderReview();
+    _showScreen('review');
+    return;
+  }
+  if (index >= vis.length) index = vis.length - 1;
+  if (index < 0) index = 0;
+  _currentIdx = index;
+
+  const q = vis[index];
+  const n = vis.length;
+
+  // Dynamic option filter (e.g. app2 cannot repeat app1)
+  let renderQ = q;
+  if (q.id === 'app2' && _answers.app1) {
+    renderQ = { ...q, options: q.options.filter((o) => o !== _answers.app1) };
+  }
+
+  _renderPhases(q.phase);
   document.getElementById('ff-q-number').textContent = 'Question ' + (index + 1) + ' of ' + n;
   document.getElementById('ff-q-label').innerHTML = _esc(q.label) + (q.required ? '<span class="ff-q-required">*</span>' : '');
+  const hintEl = document.getElementById('ff-q-hint');
+  if (hintEl) {
+    hintEl.textContent = q.hint || '';
+    hintEl.style.display = q.hint ? 'block' : 'none';
+  }
   document.getElementById('ff-limit-counter').textContent = '';
   document.getElementById('ff-limit-counter').className = 'ff-limit-counter';
   document.getElementById('ff-q-input-wrap').innerHTML = '';
@@ -706,16 +893,16 @@ function _renderQuestion(index) {
   const wrap = document.getElementById('ff-q-input-wrap');
 
   switch (q.type) {
-    case 'text': case 'email': case 'number': wrap.appendChild(_buildText(q, existing)); break;
-    case 'textarea':   wrap.appendChild(_buildTextarea(q, existing)); break;
-    case 'choice':     wrap.appendChild(_buildChoice(q, existing)); break;
-    case 'multi':      wrap.appendChild(_buildMulti(q, existing)); break;
-    case 'yesno':      wrap.appendChild(_buildYesNo(q, existing)); break;
-    case 'scale':      wrap.appendChild(_buildScale(q, existing)); break;
-    default:           wrap.appendChild(_buildTextarea(q, existing));
+    case 'text': case 'email': case 'number': wrap.appendChild(_buildText(renderQ, existing)); break;
+    case 'textarea':   wrap.appendChild(_buildTextarea(renderQ, existing)); break;
+    case 'choice':     wrap.appendChild(_buildChoice(renderQ, existing)); break;
+    case 'multi':      wrap.appendChild(_buildMulti(renderQ, existing)); break;
+    case 'yesno':      wrap.appendChild(_buildYesNo(renderQ, existing)); break;
+    case 'scale':      wrap.appendChild(_buildScale(renderQ, existing)); break;
+    default:           wrap.appendChild(_buildTextarea(renderQ, existing));
   }
 
-  _updateNav(q);
+  _updateNav(renderQ);
   _updateProgress();
   const first = wrap.querySelector('input, textarea');
   if (first) setTimeout(() => first.focus(), 40);
@@ -727,7 +914,12 @@ function _buildText(q, existing) {
   inp.className = 'ff-input';
   inp.placeholder = q.placeholder || '';
   inp.value = existing != null ? String(existing) : '';
-  inp.addEventListener('input', () => { _answers[q.id] = inp.value; _updateLimit(q, inp.value); _updateNav(q); });
+  inp.addEventListener('input', () => {
+    _answers[q.id] = inp.value;
+    _updateLimit(q, inp.value);
+    _updateNav(q);
+    _maybeReflowVisible(q.id);
+  });
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _tryAdvance(); } });
   _updateLimit(q, inp.value);
   return inp;
@@ -738,7 +930,12 @@ function _buildTextarea(q, existing) {
   ta.className = 'ff-input';
   ta.placeholder = q.placeholder || '';
   ta.value = existing != null ? String(existing) : '';
-  ta.addEventListener('input', () => { _answers[q.id] = ta.value; _updateLimit(q, ta.value); _updateNav(q); });
+  ta.addEventListener('input', () => {
+    _answers[q.id] = ta.value;
+    _updateLimit(q, ta.value);
+    _updateNav(q);
+    _maybeReflowVisible(q.id);
+  });
   ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _tryAdvance(); } });
   _updateLimit(q, ta.value);
   return ta;
@@ -756,6 +953,7 @@ function _buildChoice(q, existing) {
       item.classList.add('selected');
       _answers[q.id] = opt;
       _updateNav(q);
+      _maybeReflowVisible(q.id);
     });
     wrap.appendChild(item);
   });
@@ -777,6 +975,7 @@ function _buildMulti(q, existing) {
       else          { selected.push(opt);       item.classList.add('selected');    box.textContent = '✓'; }
       _answers[q.id] = selected.slice();
       _updateNav(q);
+      _maybeReflowVisible(q.id);
     });
     wrap.appendChild(item);
   });
@@ -795,6 +994,7 @@ function _buildYesNo(q, existing) {
       btn.classList.add('selected');
       _answers[q.id] = label;
       _updateNav(q);
+      _maybeReflowVisible(q.id);
     });
     wrap.appendChild(btn);
   });
@@ -814,6 +1014,7 @@ function _buildScale(q, existing) {
       btn.classList.add('selected');
       _answers[q.id] = val;
       _updateNav(q);
+      _maybeReflowVisible(q.id);
     });
     wrap.appendChild(btn);
   }
@@ -853,13 +1054,26 @@ function _hasAnswer(q) {
   return true;
 }
 
+function _maybeReflowVisible(changedId) {
+  const visBefore = _visibleQs().map((q) => q.id);
+  const vis = _visibleQs();
+  const visAfter = vis.map((q) => q.id);
+  if (visAfter.join('|') === visBefore.join('|')) return;
+  const cur = visBefore[_currentIdx];
+  if (cur === changedId) {
+    const newIdx = visAfter.indexOf(changedId);
+    _renderQuestion(newIdx >= 0 ? newIdx : Math.min(_currentIdx, vis.length - 1));
+  }
+}
+
 function _updateNav(q) {
   const next = document.getElementById('ff-nav-next');
   const back = document.getElementById('ff-nav-back');
   if (!next || !back) return;
   next.disabled = _isOverLimit(q) || (q.required && !_hasAnswer(q));
   back.classList.toggle('invisible', _currentIdx === 0);
-  next.textContent = _currentIdx === _questions.length - 1 ? 'Review →' : 'Next →';
+  const vis = _visibleQs();
+  next.textContent = _currentIdx === vis.length - 1 ? 'Review →' : 'Next →';
 }
 
 function _tryAdvance() {
@@ -868,7 +1082,8 @@ function _tryAdvance() {
 }
 
 function _advanceForm() {
-  if (_currentIdx === _questions.length - 1) {
+  const vis = _visibleQs();
+  if (_currentIdx === vis.length - 1) {
     _renderReview();
     _showScreen('review');
   } else {
@@ -884,20 +1099,24 @@ function _answerDisplay(q) {
 }
 
 function _renderReview() {
-  const total    = _questions.length;
-  const answered = _questions.filter(q => _hasAnswer(q)).length;
+  const vis = _visibleQs();
+  const total    = vis.length;
+  const answered = vis.filter(q => _hasAnswer(q)).length;
   const subEl = document.getElementById('ff-review-sub');
-  if (subEl) subEl.textContent = answered + ' of ' + total + ' question' + (total !== 1 ? 's' : '') + ' answered';
+  if (subEl) {
+    subEl.textContent = answered + ' of ' + total + ' question' + (total !== 1 ? 's' : '') + ' answered'
+      + (_activeFlowId ? ' · ' + (_flowPhases.length ? 'decision flow' : 'flow') : '');
+  }
 
   const list = document.getElementById('ff-review-list');
   if (!list) return;
   list.innerHTML = '';
-  _questions.forEach((q, i) => {
+  vis.forEach((q, i) => {
     const display = _answerDisplay(q);
     const item = document.createElement('div');
     item.className = 'ff-review-item';
     item.innerHTML = `
-      <div class="ff-review-q-num">Q${i + 1}</div>
+      <div class="ff-review-q-num">Q${i + 1}${q.phase ? ' · ' + _esc(q.phase) : ''}</div>
       <div class="ff-review-q-label">${_esc(q.label)}</div>
       <div class="ff-review-answer${display ? '' : ' empty'}">${_esc(display || '(not answered)')}</div>
     `;
@@ -906,8 +1125,93 @@ function _renderReview() {
   _updateProgress();
 }
 
+function _renderHandoffs() {
+  _handoffOptions = buildHandoffOptions({
+    flowId: _activeFlowId,
+    questions: _visibleQs(),
+    answers: _answers,
+  });
+
+  const sub = document.getElementById('ff-handoff-sub');
+  if (sub) {
+    const human = _handoffOptions.filter((h) => h.target === 'human').length;
+    const agent = _handoffOptions.length - human;
+    sub.textContent = `${_handoffOptions.length} handoff${_handoffOptions.length === 1 ? '' : 's'} — ${human} for you, ${agent} to delegate`;
+  }
+
+  const list = document.getElementById('ff-handoff-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  _handoffOptions.forEach((opt) => {
+    const card = document.createElement('div');
+    card.className = 'ff-handoff-card' + (opt.target === 'human' ? ' human' : '');
+    const badgeCls = opt.target === 'human' ? 'human' : opt.target;
+    card.innerHTML = `
+      <div class="ff-handoff-card-head">
+        <span class="ff-handoff-badge ${badgeCls}">${_esc(handoffTargetLabel(opt.target))}</span>
+        <strong style="font-size:0.88rem;">${_esc(opt.title)}</strong>
+      </div>
+      <div class="ff-handoff-body">${_esc(opt.body)}</div>
+      <div class="ff-handoff-actions">
+        <button type="button" class="ff-handoff-btn" data-action="copy" data-id="${_esc(opt.id)}">Copy prompt</button>
+        ${opt.target !== 'human' ? `<button type="button" class="ff-handoff-btn primary" data-action="handoff" data-id="${_esc(opt.id)}">Create handoff → ${_esc(handoffTargetLabel(opt.target))}</button>` : ''}
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  list.querySelectorAll('[data-action="copy"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const opt = _handoffOptions.find((h) => h.id === btn.dataset.id);
+      if (!opt) return;
+      navigator.clipboard.writeText(opt.body).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1600);
+      }).catch(() => {});
+    });
+  });
+
+  list.querySelectorAll('[data-action="handoff"]').forEach((btn) => {
+    btn.addEventListener('click', () => _createHandoffFromOption(btn.dataset.id, btn));
+  });
+
+  _updateProgress();
+}
+
+async function _createHandoffFromOption(optionId, btn) {
+  const opt = _handoffOptions.find((h) => h.id === optionId);
+  if (!opt || opt.target === 'human') return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  try {
+    const result = await createHandoffDocument({
+      apiBase: window.location.origin,
+      target: opt.target,
+      title: opt.title,
+      goal: opt.goal || opt.title,
+      next: opt.nextSteps || [],
+      noteBody: opt.body,
+      project: 'odysseus',
+      source: 'odysseus',
+    });
+    btn.textContent = 'Created!';
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Handoff → ${opt.target}: ${result.docId.slice(0, 8)}…`);
+    }
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2200);
+  } catch (err) {
+    btn.textContent = 'Failed';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+    const errEl = document.getElementById('ff-input-error');
+    if (errEl) errEl.textContent = err.message || 'Handoff failed';
+  }
+}
+
 function _buildExport() {
-  return _questions.map((q, i) =>
+  return _visibleQs().map((q, i) =>
     'Q' + (i + 1) + '. ' + q.label + '\n' + (_answerDisplay(q) || '(not answered)')
   ).join('\n\n');
 }
@@ -938,6 +1242,7 @@ function _downloadAnswers() {
 
 function _restart() {
   _questions = []; _answers = {}; _currentIdx = 0; _pendingFile = null;
+  _activeFlowId = null; _flowPhases = []; _handoffOptions = [];
   const paste = document.getElementById('ff-paste');
   const fileIn = document.getElementById('ff-file-input');
   const fileChosen = document.getElementById('ff-file-chosen');
@@ -957,6 +1262,6 @@ function _esc(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const formflowModule = { openPanel, closePanel, togglePanel };
+const formflowModule = { openPanel, closePanel, togglePanel, openWithQuestions, openWithText, openWithFlow };
 export default formflowModule;
 window.formflowModule = formflowModule;

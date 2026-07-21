@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Close Loop — /end-chat</title>
+<meta name="description" content="One-shot Cursor close-out: session catalog → end-session recap → AgentMemory → Odysseus note.">
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,500;9..144,700&display=swap");
+
+  :root {
+    --bg: #0e1412;
+    --bg-elev: #16201c;
+    --bg-panel: #1a2822;
+    --line: rgba(180, 220, 200, 0.12);
+    --text: #e7f0ea;
+    --muted: #8aa396;
+    --accent: #3dcf9a;
+    --accent-dim: rgba(61, 207, 154, 0.14);
+    --warn: #e6b35a;
+    --danger: #e07a6a;
+    --radius: 14px;
+    --max: 920px;
+    --font: "IBM Plex Sans", system-ui, sans-serif;
+    --display: "Fraunces", Georgia, serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font);
+    background:
+      radial-gradient(900px 500px at 10% -10%, rgba(61, 207, 154, 0.16), transparent 55%),
+      radial-gradient(700px 400px at 100% 0%, rgba(90, 140, 255, 0.08), transparent 50%),
+      var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+
+  header.hero {
+    padding: 1.5rem 0 2rem;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 2rem;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin-bottom: 0.75rem;
+  }
+  .lede { color: var(--muted); font-size: 1.05rem; max-width: 42rem; }
+
+  .cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+    padding: 0.65rem 1rem;
+    background: var(--accent-dim);
+    border: 1px solid rgba(61, 207, 154, 0.35);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    color: var(--accent);
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-size: 1.45rem;
+    margin: 2.25rem 0 0.85rem;
+  }
+  h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: var(--text); }
+  p, li { color: var(--muted); }
+  p + p { margin-top: 0.75rem; }
+  strong { color: var(--text); font-weight: 600; }
+  a { color: var(--accent); }
+
+  .loop {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1.25rem 0 1.5rem;
+  }
+  .step {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem;
+    align-items: start;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+    position: relative;
+  }
+  .step + .step::before {
+    content: "";
+    position: absolute;
+    left: 1.55rem;
+    top: -0.75rem;
+    width: 2px;
+    height: 0.75rem;
+    background: rgba(61, 207, 154, 0.35);
+  }
+  .num {
+    width: 2.1rem; height: 2.1rem;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+  .step h3 { margin: 0.1rem 0 0.35rem; }
+  .step p { margin: 0; font-size: 0.95rem; }
+  .tag {
+    display: inline-block;
+    margin-top: 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--line);
+    color: var(--text);
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+  @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+  }
+  .card h3 { margin-top: 0; }
+
+  pre, code { font-family: var(--mono); }
+  pre {
+    background: #0a100e;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    color: #cfe8db;
+    margin: 0.75rem 0 1rem;
+  }
+  code.inline {
+    font-size: 0.85em;
+    background: var(--bg-panel);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th { color: var(--text); font-weight: 600; }
+  td { color: var(--muted); }
+
+  .callout {
+    border-left: 3px solid var(--warn);
+    background: rgba(230, 179, 90, 0.08);
+    padding: 0.85rem 1rem;
+    border-radius: 0 10px 10px 0;
+    margin: 1rem 0;
+    color: var(--muted);
+  }
+  .callout strong { color: var(--warn); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+
+  ul { padding-left: 1.2rem; margin: 0.5rem 0 1rem; }
+  li { margin: 0.3rem 0; }
+  .mermaid-wrap {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.25rem;
+    margin: 1rem 0 1.5rem;
+    overflow-x: auto;
+  }
+  svg.flow { width: 100%; max-width: 860px; height: auto; display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="kicker">Cursor · Odysseus · AgentMemory</div>
+      <h1>Session close-out loop</h1>
+      <p class="lede">
+        One command when a chat is done: catalog the session, write a continuity recap,
+        save durable memory, and land a note in Odysseus — so the next agent can resume without rediscovery.
+      </p>
+      <div class="cmd">/end-chat</div>
+    </header>
+
+    <section>
+      <h2>The loop</h2>
+      <div class="mermaid-wrap" aria-label="Close-out flow diagram">
+        <svg class="flow" viewBox="0 0 840 160" xmlns="http://www.w3.org/2000/svg" role="img">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 Z" fill="#3dcf9a"/>
+            </marker>
+          </defs>
+          <rect x="10" y="40" width="170" height="70" rx="12" fill="#1a2822" stroke="rgba(61,207,154,0.35)"/>
+          <text x="95" y="72" text-anchor="middle" fill="#e7f0ea" font-family="IBM Plex Sans" font-size="13" font-weight="600">1 · Catalog</text>
+          <text x="95" y="92" text-anchor="middle" fill="#8aa396" font-family="IBM Plex Mono" font-size="11">session id</text>
+
+          <line x1="180" y1="75" x2="220" y2="75" stroke="#3dcf9a" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="220" y="40" width="170" height="70" rx="12" fill="#1a2822" stroke="rgba(61,207,154,0.35)"/>
+          <text x="305" y="72" text-anchor="middle" fill="#e7f0ea" font-family="IBM Plex Sans" font-size="13" font-weight="600">2 · End session</text>
+          <text x="305" y="92" text-anchor="middle" fill="#8aa396" font-family="IBM Plex Mono" font-size="11">recap.md</text>
+
+          <line x1="390" y1="75" x2="430" y2="75" stroke="#3dcf9a" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="430" y="40" width="170" height="70" rx="12" fill="#1a2822" stroke="rgba(61,207,154,0.35)"/>
+          <text x="515" y="72" text-anchor="middle" fill="#e7f0ea" font-family="IBM Plex Sans" font-size="13" font-weight="600">3 · AgentMemory</text>
+          <text x="515" y="92" text-anchor="middle" fill="#8aa396" font-family="IBM Plex Mono" font-size="11">memory_save</text>
+
+          <line x1="600" y1="75" x2="640" y2="75" stroke="#3dcf9a" stroke-width="2" marker-end="url(#arrow)"/>
+
+          <rect x="640" y="40" width="180" height="70" rx="12" fill="#1a2822" stroke="rgba(61,207,154,0.55)"/>
+          <text x="730" y="72" text-anchor="middle" fill="#e7f0ea" font-family="IBM Plex Sans" font-size="13" font-weight="600">4 · note2ody</text>
+          <text x="730" y="92" text-anchor="middle" fill="#8aa396" font-family="IBM Plex Mono" font-size="11">Odysseus note</text>
+        </svg>
+      </div>
+
+      <div class="loop">
+        <article class="step">
+          <div class="num">1</div>
+          <div>
+            <h3>cursor-session-catalog</h3>
+            <p>Resolve this chat’s session ID from <code class="inline">agent-transcripts</code>, plus resume command and transcript path.</p>
+            <span class="tag">skill: cursor-session-catalog</span>
+          </div>
+        </article>
+        <article class="step">
+          <div class="num">2</div>
+          <div>
+            <h3>cursor-end-session</h3>
+            <p>Synthesize goals, changes, blockers, artifacts, and a short next-session checklist into a recap markdown body.</p>
+            <span class="tag">skill: cursor-end-session</span>
+          </div>
+        </article>
+        <article class="step">
+          <div class="num">3</div>
+          <div>
+            <h3>AgentMemory</h3>
+            <p>Persist one dense paragraph via MCP <code class="inline">memory_save</code> (and optional <code class="inline">localhost:40001/remember</code>). Failures are non-fatal.</p>
+            <span class="tag">MCP: user-agentmemory</span>
+          </div>
+        </article>
+        <article class="step">
+          <div class="num">4</div>
+          <div>
+            <h3>create-note2ody</h3>
+            <p>Write the recap to Odysseus as a note (<code class="inline">label: cursor</code>) and return <code class="inline">note_id</code> + <code class="inline">open_url</code>.</p>
+            <span class="tag">skill: create-note2ody</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>How to run</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Slash command (preferred)</h3>
+          <p>In any Cursor agent chat, type:</p>
+          <pre>/end-chat</pre>
+          <p>Runs the full loop once. Lives at <code class="inline">~/.cursor/commands/end-chat.md</code>.</p>
+        </div>
+        <div class="card">
+          <h3>Natural language</h3>
+          <p>Also works if you say:</p>
+          <ul>
+            <li>“end chat”</li>
+            <li>“close session loop”</li>
+            <li>“wrap up and save everywhere”</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>What you get back</h2>
+      <table>
+        <thead>
+          <tr><th>Surface</th><th>Artifact</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Catalog</td>
+            <td>Session UUID + <code class="inline">agent --resume</code></td>
+            <td>Reopen this exact chat later</td>
+          </tr>
+          <tr>
+            <td>AgentMemory</td>
+            <td>Saved insight (<code class="inline">workflow</code> / <code class="inline">fact</code>)</td>
+            <td>Future agents can <code class="inline">memory_recall</code></td>
+          </tr>
+          <tr>
+            <td>Odysseus</td>
+            <td>Note titled <code class="inline">Cursor session recap — DATE — topic</code></td>
+            <td>Human-readable continuity in HQ</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recap shape</h2>
+      <pre># End session recap — &lt;topic&gt;
+
+**Date:** YYYY-MM-DD
+**Workspace:** &lt;repo&gt;
+**Session ID:** &lt;uuid&gt;
+
+## Goals &amp; outcomes
+## What we set up / changed
+## What's working
+## Blocked / errors
+## Artifacts
+## Next session
+1. …
+2. …
+3. …</pre>
+    </section>
+
+    <section>
+      <h2>Requirements</h2>
+      <ul>
+        <li><code class="inline">ODYSSEUS_URL</code> + <code class="inline">ODYSSEUS_API_TOKEN</code> in <code class="inline">~/code/odysseus/.env</code> (token needs <code class="inline">todos:write</code>)</li>
+        <li>MCP server <code class="inline">user-agentmemory</code> connected (optional but recommended)</li>
+        <li>Optional: archivist remember API on <code class="inline">http://localhost:40001/remember</code></li>
+      </ul>
+      <div class="callout">
+        <strong>Non-fatal steps:</strong> AgentMemory and <code class="inline">/remember</code> may fail if services are down.
+        The Odysseus note is the hard requirement — if that 403s, enable write scope in Odysseus Settings.
+      </div>
+    </section>
+
+    <section>
+      <h2>Related paths</h2>
+      <table>
+        <thead><tr><th>Piece</th><th>Path</th></tr></thead>
+        <tbody>
+          <tr><td>Slash command</td><td><code class="inline">~/.cursor/commands/end-chat.md</code></td></tr>
+          <tr><td>End session skill</td><td><code class="inline">~/.cursor/skills/cursor-end-session/SKILL.md</code></td></tr>
+          <tr><td>Session catalog</td><td><code class="inline">~/.cursor/skills/cursor-session-catalog/SKILL.md</code></td></tr>
+          <tr><td>Note helper</td><td><code class="inline">~/.cursor/skills/create-note2ody/scripts/note2ody.py</code></td></tr>
+          <tr><td>This doc</td><td><code class="inline">docs/session-close-loop.html</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      Odysseus session continuity · run <strong>/end-chat</strong> once at the end of a Cursor agent conversation.
+    </footer>
+  </div>
+</body>
+</html>

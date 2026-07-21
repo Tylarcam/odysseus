@@ -127,7 +127,20 @@ export function _addDays(dateStr, n) {
 
 export function _shiftDT(iso, days) {
   if (typeof iso !== 'string' || !iso) return '';
-  const d = new Date(iso);
+  const aware = /[Zz]$|[+\-]\d{2}:?\d{2}$/.test(iso);
+  // Naive: shift the calendar date while preserving the written wall-clock
+  // suffix. Aware: shift the absolute instant, then re-emit local wall-clock
+  // with the current offset so PUT paths keep is_utc semantics.
+  if (aware) {
+    const d = new Date(iso);
+    if (isNaN(d)) return '';
+    d.setDate(d.getDate() + days);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${_ds(d)}T${hh}:${mm}:${ss}${_tzOffset()}`;
+  }
+  const d = new Date(iso.slice(0, 10) + 'T' + (iso.slice(11, 19) || '00:00:00'));
   if (isNaN(d)) return '';
   d.setDate(d.getDate() + days);
   return _ds(d) + (iso.length > 10 ? 'T' + iso.slice(11) : '');
@@ -143,6 +156,46 @@ export function _tzOffset() {
   return `${sign}${h}:${m}`;
 }
 
+// Wall-clock date + time in the USER's timezone for any ISO shape:
+//   - date-only → midnight on that date
+//   - tz-aware (Z / ±HH:MM) → convert absolute instant to local parts
+//   - naive → trust the written digits (legacy TimeTree / pre-is_utc rows)
+// Week-grid positioning MUST use this — regex on UTC digits puts a 10:00
+// MST event in the 4 PM slot (16:00Z).
+export function _localParts(isoStr) {
+  if (typeof isoStr !== 'string' || !isoStr) return null;
+  if (isoStr.length === 10) return { date: isoStr, hours: 0, minutes: 0, seconds: 0 };
+  if (/[Zz]$|[+\-]\d{2}:?\d{2}$/.test(isoStr)) {
+    const d = new Date(isoStr);
+    if (isNaN(d)) return null;
+    return {
+      date: _ds(d),
+      hours: d.getHours(),
+      minutes: d.getMinutes(),
+      seconds: d.getSeconds(),
+    };
+  }
+  const m = isoStr.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return { date: isoStr.slice(0, 10), hours: 0, minutes: 0, seconds: 0 };
+  return {
+    date: m[1],
+    hours: parseInt(m[2], 10),
+    minutes: parseInt(m[3], 10),
+    seconds: parseInt(m[4] || '0', 10),
+  };
+}
+
+export function _localMinutes(isoStr) {
+  const p = _localParts(isoStr);
+  return p == null ? null : p.hours * 60 + p.minutes;
+}
+
+export function _localTimeHHMM(isoStr) {
+  const p = _localParts(isoStr);
+  if (!p) return '';
+  return `${String(p.hours).padStart(2, '0')}:${String(p.minutes).padStart(2, '0')}`;
+}
+
 // For naive datetimes (no tz suffix), display the date portion as written —
 // TimeTree and many sync tools store "local time" without an offset, so
 // re-interpreting them via the user's tz would shift days.
@@ -151,16 +204,6 @@ export function _tzOffset() {
 // bucket by the USER's local date. Without this an event at
 // "2026-05-13T22:00:00Z" (07:00 May 14 JST) would render on May 13.
 export function _localDateOf(isoStr) {
-  if (typeof isoStr !== 'string' || !isoStr) return '';
-  if (isoStr.length === 10) return isoStr;
-  if (/[Zz]$|[+\-]\d{2}:?\d{2}$/.test(isoStr)) {
-    const d = new Date(isoStr);
-    if (!isNaN(d)) {
-      const y  = d.getFullYear();
-      const m  = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${dd}`;
-    }
-  }
-  return isoStr.slice(0, 10);
+  const p = _localParts(isoStr);
+  return p ? p.date : '';
 }

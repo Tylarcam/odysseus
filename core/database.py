@@ -324,6 +324,8 @@ class EmailAccount(TimestampMixin, Base):
     smtp_password  = Column(String, default="")
 
     from_address   = Column(String, default="")
+    # "imap" = standard IMAP/SMTP; "gmail_gog" = gogcli OAuth backend
+    provider       = Column(String, default="imap", nullable=False)
 
     __table_args__ = (
         Index('ix_email_accounts_owner_default', 'owner', 'is_default'),
@@ -974,6 +976,22 @@ def _migrate_add_notes_sort_order():
             conn.execute("ALTER TABLE notes ADD COLUMN ai_content_hash TEXT")
         if columns and "agent_session_id" not in columns:
             conn.execute("ALTER TABLE notes ADD COLUMN agent_session_id TEXT")
+        if columns and "handoff_doc_id" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_doc_id TEXT")
+        if columns and "handoff_target" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_target TEXT")
+        if columns and "handoff_at" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_at TEXT")
+        if columns and "handoff_relay_status" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_status TEXT")
+        if columns and "handoff_outcome" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_outcome TEXT")
+        if columns and "handoff_relay_session_id" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_session_id TEXT")
+        if columns and "handoff_relay_started_at" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_started_at TEXT")
+        if columns and "handoff_relay_completed_at" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_completed_at TEXT")
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1498,6 +1516,113 @@ class Note(TimestampMixin, Base):
     # Chat session spawned by the note's "Agent" button (solve-this-todo).
     # The note shows a clickable tag that opens this session for review.
     agent_session_id  = Column(String, nullable=True)
+    handoff_doc_id    = Column(String, nullable=True)
+    handoff_target    = Column(String, nullable=True)
+    handoff_at        = Column(String, nullable=True)
+    handoff_relay_status = Column(String, nullable=True)
+    handoff_outcome   = Column(Text, nullable=True)
+    handoff_relay_session_id = Column(String, nullable=True)
+    handoff_relay_started_at = Column(String, nullable=True)
+    handoff_relay_completed_at = Column(String, nullable=True)
+
+
+class JobRecord(TimestampMixin, Base):
+    """A job posting captured from email or manual ingest (Phase 1 pipeline)."""
+    __tablename__ = "job_records"
+
+    id = Column(String, primary_key=True, index=True)
+    owner = Column(String, nullable=True, index=True)
+    status = Column(String, default="email_received", index=True)
+    company = Column(String, nullable=True)
+    role = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    compensation = Column(String, nullable=True)
+    source = Column(String, default="manual")
+    apply_url = Column(String, nullable=True)
+    handshake_job_id = Column(String, nullable=True)
+    jd_text = Column(Text, nullable=True)
+    confidence = Column(String, nullable=True)
+    dedup_key = Column(String, nullable=True, index=True)
+    folder_slug = Column(String, nullable=True)
+    jd_path = Column(String, nullable=True)
+    raw_input = Column(JSON, nullable=True)
+    duplicate_of_id = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+    match_score = Column(String, nullable=True)
+    gate_score = Column(String, nullable=True)
+    profile = Column(String, nullable=True)
+    evaluation_path = Column(String, nullable=True)
+    validation_report_path = Column(String, nullable=True)
+    handoff_doc_id = Column(String, nullable=True)
+    terminal_status = Column(String, nullable=True)
+    notion_page_id = Column(String, nullable=True)
+    apply_package_json = Column(JSON, nullable=True)
+    followup_task_id = Column(String, nullable=True)
+    research_session_id = Column(String, nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    ready_to_apply_at = Column(DateTime, nullable=True)
+
+    events = relationship(
+        "JobEvent",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        order_by="JobEvent.created_at",
+    )
+
+    __table_args__ = (
+        Index("ix_job_records_status_created", "status", "created_at"),
+        Index("ix_job_records_dedup", "dedup_key", "status"),
+    )
+
+
+class JobEvent(Base):
+    """Audit log for job pipeline state transitions."""
+    __tablename__ = "job_events"
+
+    id = Column(String, primary_key=True, index=True)
+    job_id = Column(String, ForeignKey("job_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_status = Column(String, nullable=True)
+    to_status = Column(String, nullable=False)
+    stage = Column(String, nullable=False)
+    message = Column(String, nullable=True)
+    detail = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False)
+
+    job = relationship("JobRecord", back_populates="events")
+
+    __table_args__ = (
+        Index("ix_job_events_job_created", "job_id", "created_at"),
+    )
+
+
+class OperatorAudit(Base):
+    """Audit log for operator desktop/browser actions (executed or denied)."""
+    __tablename__ = "operator_audit"
+
+    id         = Column(String, primary_key=True, index=True)
+    timestamp  = Column(DateTime, nullable=False, default=utcnow_naive)
+    capability = Column(String, nullable=False)   # desktop_action | browser_action
+    action     = Column(String, nullable=False)   # click, type, navigate, speak, ...
+    target     = Column(Text, nullable=True)      # selector / coordinates / URL / text anchor
+    session_id = Column(String, nullable=True, index=True)
+    result     = Column(String, default="ok")     # ok | error | denied
+
+    __table_args__ = (
+        Index("ix_operator_audit_time", "capability", "timestamp"),
+    )
+
+
+class OperatorTrace(Base):
+    """SpecTracer context bundle — ephemeral dev scratch context (24h/50 cap)."""
+    __tablename__ = "operator_traces"
+
+    id              = Column(String, primary_key=True, index=True)
+    created_at      = Column(DateTime, nullable=False, default=utcnow_naive, index=True)
+    page_url        = Column(Text, nullable=True)
+    element_summary = Column(String, nullable=True)   # e.g. "button.btn-primary 'Join Beta'"
+    bundle_version  = Column(String, nullable=True)   # extension payload version
+    bundle          = Column(Text, nullable=False)    # raw JSON as posted
 
 
 class CalendarCal(TimestampMixin, Base):
@@ -1682,7 +1807,71 @@ def init_db():
     _migrate_encrypt_email_passwords()
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
+    _migrate_add_email_account_provider_column()
     _migrate_backfill_task_folders()
+    _migrate_job_records_phase4_columns()
+    _migrate_job_records_phase23_columns()
+
+
+def _migrate_job_records_phase23_columns():
+    """Add Phase 2/3 job pipeline columns (handoff link, evaluation, validation)."""
+    new_cols = {
+        "handoff_doc_id": "VARCHAR",
+        "evaluation_path": "VARCHAR",
+        "validation_report_path": "VARCHAR",
+        "match_score": "FLOAT",
+        "gate_score": "FLOAT",
+        "profile": "VARCHAR",
+    }
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(job_records)"))]
+            if not cols:
+                return
+            for col_name, col_def in new_cols.items():
+                if col_name not in cols:
+                    conn.execute(text(f"ALTER TABLE job_records ADD COLUMN {col_name} {col_def}"))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"job_records Phase 2/3 migration: {e}")
+
+
+def _migrate_job_records_phase4_columns():
+    """Add Phase 4 job pipeline columns (apply package, follow-ups, research)."""
+    new_cols = {
+        "terminal_status": "VARCHAR",
+        "notion_page_id": "VARCHAR",
+        "apply_package_json": "TEXT",
+        "followup_task_id": "VARCHAR",
+        "research_session_id": "VARCHAR",
+        "applied_at": "DATETIME",
+        "ready_to_apply_at": "DATETIME",
+    }
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(job_records)"))]
+            if not cols:
+                return
+            for col_name, col_def in new_cols.items():
+                if col_name not in cols:
+                    conn.execute(text(f"ALTER TABLE job_records ADD COLUMN {col_name} {col_def}"))
+            conn.commit()
+            logging.getLogger(__name__).info("Job records Phase 4 columns migration complete")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"job_records Phase 4 migration: {e}")
+
+
+def _migrate_add_email_account_provider_column():
+    """Add provider column to email_accounts for gogcli Gmail support."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(email_accounts)"))]
+            if cols and "provider" not in cols:
+                conn.execute(text("ALTER TABLE email_accounts ADD COLUMN provider VARCHAR NOT NULL DEFAULT 'imap'"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added provider column to email_accounts")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"email_accounts.provider migration: {e}")
 
 
 def _migrate_backfill_task_folders():
@@ -1757,17 +1946,23 @@ def _migrate_chat_messages_fts():
             END;
             """
         )
-        conn.execute(
-            """
-            INSERT INTO chat_messages_fts(content, message_id, session_id, role)
-            SELECT COALESCE(cm.content, ''), cm.id, cm.session_id, cm.role
-            FROM chat_messages cm
-            WHERE NOT EXISTS (
-                SELECT 1 FROM chat_messages_fts fts
-                WHERE fts.message_id = cm.id
+        # Only backfill on first creation (FTS table empty). The AFTER INSERT
+        # trigger keeps the index in sync after that, so re-running the backfill
+        # on every boot is unnecessary. The previous form used
+        # `WHERE NOT EXISTS (SELECT 1 FROM chat_messages_fts WHERE message_id=...)`
+        # — but message_id is UNINDEXED in the FTS5 table, so that correlated
+        # subquery is O(n^2) against the full chat history and hangs init_db()
+        # (which runs at import time) once chat_messages grows past a few
+        # thousand rows.
+        fts_count = conn.execute("SELECT COUNT(*) FROM chat_messages_fts").fetchone()[0]
+        if fts_count == 0:
+            conn.execute(
+                """
+                INSERT INTO chat_messages_fts(content, message_id, session_id, role)
+                SELECT COALESCE(cm.content, ''), cm.id, cm.session_id, cm.role
+                FROM chat_messages cm
+                """
             )
-            """
-        )
         conn.commit()
     except Exception as e:
         logging.getLogger(__name__).warning(f"chat_messages FTS migration failed: {e}")
@@ -2109,6 +2304,20 @@ def get_session_by_id(session_id: str):
     with get_db_session() as db:
         return db.query(Session).filter(Session.id == session_id).first()
 
+def calendar_owner_key(owner):
+    """Map effective_user() to the CalendarCal.owner key calendar routes use.
+
+    None → no scoping (caller explicitly opted out).
+    "" → FALLBACK_OWNER (same as calendar_routes._require_user in single-user mode).
+    username → unchanged.
+    """
+    if owner is None:
+        return None
+    if owner:
+        return owner
+    return os.environ.get("ODYSSEUS_FALLBACK_OWNER", "owner@localhost")
+
+
 def get_upcoming_events(owner, horizon_days: int = 60, limit: int = 40):
     """Upcoming, non-cancelled events as {uid, title, start} dicts, soonest first.
 
@@ -2118,14 +2327,15 @@ def get_upcoming_events(owner, horizon_days: int = 60, limit: int = 40):
     acting on) other users' calendars."""
     from datetime import timedelta
     now = utcnow_naive()
+    owner_key = calendar_owner_key(owner)
     with get_db_session() as db:
         q = db.query(CalendarEvent).join(CalendarCal).filter(
             CalendarEvent.dtstart >= now,
             CalendarEvent.dtstart <= now + timedelta(days=horizon_days),
             CalendarEvent.status != "cancelled",
         )
-        if owner is not None:
-            q = q.filter(CalendarCal.owner == owner)
+        if owner_key is not None:
+            q = q.filter(CalendarCal.owner == owner_key)
         return [
             {
                 "uid": e.uid,

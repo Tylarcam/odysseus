@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CEO Brief Transcription — Agent Handoff</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #171d25;
+      --panel2: #1c2430;
+      --line: #2a3544;
+      --text: #e7edf5;
+      --muted: #8b9bb0;
+      --accent: #3d9cf0;
+      --accent2: #5eead4;
+      --ok: #34d399;
+      --code: #0b0f14;
+      --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      --sans: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    /* Pure-CSS tabs — works with no JS (Cursor preview / Simple Browser) */
+    .tab-radio {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      clip: rect(0,0,0,0);
+    }
+    .panel { display: none !important; }
+    #tab-overview:checked ~ main #overview,
+    #tab-paths:checked ~ main #paths,
+    #tab-flow:checked ~ main #flow,
+    #tab-snippets:checked ~ main #snippets,
+    #tab-playbook:checked ~ main #playbook,
+    #tab-apis:checked ~ main #apis {
+      display: block !important;
+    }
+    #tab-overview:checked ~ header label[for="tab-overview"],
+    #tab-paths:checked ~ header label[for="tab-paths"],
+    #tab-flow:checked ~ header label[for="tab-flow"],
+    #tab-snippets:checked ~ header label[for="tab-snippets"],
+    #tab-playbook:checked ~ header label[for="tab-playbook"],
+    #tab-apis:checked ~ header label[for="tab-apis"] {
+      color: var(--text);
+      background: var(--panel2);
+      border-color: var(--line);
+    }
+
+    header {
+      padding: 1.25rem 1.5rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: #15202b;
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    header h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.15rem;
+      font-weight: 650;
+    }
+    .open-hint {
+      margin: 0.55rem 0 0;
+      padding: 0.45rem 0.65rem;
+      background: #1a2a1f;
+      border: 1px solid #1f6b4f;
+      border-radius: 8px;
+      color: var(--ok);
+      font-size: 0.78rem;
+    }
+    .recap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.65rem;
+    }
+    .recap-box {
+      flex: 1 1 28rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      user-select: all;
+    }
+    .badge {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .badge.ok { color: var(--ok); border-color: #1f6b4f; }
+    nav.tabs {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      margin-top: 0.85rem;
+    }
+    nav.tabs label {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 0.45rem 0.75rem;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.85rem;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    nav.tabs label:hover {
+      color: var(--text);
+      background: var(--panel);
+    }
+    main { padding: 1.1rem 1.5rem 3rem; max-width: 1100px; }
+    h2 { font-size: 1rem; margin: 0 0 0.75rem; color: var(--accent2); }
+    h3 { font-size: 0.9rem; margin: 1.1rem 0 0.45rem; color: var(--accent); }
+    p, li { color: var(--text); font-size: 0.92rem; }
+    .muted { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.75rem;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.85rem 0.95rem;
+    }
+    .card strong { display: block; margin-bottom: 0.25rem; font-size: 0.88rem; }
+    .path {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--accent2);
+      word-break: break-all;
+      user-select: all;
+      cursor: text;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.55rem 0.6rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    td code, .inline-code {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--accent2);
+    }
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+      margin: 0.75rem 0 1rem;
+    }
+    .step {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.55rem 0.7rem;
+      min-width: 8.5rem;
+      flex: 1 1 8.5rem;
+    }
+    .step b { display: block; font-size: 0.78rem; color: var(--accent); }
+    .step span { font-size: 0.8rem; color: var(--muted); }
+    .arrow { color: var(--muted); font-size: 1.1rem; }
+    pre {
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.85rem;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      line-height: 1.5;
+      margin: 0.4rem 0 1rem;
+      user-select: text;
+      white-space: pre-wrap;
+    }
+    .snip-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.9rem;
+    }
+    .snip-head .label {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+    button.copy {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.72rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.copy:hover { border-color: var(--accent); color: var(--accent); }
+    button.copy.copied { color: var(--ok); border-color: #1f6b4f; }
+    .search {
+      width: 100%;
+      max-width: 28rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.5rem 0.7rem;
+      font: inherit;
+      margin-bottom: 0.85rem;
+    }
+    .toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: #123524;
+      color: var(--ok);
+      border: 1px solid #1f6b4f;
+      padding: 0.5rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 50;
+    }
+    .toast.show { opacity: 1; }
+    details {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      margin: 0.5rem 0;
+    }
+    details summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.88rem;
+    }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.9rem; }
+    .pill {
+      font-size: 0.72rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Radios MUST be siblings before header+main for :checked ~ selectors -->
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-overview" checked />
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-paths" />
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-flow" />
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-snippets" />
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-playbook" />
+  <input class="tab-radio" type="radio" name="handoff-tab" id="tab-apis" />
+
+  <header>
+    <h1>CEO Brief Transcription — Agent Handoff</h1>
+    <div class="muted" style="font-size:0.82rem">Odysseus · video URL → transcript → decision-ready brief (+ Listen audio)</div>
+    <p class="open-hint">Tabs work with CSS only — click Overview / Paths / Flow / Snippets below. If you still see source code, open this file in Chrome (not the editor).</p>
+    <div class="recap">
+      <div class="recap-box" id="projectRecap">Odysseus: personal agent OS — chat, research, docs, voice, email, cron CEO briefs.</div>
+      <span class="badge ok" id="recapCount">88 / 100</span>
+      <span class="badge">repo: odysseus</span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <label for="tab-overview">Overview</label>
+      <label for="tab-paths">Canonical paths</label>
+      <label for="tab-flow">How it works</label>
+      <label for="tab-snippets">Code snippets</label>
+      <label for="tab-playbook">Agent playbook</label>
+      <label for="tab-apis">APIs &amp; cron</label>
+    </nav>
+  </header>
+
+  <main>
+    <section class="panel" id="overview">
+      <h2>What to reuse in a new build</h2>
+      <p>Three related surfaces share one idea: <strong>turn long text (video or docs) into a CEO-scan brief</strong>, optionally spoken.</p>
+      <div class="grid" style="margin-top:0.9rem">
+        <div class="card">
+          <strong>1. YouTube → CEO Brief (skill)</strong>
+          <span class="muted">Agent workflow: transcribe_video → structured markdown brief → save docs.</span>
+          <div class="path">C:\Users\tylar\code\odysseus\data\skills\general\youtube-ceo-brief\SKILL.md</div>
+        </div>
+        <div class="card">
+          <strong>2. Transcript waterfall</strong>
+          <span class="muted">Captions first, then Aether (yt-dlp + Groq Whisper).</span>
+          <div class="path">C:\Users\tylar\code\odysseus\services\transcribe\video_transcriber.py</div>
+        </div>
+        <div class="card">
+          <strong>3. Doc Listen audio brief</strong>
+          <span class="muted">Doc text → LLM spoken brief → Open Notebook MP3 or browser TTS.</span>
+          <div class="path">C:\Users\tylar\code\odysseus\services\documents\audio_brief.py</div>
+        </div>
+        <div class="card">
+          <strong>4. Morning cron CEO Brief</strong>
+          <span class="muted">Harvest chron outputs → ceo-brief-{date} doc → kickoff Listen.</span>
+          <div class="path">C:\Users\tylar\code\odysseus\src\builtin_actions.py → action_ceo_brief</div>
+        </div>
+      </div>
+
+      <h3>Insight synthesis (product intent)</h3>
+      <div class="path">C:\Users\tylar\code\odysseus\docs\vault-ceo-transcript-insights.md</div>
+      <p class="muted" style="margin-top:0.4rem">Scan ≤45s · one human action · verb-first playbook · edges/wedges · evidence before ask.</p>
+
+      <div class="pill-row">
+        <span class="pill">/brief &lt;url&gt;</span>
+        <span class="pill">transcribe_video tool</span>
+        <span class="pill">POST /api/transcribe/url</span>
+        <span class="pill">POST /api/document/{id}/audio-brief</span>
+        <span class="pill">cron 0 9 * * *</span>
+      </div>
+    </section>
+
+    <section class="panel" id="paths">
+      <h2>Canonical paths (triple-click to select)</h2>
+      <input class="search" id="pathFilter" type="search" placeholder="Filter paths…" />
+      <table id="pathTable">
+        <thead>
+          <tr><th>Role</th><th>Full path</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Skill (video CEO brief)</td><td class="path">C:\Users\tylar\code\odysseus\data\skills\general\youtube-ceo-brief\SKILL.md</td></tr>
+          <tr><td>Transcript service</td><td class="path">C:\Users\tylar\code\odysseus\services\transcribe\video_transcriber.py</td></tr>
+          <tr><td>Transcript package export</td><td class="path">C:\Users\tylar\code\odysseus\services\transcribe\__init__.py</td></tr>
+          <tr><td>HTTP: transcribe</td><td class="path">C:\Users\tylar\code\odysseus\routes\transcribe_routes.py</td></tr>
+          <tr><td>Agent tool impl</td><td class="path">C:\Users\tylar\code\odysseus\src\tool_implementations.py → do_transcribe_video</td></tr>
+          <tr><td>Tool schema / index</td><td class="path">C:\Users\tylar\code\odysseus\src\tool_schemas.py · tool_index.py</td></tr>
+          <tr><td>Slash /brief</td><td class="path">C:\Users\tylar\code\odysseus\static\js\slashCommands.js → _cmdVideoBrief</td></tr>
+          <tr><td>Doc Listen pipeline</td><td class="path">C:\Users\tylar\code\odysseus\services\documents\audio_brief.py</td></tr>
+          <tr><td>HTTP: doc audio-brief</td><td class="path">C:\Users\tylar\code\odysseus\routes\document_routes.py (~L467–534)</td></tr>
+          <tr><td>UI Listen button</td><td class="path">C:\Users\tylar\code\odysseus\static\js\documentLibrary.js</td></tr>
+          <tr><td>Research audio brief twin</td><td class="path">C:\Users\tylar\code\odysseus\services\research\audio_brief.py</td></tr>
+          <tr><td>Morning CEO brief action</td><td class="path">C:\Users\tylar\code\odysseus\src\builtin_actions.py → action_ceo_brief</td></tr>
+          <tr><td>Cron schedule</td><td class="path">C:\Users\tylar\code\odysseus\src\task_scheduler.py → ceo_brief 0 9 * * *</td></tr>
+          <tr><td>Exec brief prompt template</td><td class="path">C:\Users\tylar\code\odysseus\prompts\executive-brief-template.md</td></tr>
+          <tr><td>Vault insight map</td><td class="path">C:\Users\tylar\code\odysseus\docs\vault-ceo-transcript-insights.md</td></tr>
+          <tr><td>State dir (runtime)</td><td class="path">C:\Users\tylar\code\odysseus\data\doc_audio_briefs\{doc_id}.json + chunk_000.mp3</td></tr>
+          <tr><td>External Aether STT</td><td class="path">C:\Users\tylar\code\Aether\server.js → POST /api/transcribe-url</td></tr>
+          <tr><td>Claude transcribe skill</td><td class="path">C:\Users\tylar\.claude\skills\transcribe\SKILL.md</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel" id="flow">
+      <h2>Feature flows</h2>
+
+      <h3>A — Video URL → CEO Brief (agent / /brief)</h3>
+      <div class="flow">
+        <div class="step"><b>1. URL in</b><span>/brief or skill trigger</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>2. transcribe_video</b><span>captions → Aether</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>3. Save transcript doc</b><span>save_as_document:true</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>4. Write brief</b><span>exact markdown schema</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>5. Save brief doc</b><span>CEO Brief — date — title</span></div>
+      </div>
+
+      <h3>B — Document Listen (library UI)</h3>
+      <div class="flow">
+        <div class="step"><b>1. POST audio-brief</b><span>kickoff_doc_audio_brief</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>2. generate_ceo_brief</b><span>spoken 2–4 min prose</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>3. Open Notebook</b><span>MP3 or status=skipped</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>4. Poll status</b><span>ready → chunk/0</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>5. Play</b><span>MP3 or speechSynthesis</span></div>
+      </div>
+
+      <h3>C — Daily cron voice rundown</h3>
+      <div class="flow">
+        <div class="step"><b>1. Harvest gate</b><span>Swarm Plan / Research Brief</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>2. Compose doc</b><span>ceo-brief-YYYY-MM-DD</span></div>
+        <span class="arrow">→</span>
+        <div class="step"><b>3. Kickoff Listen</b><span>same audio_brief pipeline</span></div>
+      </div>
+
+      <details open>
+        <summary>Transcript waterfall contract</summary>
+        <p class="muted">Normalized return from <code class="inline-code">transcribe_video_url</code>:</p>
+        <pre>{ success, text, method, source_url, title, channel, duration_sec, char_count, warnings, error }
+method ∈ { "captions", "local_ytdlp_groq" }</pre>
+      </details>
+      <details>
+        <summary>Brief markdown schema (skill — do not invent sections)</summary>
+        <pre># CEO Brief — {video title}
+**Source:** {url}
+**Channel:** {channel} | **Length:** ~{N} min | **Transcript:** {captions|STT}
+
+{3–5 sentences: thesis, why it matters, so-what}
+
+- {Topic cluster — one-line takeaway}
+
+- **What they use:** …
+- **How they use it:** …
+- **Maturity/hype gap:** …
+
+- **Edges (where this breaks):** …
+- **Wedges (asymmetric bets):** …
+
+| # | Action | Effort | Why now |
+|---|--------|--------|---------|
+| 1 | {verb-first} | S/M/L | {reason} |
+
+- {claims to verify}
+{confidence / transcript caveats}</pre>
+      </details>
+    </section>
+
+    <section class="panel" id="snippets">
+      <h2>Copy-ready snippets</h2>
+
+      <div class="snip-head">
+        <span class="label">C:\Users\tylar\code\odysseus\services\transcribe\video_transcriber.py</span>
+        <button type="button" class="copy" data-target="snip1">Copy</button>
+      </div>
+      <pre id="snip1"># Waterfall entry — never raises; returns normalized dict
+async def transcribe_video_url(url: str) -&gt; Dict[str, Any]:
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return _normalize(success=False, source_url=url,
+                          error="Provide a full http(s) video URL")
+    result = await _try_captions(url)          # youtube_transcript_api FULL text
+    if result:
+        return result
+    result = await _try_aether_server(url)     # POST {AETHER}/api/transcribe-url
+    if result:
+        return result
+    return _normalize(success=False, source_url=url, error="All transcript paths failed…")</pre>
+
+      <div class="snip-head">
+        <span class="label">C:\Users\tylar\code\odysseus\routes\transcribe_routes.py</span>
+        <button type="button" class="copy" data-target="snip2">Copy</button>
+      </div>
+      <pre id="snip2"># External agent/script surface (admin session / API token)
+@router.post("/api/transcribe/url")
+async def transcribe_url(request: Request, body: TranscribeUrlRequest):
+    require_admin(request)
+    from services.transcribe import transcribe_video_url
+    return await transcribe_video_url(body.url)
+# Body: { "url": "https://…" }  — use generous read timeout (minutes)</pre>
+
+      <div class="snip-head">
+        <span class="label">youtube-ceo-brief skill — tool call</span>
+        <button type="button" class="copy" data-target="snip3">Copy</button>
+      </div>
+      <pre id="snip3">```transcribe_video
+{"url": "&lt;the video URL&gt;", "save_as_document": true}
+```
+# Then write brief with EXACT skill structure; save as:
+#   CEO Brief — {YYYY-MM-DD} — {video title}
+# Ground every claim in transcript. Never web-search to fill gaps.</pre>
+
+      <div class="snip-head">
+        <span class="label">C:\Users\tylar\code\odysseus\static\js\slashCommands.js — /brief</span>
+        <button type="button" class="copy" data-target="snip4">Copy</button>
+      </div>
+      <pre id="snip4">/** /brief &lt;url&gt; — transcribe video + CEO brief via youtube-ceo-brief skill */
+async function _cmdVideoBrief(args, ctx) {
+  const url = _extractHttpUrl(args.join(' ').trim());
+  _ensureAgentMode();
+  const message =
+    `Brief this video: ${url}\n\n` +
+    '1. Call transcribe_video with {"url": "' + url + '", "save_as_document": true}\n' +
+    '2. From the transcript, write a CEO-level brief and save it as a document.';
+  _submitComposedMessage(message);
+}</pre>
+
+      <div class="snip-head">
+        <span class="label">C:\Users\tylar\code\odysseus\services\documents\audio_brief.py</span>
+        <button type="button" class="copy" data-target="snip5">Copy</button>
+      </div>
+      <pre id="snip5"># Pipeline: document text → CEO brief (LLM) → Open Notebook MP3
+# State: data/doc_audio_briefs/{doc_id}.json ; audio: {doc_id}/chunk_000.mp3
+# status: generating | ready | skipped (browser TTS) | failed
+
+async def generate_doc_audio_brief(doc_id, title, content, owner=""):
+    brief = await generate_ceo_brief(title, content, llm_endpoint, llm_model, …)
+    _write_brief_state(doc_id, {"script": brief})
+    if not open_notebook_configured():
+        _write_brief_state(doc_id, {"status": "skipped", …})  # UI uses speechSynthesis
+        return
+    audio, episode_id = await OpenNotebookClient().generate_brief_audio(…)
+    (audio_dir / "chunk_000.mp3").write_bytes(audio)
+    _write_brief_state(doc_id, {"status": "ready", "chunk_count": 1, …})</pre>
+
+      <div class="snip-head">
+        <span class="label">Listen API</span>
+        <button type="button" class="copy" data-target="snip6">Copy</button>
+      </div>
+      <pre id="snip6">POST   /api/document/{doc_id}/audio-brief
+GET    /api/document/{doc_id}/audio-brief/status
+GET    /api/document/{doc_id}/audio-brief/transcript
+GET    /api/document/{doc_id}/audio-brief/chunk/{index}</pre>
+
+      <div class="snip-head">
+        <span class="label">curl smoke</span>
+        <button type="button" class="copy" data-target="snip7">Copy</button>
+      </div>
+      <pre id="snip7">curl -X POST "$ODYSSEUS_URL/api/transcribe/url" \
+  -H "Authorization: Bearer $ODYSSEUS_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.youtube.com/watch?v=VIDEO_ID"}' \
+  --max-time 1200</pre>
+
+      <div class="snip-head">
+        <span class="label">handoff packet seed</span>
+        <button type="button" class="copy" data-target="snip8">Copy</button>
+      </div>
+      <pre id="snip8">Goal: Reuse Odysseus CEO-brief transcription in a new surface.
+Project: C:\Users\tylar\code\odysseus
+Primary skill: data\skills\general\youtube-ceo-brief\SKILL.md
+Core code: services\transcribe\video_transcriber.py + services\documents\audio_brief.py
+Entry UX: /brief &lt;url&gt; OR POST /api/transcribe/url
+Next:
+1. Call transcribe / save transcript
+2. Emit brief using skill markdown schema
+3. Optionally POST /api/document/{id}/audio-brief for Listen</pre>
+    </section>
+
+    <section class="panel" id="playbook">
+      <h2>Agent playbook — reuse in a new build</h2>
+      <ol>
+        <li><strong>Copy the skill contract</strong> from <code class="inline-code">youtube-ceo-brief/SKILL.md</code> — keep the markdown schema identical.</li>
+        <li><strong>Wire one transcript entrypoint</strong> — <code class="inline-code">POST /api/transcribe/url</code> or port <code class="inline-code">transcribe_video_url</code> + <code class="inline-code">AETHER_SERVER_URL</code>.</li>
+        <li><strong>Always persist the raw transcript</strong> before summarizing.</li>
+        <li><strong>Optional Listen</strong> — port status machine <code class="inline-code">ready|skipped|failed</code> for browser-TTS fallback.</li>
+        <li><strong>Do not invent</strong> from title alone if transcription fails.</li>
+      </ol>
+      <div class="grid">
+        <div class="card"><strong>Env</strong><span class="muted">ODYSSEUS_URL, ODYSSEUS_API_TOKEN, AETHER_SERVER_URL</span></div>
+        <div class="card"><strong>Deps</strong><span class="muted">youtube_transcript_api · httpx · Open Notebook (optional)</span></div>
+        <div class="card"><strong>Timeouts</strong><span class="muted">Aether up to 20 min; captions near-instant</span></div>
+        <div class="card"><strong>Idempotency</strong><span class="muted">content_hash on doc briefs; harvest gate on cron</span></div>
+      </div>
+    </section>
+
+    <section class="panel" id="apis">
+      <h2>APIs, tools, cron</h2>
+      <table>
+        <thead><tr><th>Surface</th><th>Call</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>HTTP</td><td><code>/api/transcribe/url</code></td><td>Admin; long timeout</td></tr>
+          <tr><td>Agent tool</td><td><code>transcribe_video</code></td><td>JSON: url, save_as_document</td></tr>
+          <tr><td>Slash</td><td><code>/brief</code></td><td>aliases: videobrief, ytbrief, ceo-brief</td></tr>
+          <tr><td>Doc Listen</td><td><code>/api/document/{id}/audio-brief*</code></td><td>status/transcript/chunk</td></tr>
+          <tr><td>Research Listen</td><td><code>/api/research/{sid}/audio-brief*</code></td><td>Same contract</td></tr>
+          <tr><td>Cron</td><td><code>ceo_brief</code> <code>0 9 * * *</code></td><td>Defers if harvest missing</td></tr>
+          <tr><td>CMD Center</td><td>action <code>ceo_brief</code></td><td>Float card “CEO Brief ▶”</td></tr>
+          <tr><td>Aether</td><td><code>POST /api/transcribe-url</code></td><td>localhost:3000 or host.docker.internal</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      Pure-CSS tabs (no JS required for navigation). Copy buttons need a real browser with clipboard access.
+    </footer>
+  </main>
+
+  <div class="toast" id="toast">Copied</div>
+
+  <script>
+    // Progressive enhancement only — tabs already work via CSS radios.
+    (function () {
+      const toast = document.getElementById("toast");
+      function flash(msg) {
+        if (!toast) return;
+        toast.textContent = msg;
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 1200);
+      }
+      async function copyText(text) {
+        try {
+          await navigator.clipboard.writeText(text);
+          flash("Copied");
+        } catch {
+          // Fallback for file:// where clipboard may be blocked
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand("copy"); flash("Copied"); }
+          catch { flash("Select text manually (Ctrl+C)"); }
+          ta.remove();
+        }
+      }
+      document.querySelectorAll("button.copy").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const pre = document.getElementById(btn.dataset.target);
+          if (!pre) return;
+          copyText(pre.innerText);
+          btn.classList.add("copied");
+          btn.textContent = "Copied";
+          setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.textContent = "Copy";
+          }, 1000);
+        });
+      });
+      const filter = document.getElementById("pathFilter");
+      if (filter) {
+        const rows = [...document.querySelectorAll("#pathTable tbody tr")];
+        filter.addEventListener("input", () => {
+          const q = filter.value.trim().toLowerCase();
+          rows.forEach((row) => {
+            row.style.display = !q || row.textContent.toLowerCase().includes(q) ? "" : "none";
+          });
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

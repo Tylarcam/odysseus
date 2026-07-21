@@ -8,10 +8,14 @@ FROM python:3.12-slim
 # nodejs/npm provide npx for the optional built-in Browser MCP server.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
+# ffmpeg is required for local Whisper STT: browsers record audio/webm and
+# faster-whisper decodes via ffmpeg. Without it, /api/stt/transcribe returns
+# "Transcription failed" on every mic take (WAV/PCM stream path still works).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     curl \
+    ffmpeg \
     git \
     nodejs \
     npm \
@@ -20,13 +24,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
+# gogcli — Gmail/Workspace OAuth CLI used by the gmail_gog email provider.
+ARG GOGCLI_VERSION=0.24.0
+RUN curl -fsSL "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_linux_amd64.tar.gz" \
+    -o /tmp/gogcli.tar.gz \
+    && tar -xzf /tmp/gogcli.tar.gz -C /usr/local/bin gog \
+    && chmod +x /usr/local/bin/gog \
+    && rm /tmp/gogcli.tar.gz
+
 WORKDIR /app
 
 # Install Python deps first (layer cache). Optional extras (PyMuPDF AGPL, etc.)
 # are opt-in so the default image stays MIT-core; see requirements-optional.txt.
+# INSTALL_STT pulls only faster-whisper (requirements-stt.txt) without AGPL optionals.
 ARG INSTALL_OPTIONAL=false
-COPY requirements.txt requirements-optional.txt ./
+ARG INSTALL_STT=false
+COPY requirements.txt requirements-optional.txt requirements-stt.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_STT" = "true" ]; then pip install --no-cache-dir -r requirements-stt.txt; fi \
     && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
 
 # Copy app code
