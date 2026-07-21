@@ -175,6 +175,9 @@ _TOOL_NAME_MAP = {
     "notes": "manage_notes",
     "todo": "manage_notes",
     "todos": "manage_notes",
+    "process_job_application": "process_job_application",
+    "job_application": "process_job_application",
+    "evaluate_job": "process_job_application",
 }
 
 _MISFENCED_WEB_TOOL_NAMES = {
@@ -340,8 +343,51 @@ def _parse_tool_call_block(raw: str) -> Optional[ToolBlock]:
             content = rest
 
     if content:
-        return ToolBlock(mapped, content.strip())
+        block = _structured_tool_block(mapped, content.strip())
+        return block or ToolBlock(mapped, content.strip())
     return None
+
+
+# Tools whose fenced bodies are raw text (commands/code), not JSON args.
+_LEGACY_TEXT_FENCE_TOOLS = frozenset({
+    "bash", "python", "web_search", "web_fetch", "read_file", "write_file",
+})
+
+
+def _structured_tool_block(tag: str, content: str) -> Optional[ToolBlock]:
+    """Convert a structured tool invocation through the canonical converter.
+
+    Used by fenced blocks and [TOOL_CALL] so email tools remap to
+    mcp__email__* and JSON-arg tools share one code path with native calls.
+    """
+    from src.tool_schemas import function_call_to_tool_block
+
+    tag = (tag or "").lower()
+    raw = (content or "").strip()
+    if not tag or not raw:
+        return None
+
+    if raw.startswith("{"):
+        try:
+            args = json.loads(raw)
+            if isinstance(args, dict):
+                block = function_call_to_tool_block(tag, json.dumps(args))
+                if block:
+                    return block
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if tag in _LEGACY_TEXT_FENCE_TOOLS:
+        return ToolBlock(tag, raw)
+
+    block = function_call_to_tool_block(tag, raw)
+    if block:
+        return block
+    # Non-JSON fenced bodies (legacy text formats like
+    # ```create_document\nTitle\nmd\nBody```) can't go through the converter,
+    # but the do_* executors still parse those text formats themselves.
+    # Fall back to a raw block instead of silently dropping the call.
+    return ToolBlock(_TOOL_NAME_MAP.get(tag, tag), raw)
 
 
 def _parse_xml_invoke(inv_match) -> Optional[ToolBlock]:
@@ -478,7 +524,9 @@ def parse_tool_blocks(text: str, skip_fenced: bool = False) -> List[ToolBlock]:
                 if block:
                     blocks.append(block)
                     continue
-            blocks.append(ToolBlock(tag, content))
+            block = _structured_tool_block(tag, content)
+            if block:
+                blocks.append(block)
 
     # Pattern 2: [TOOL_CALL] blocks (only if no fenced blocks found)
     if not blocks:

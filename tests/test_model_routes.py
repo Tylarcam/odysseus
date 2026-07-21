@@ -182,7 +182,7 @@ class TestMatchProviderCurated:
         assert _match_provider_curated("https://api.x.ai/v1", "openai") == "xai"
 
     def test_ollama_url(self):
-        assert _match_provider_curated("https://ollama.com/api", "openai") == "ollama"
+        assert _match_provider_curated("https://ollama.com/api", "openai") == "ollama-cloud"
 
     def test_no_url_match_returns_provider(self):
         assert _match_provider_curated("https://localhost:1234", "openai") == "openai"
@@ -572,8 +572,27 @@ class TestSetupProbeSafety:
 
         monkeypatch.setattr(model_routes.httpx, "get", fake_get)
 
-        assert _probe_endpoint("https://ollama.com/api", "ollama-key") == ["gpt-oss:120b", "qwen3:235b"]
+        result = _probe_endpoint("https://ollama.com/api", "ollama-key")
+        assert "gpt-oss:120b" in result
+        assert "qwen3:235b" in result
         assert seen == [("https://ollama.com/api/tags", {"Authorization": "Bearer ollama-key"})]
+
+    def test_ollama_cloud_probe_appends_curated_models(self, monkeypatch):
+        """Brand-new Ollama Cloud models appear via curated append when /tags omits them."""
+        monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
+        monkeypatch.setattr(model_routes, "_normalize_base", lambda url: url.rstrip("/"))
+
+        def fake_get(url, headers=None, timeout=None, verify=None, **kwargs):
+            return httpx.Response(
+                200,
+                request=httpx.Request("GET", url),
+                json={"models": [{"name": "gpt-oss:120b"}]},
+            )
+
+        monkeypatch.setattr(model_routes.httpx, "get", fake_get)
+        result = _probe_endpoint("https://ollama.com/api", "ollama-key")
+        assert "gpt-oss:120b" in result
+        assert "glm-5.2:cloud" in result
 
     def test_unkeyed_anthropic_probe_can_use_curated_fallback(self, monkeypatch):
         monkeypatch.setattr(endpoint_resolver, "resolve_url", lambda url: url, raising=False)
@@ -1592,3 +1611,115 @@ def test_manual_refresh_timeout_keeps_cached_models_and_warns(monkeypatch):
     assert db.commits == 0
     assert response.headers["X-Model-Refresh-Status"] == "failed"
     assert "kept cached models" in response.headers["X-Model-Refresh-Warning"]
+
+
+# ── Cloudflare Workers AI ──
+
+def test_cloudflare_normalize_run_to_v1():
+    u = "https://api.cloudflare.com/client/v4/accounts/abc123/ai/run/"
+    assert endpoint_resolver.normalize_base(u).endswith("/ai/v1")
+
+
+def test_cloudflare_normalize_path_only():
+    u = endpoint_resolver.normalize_base("v4/accounts/abc123/ai/v1")
+    assert "api.cloudflare.com" in u
+    assert u.endswith("/ai/v1")
+
+
+def test_is_cloudflare_workers_ai_base():
+    assert endpoint_resolver.is_cloudflare_workers_ai_base(
+        "https://api.cloudflare.com/client/v4/accounts/x/ai/v1"
+    )
+    assert not endpoint_resolver.is_cloudflare_workers_ai_base("https://api.openai.com/v1")
+
+
+def test_probe_cloudflare_uses_curated_catalog(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    monkeypatch.setattr(
+        model_routes,
+        "_cloudflare_workers_ai_ping",
+        lambda *a, **k: {"reachable": True, "status_code": 200, "error": None},
+    )
+    models = _probe_endpoint(base, "fake-key", timeout=5)
+    assert "@cf/zai-org/glm-5.2" in models
+
+
+def test_probe_cloudflare_bad_key_returns_empty(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    monkeypatch.setattr(
+        model_routes,
+        "_cloudflare_workers_ai_ping",
+        lambda *a, **k: {"reachable": False, "status_code": 401, "error": "HTTP 401"},
+    )
+    assert _probe_endpoint(base, "bad-key", timeout=5) == []
+
+
+def test_ping_cloudflare_delegates_to_chat_probe(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    calls = []
+
+    def fake_ping(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"reachable": True, "status_code": 200, "error": None}
+
+    monkeypatch.setattr(model_routes, "_cloudflare_workers_ai_ping", fake_ping)
+    result = _ping_endpoint(base, "tok", timeout=2.0)
+    assert result["reachable"] is True
+    assert calls
+    assert calls[0][0][0] == base
+
+
+# ── Cloudflare Workers AI ──
+
+def test_cloudflare_normalize_run_to_v1():
+    u = "https://api.cloudflare.com/client/v4/accounts/abc123/ai/run/"
+    assert endpoint_resolver.normalize_base(u).endswith("/ai/v1")
+
+
+def test_cloudflare_normalize_path_only():
+    u = endpoint_resolver.normalize_base("v4/accounts/abc123/ai/v1")
+    assert "api.cloudflare.com" in u
+    assert u.endswith("/ai/v1")
+
+
+def test_is_cloudflare_workers_ai_base():
+    assert endpoint_resolver.is_cloudflare_workers_ai_base(
+        "https://api.cloudflare.com/client/v4/accounts/x/ai/v1"
+    )
+    assert not endpoint_resolver.is_cloudflare_workers_ai_base("https://api.openai.com/v1")
+
+
+def test_probe_cloudflare_uses_curated_catalog(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    monkeypatch.setattr(
+        model_routes,
+        "_cloudflare_workers_ai_ping",
+        lambda *a, **k: {"reachable": True, "status_code": 200, "error": None},
+    )
+    models = _probe_endpoint(base, "fake-key", timeout=5)
+    assert "@cf/zai-org/glm-5.2" in models
+
+
+def test_probe_cloudflare_bad_key_returns_empty(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    monkeypatch.setattr(
+        model_routes,
+        "_cloudflare_workers_ai_ping",
+        lambda *a, **k: {"reachable": False, "status_code": 401, "error": "HTTP 401"},
+    )
+    assert _probe_endpoint(base, "bad-key", timeout=5) == []
+
+
+def test_ping_cloudflare_delegates_to_chat_probe(monkeypatch):
+    base = "https://api.cloudflare.com/client/v4/accounts/abc/ai/v1"
+    calls = []
+
+    def fake_ping(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"reachable": True, "status_code": 200, "error": None}
+
+    monkeypatch.setattr(model_routes, "_cloudflare_workers_ai_ping", fake_ping)
+    result = _ping_endpoint(base, "tok", timeout=2.0)
+    assert result["reachable"] is True
+    assert calls
+    assert calls[0][0][0] == base

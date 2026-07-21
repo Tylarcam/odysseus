@@ -132,8 +132,9 @@ def _list_accounts_raw() -> list:
         conn.row_factory = sqlite3.Row
         columns = {r[1] for r in conn.execute("PRAGMA table_info(email_accounts)").fetchall()}
         smtp_security_select = "smtp_security" if "smtp_security" in columns else "'' AS smtp_security"
+        provider_select = "provider" if "provider" in columns else "'imap' AS provider"
         rows = conn.execute(f"""
-            SELECT id, name, is_default, enabled,
+            SELECT id, name, is_default, enabled, {provider_select},
                    imap_host, imap_port, imap_user, imap_password, imap_starttls,
                    smtp_host, smtp_port, {smtp_security_select}, smtp_user, smtp_password, from_address
             FROM email_accounts WHERE enabled = 1
@@ -221,6 +222,7 @@ def _load_config(account: str | None = None) -> dict:
         ),
         "account_id": None,
         "account_name": None,
+        "provider": "imap",
     }
 
     rows = _list_accounts_raw()
@@ -234,6 +236,7 @@ def _load_config(account: str | None = None) -> dict:
     if row:
         cfg["account_id"] = row["id"]
         cfg["account_name"] = row["name"]
+        cfg["provider"] = (row.get("provider") or "imap").strip().lower()
         cfg["imap_host"] = row["imap_host"] or cfg["imap_host"]
         cfg["imap_port"] = int(row["imap_port"] or cfg["imap_port"])
         cfg["imap_user"] = row["imap_user"] or cfg["imap_user"]
@@ -277,6 +280,98 @@ def _load_config(account: str | None = None) -> dict:
 
     _ACCOUNT_CACHE[cache_key] = cfg
     return cfg
+
+
+# ── gmail_gog (gogcli) helpers ──
+
+
+def _gog_address(cfg: dict) -> str:
+    return (cfg.get("from_address") or cfg.get("imap_user") or "").strip()
+
+
+def _is_gog(cfg: dict) -> bool:
+    return (cfg.get("provider") or "imap").strip().lower() == "gmail_gog"
+
+
+def _gog_list_filter(unread_only: bool, unresponded_only: bool) -> str:
+    # gog list_inbox supports all/unread/starred — no IMAP UNANSWERED equivalent.
+    if unread_only:
+        return "unread"
+    return "all"
+
+
+def _gog_emails_to_results(emails: list, cache: dict) -> list:
+    results = []
+    for em in emails:
+        subject = em.get("subject") or "(no subject)"
+        cached = cache.get(subject, {})
+        sender_name = em.get("from_name") or ""
+        sender_addr = em.get("from_address") or ""
+        results.append({
+            "uid": em.get("uid") or em.get("thread_id") or "",
+            "message_id": em.get("message_id") or em.get("uid") or "",
+            "subject": subject,
+            "from": sender_name or sender_addr or "unknown",
+            "from_address": sender_addr,
+            "date": em.get("date") or em.get("date_display") or "",
+            "summary": cached.get("summary", ""),
+        })
+    return results
+
+
+def _list_emails_gog(cfg: dict, folder: str, max_results: int,
+                      unread_only: bool, unresponded_only: bool) -> list:
+    from src import gmail_gog as gog
+
+    addr = _gog_address(cfg)
+    if not addr:
+        raise ValueError(
+            f"Gmail account {cfg.get('account_name') or 'default'} has no address configured"
+        )
+    filter_ = _gog_list_filter(unread_only, unresponded_only)
+    payload = gog.list_inbox(addr, folder, max_results, 0, filter_)
+    err = payload.get("error")
+    if err:
+        raise RuntimeError(err)
+    return _gog_emails_to_results(payload.get("emails") or [], _get_cached_summaries())
+
+
+def _read_email_gog(cfg: dict, uid=None, message_id=None, folder: str = "INBOX") -> dict:
+    from src import gmail_gog as gog
+
+    addr = _gog_address(cfg)
+    if not addr:
+        return {"error": "Gmail account has no address configured"}
+    if message_id and not uid:
+        return {
+            "error": (
+                "Message-ID lookup is not supported for Gmail/gog accounts; "
+                "use UID (thread id) from list_emails"
+            )
+        }
+    if not uid:
+        return {"error": "No UID or Message-ID provided"}
+
+    result = gog.read_message(addr, str(uid), folder, mark_seen=True)
+    if result.get("error"):
+        return {"error": result["error"]}
+
+    body = result.get("body") or ""
+    if not body.strip() and result.get("body_html"):
+        body = result.get("body_html") or ""
+    return {
+        "uid": result.get("uid") or str(uid),
+        "account": cfg.get("account_name") or addr,
+        "account_email": addr,
+        "account_id": cfg.get("account_id"),
+        "message_id": result.get("message_id") or "",
+        "subject": result.get("subject") or "(no subject)",
+        "from": result.get("from_name") or result.get("from_address") or "unknown",
+        "from_address": result.get("from_address") or "",
+        "date": result.get("date") or "",
+        "body": body[:8000],
+        "attachments": result.get("attachments") or [],
+    }
 
 
 # ── IMAP helpers ──
@@ -495,6 +590,10 @@ def _list_emails(folder="INBOX", max_results=20, unresponded_only=False,
     Pass unread_only=True and/or unresponded_only=True for attention scans.
     account selects mailbox (None = default).
     """
+    cfg = _load_config(account)
+    if _is_gog(cfg):
+        return _list_emails_gog(cfg, folder, max_results, unread_only, unresponded_only)
+
     conn = None
     try:
         conn = _imap_connect(account)
@@ -732,6 +831,9 @@ def _extract_attachment_to_disk(msg, index, target_dir):
 def _read_email(uid=None, message_id=None, folder="INBOX", account=None):
     """Read full email content by UID or message-ID. account = mailbox selector."""
     cfg = _load_config(account)
+    if _is_gog(cfg):
+        return _read_email_gog(cfg, uid=uid, message_id=message_id, folder=folder)
+
     conn = None
     try:
         conn = _imap_connect(account)
@@ -817,6 +919,8 @@ def _read_email_across_accounts(uid=None, message_id=None, folder="INBOX"):
 
 
 def _smtp_ready(cfg: dict) -> bool:
+    if _is_gog(cfg):
+        return bool(_gog_address(cfg))
     return bool(cfg.get("smtp_host") and cfg.get("smtp_user") and cfg.get("smtp_password"))
 
 
@@ -886,8 +990,40 @@ def _smtp_connect(account=None, cfg=None):
 
 
 def _send_email(to, subject, body, in_reply_to=None, references=None, cc=None, bcc=None, account=None):
-    """Send an email via SMTP. Returns dict with status."""
+    """Send an email via SMTP or gogcli. Returns dict with status."""
     send_account, cfg = _resolve_send_config(account)
+    if _is_gog(cfg):
+        from src import gmail_gog as gog
+
+        addr = _gog_address(cfg)
+        result = gog.send_message(
+            addr,
+            to,
+            subject,
+            body,
+            cc=cc or "",
+            bcc=bcc or "",
+            in_reply_to_msg_id=(in_reply_to or "").strip(),
+            from_addr=cfg.get("from_address") or addr,
+        )
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error") or "Gmail send failed")
+        recipients = []
+        if isinstance(to, str):
+            recipients.extend([a.strip() for a in to.split(",") if a.strip()])
+        else:
+            recipients.extend(to or [])
+        return {
+            "sent": True,
+            "to": recipients,
+            "subject": subject,
+            "account": cfg.get("account_name"),
+            "account_id": cfg.get("account_id"),
+            "sent_folder": None,
+            "sent_uid": result.get("id"),
+            "message_id": result.get("id") or "",
+        }
+
     msg = EmailMessage()
     msg["From"] = _clean_header_value(cfg["from_address"])
     msg["To"] = _clean_header_value(to if isinstance(to, str) else ", ".join(to))
@@ -1286,6 +1422,48 @@ async def _ai_draft_reply_to_email(uid, folder="INBOX", reply_all=False, account
 
 def _reply_to_email(uid, body, folder="INBOX", reply_all=False, account=None):
     """Reply to an existing email by UID. Threads via In-Reply-To/References."""
+    cfg = _load_config(account)
+    if _is_gog(cfg):
+        orig = _read_email_gog(cfg, uid=uid, folder=folder)
+        if "error" in orig:
+            return orig
+        from src import gmail_gog as gog
+
+        subject = orig.get("subject") or ""
+        reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+        to_addrs = orig.get("from_address") or ""
+        cc = None
+        if reply_all:
+            cc_addrs = []
+            for addr in (orig.get("to") or "").split(","):
+                addr = addr.strip()
+                if addr and addr != to_addrs:
+                    cc_addrs.append(addr)
+            if cc_addrs:
+                cc = ", ".join(cc_addrs)
+        addr = _gog_address(cfg)
+        result = gog.send_message(
+            addr,
+            to_addrs,
+            reply_subject,
+            body,
+            cc=cc or "",
+            in_reply_to_msg_id=(orig.get("message_id") or "").strip(),
+            thread_id=str(uid),
+            from_addr=cfg.get("from_address") or addr,
+        )
+        if not result.get("ok"):
+            return {"error": result.get("error") or "Gmail reply failed"}
+        return {
+            "sent": True,
+            "to": [to_addrs] if to_addrs else [],
+            "subject": reply_subject,
+            "account": cfg.get("account_name"),
+            "account_id": cfg.get("account_id"),
+            "sent_uid": result.get("id"),
+            "message_id": result.get("id") or "",
+        }
+
     conn = None
     try:
         conn = _imap_connect(account)
@@ -1333,6 +1511,20 @@ def _reply_to_email(uid, body, folder="INBOX", reply_all=False, account=None):
 
 def _set_flag(uid, folder, flag, add=True, account=None):
     """Add or remove an IMAP flag (e.g. \\Seen, \\Answered, \\Deleted)."""
+    cfg = _load_config(account)
+    if _is_gog(cfg):
+        from src import gmail_gog as gog
+
+        addr = _gog_address(cfg)
+        uid_s = str(uid)
+        if flag == "\\Seen":
+            result = gog.mark_read(addr, uid_s) if add else gog.mark_unread(addr, uid_s)
+            return bool(result.get("ok"))
+        if flag == "\\Deleted" and add:
+            result = gog.trash_message(addr, uid_s)
+            return bool(result.get("ok"))
+        return False
+
     conn = _imap_connect(account)
     conn.select(_q(folder))
     op = "+FLAGS" if add else "-FLAGS"
@@ -1426,6 +1618,19 @@ def _search_uids(folder="INBOX", criteria="UNSEEN", account=None):
 
 def _move_message(uid, source_folder, dest_folder, account=None, role: str = ""):
     """Move a message between folders. Tries IMAP MOVE, falls back to copy+delete."""
+    cfg = _load_config(account)
+    if _is_gog(cfg):
+        from src import gmail_gog as gog
+
+        addr = _gog_address(cfg)
+        uid_s = str(uid)
+        role = role or _folder_role_from_name(dest_folder)
+        if role == "archive" or (dest_folder or "").lower() == "archive":
+            return bool(gog.archive_message(addr, uid_s).get("ok"))
+        if role == "trash" or (dest_folder or "").lower() in ("trash", "deleted"):
+            return bool(gog.trash_message(addr, uid_s).get("ok"))
+        return False
+
     conn = _imap_connect(account)
     conn.select(_q(source_folder))
     try:

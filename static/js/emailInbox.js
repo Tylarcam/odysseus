@@ -9,6 +9,8 @@ import { initEmailLibrary, openEmailLibrary, closeEmailLibrary, isOpen as isLibO
 import * as Modals from './modalManager.js';
 import { applyEdgeDock } from './modalSnap.js';
 import { buildReplyAllCc } from './emailLibrary/replyRecipients.js';
+import { saveEmailToNote, NOTE_BTN_ICON } from './noteFromCodeBlock.js';
+import { JOB_PIPELINE_BTN_ICON, runJobPipelineFromEmail } from './jobPipeline.js';
 
 const API_BASE = window.location.origin;
 const _acct = () => window.__odysseusActiveEmailAccount
@@ -926,6 +928,28 @@ function _showEmailMenu(em, anchor, itemEl) {
 
   const actions = [
     { label: 'Open', icon: _replyIcon, action: () => _openEmail(em, itemEl) },
+    { label: 'Save to Notes', icon: NOTE_BTN_ICON, action: async () => {
+      try {
+        await saveEmailToNote(em, {
+          folder: _currentFolder,
+          accountQuery: _acct(),
+        });
+      } catch (err) {
+        const { showError } = await import('./ui.js');
+        showError(err?.message || 'Failed to save note');
+      }
+    }},
+    { label: 'Run job pipeline', icon: JOB_PIPELINE_BTN_ICON, action: async () => {
+      try {
+        await runJobPipelineFromEmail(em, {
+          folder: _currentFolder,
+          accountQuery: _acct(),
+        });
+      } catch (err) {
+        const { showError } = await import('./ui.js');
+        showError(err?.message || 'Job pipeline failed');
+      }
+    }},
     { label: 'Remind to reply', icon: _bellIcon, submenu: 'remind' },
     { label: 'Archive', icon: _archiveIcon, action: () => _archiveEmail(em) },
     { label: 'Delete', icon: _deleteIcon, danger: true, action: () => _deleteEmail(em) },

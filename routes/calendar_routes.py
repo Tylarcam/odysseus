@@ -154,8 +154,19 @@ class EventUpdate(BaseModel):
 # ── Helpers ──
 
 def _ensure_default_calendar(db, owner: str = None) -> CalendarCal:
-    """Create default calendar if none exist for this owner."""
+    """Return the default write target for this owner.
+
+    Prefer a synced CalDAV calendar so new events push to the user's remote
+    (Stanford/Google/etc.) instead of staying local-only in Personal."""
     owner = owner or FALLBACK_OWNER
+    caldav_cal = (
+        db.query(CalendarCal)
+        .filter(CalendarCal.owner == owner, CalendarCal.source == "caldav")
+        .order_by(CalendarCal.name)
+        .first()
+    )
+    if caldav_cal:
+        return caldav_cal
     cal = db.query(CalendarCal).filter(CalendarCal.owner == owner).first()
     if not cal:
         cal = CalendarCal(
@@ -169,6 +180,45 @@ def _ensure_default_calendar(db, owner: str = None) -> CalendarCal:
         db.commit()
         db.refresh(cal)
     return cal
+
+
+def event_writeback_payload(ev) -> dict:
+    """Build the dict ``writeback_event`` expects from a CalendarEvent row."""
+    return {
+        "uid": ev.uid,
+        "summary": ev.summary,
+        "description": ev.description,
+        "location": ev.location,
+        "dtstart": ev.dtstart,
+        "dtend": ev.dtend,
+        "all_day": ev.all_day,
+        "is_utc": ev.is_utc,
+        "rrule": ev.rrule or "",
+    }
+
+
+def _normalize_writeback_result(result: dict) -> dict:
+    """Shape writeback results for API consumers."""
+    if not result:
+        return {"ok": True}
+    if result.get("skipped"):
+        return {"ok": True, "skipped": result["skipped"]}
+    if result.get("ok"):
+        out = {"ok": True}
+        for key in ("created", "updated", "note"):
+            if key in result:
+                out[key] = result[key]
+        return out
+    return {"ok": False, "error": result.get("error") or "writeback failed"}
+
+
+async def writeback_calendar_event(owner: str, cal, ev_dict: dict, *, delete: bool = False) -> dict:
+    """Push a local calendar change to CalDAV when ``cal.source == 'caldav'``."""
+    if not cal or cal.source != "caldav":
+        return {"ok": True, "skipped": "not a caldav calendar"}
+    from src.caldav_writeback import writeback_event
+    result = await writeback_event(owner, cal.source, cal.id, ev_dict, delete=delete)
+    return _normalize_writeback_result(result)
 
 
 # Per-request user time context. chat_routes sets this from browser timezone
@@ -1005,17 +1055,8 @@ def setup_calendar_routes() -> APIRouter:
             )
             db.add(ev)
             db.commit()
-            if cal.source == "caldav":
-                # Push the new event to the remote so it appears on the user's
-                # other devices — the sync is otherwise pull-only (#800).
-                from src.caldav_writeback import writeback_event
-                await writeback_event(owner, cal.source, cal.id, {
-                    "uid": uid, "summary": data.summary, "description": data.description,
-                    "location": data.location, "dtstart": dtstart, "dtend": dtend,
-                    "all_day": data.all_day, "is_utc": _is_utc and not data.all_day,
-                    "rrule": data.rrule or "",
-                })
-            return {"ok": True, "uid": uid}
+            writeback = await writeback_calendar_event(owner, cal, event_writeback_payload(ev))
+            return {"ok": True, "uid": uid, "writeback": writeback}
         except HTTPException:
             raise
         except Exception as e:
@@ -1062,14 +1103,8 @@ def setup_calendar_routes() -> APIRouter:
                 ev.color = data.color if data.color else None
             db.commit()
             cal = db.query(CalendarCal).filter(CalendarCal.id == ev.calendar_id).first()
-            if cal and cal.source == "caldav":
-                from src.caldav_writeback import writeback_event
-                await writeback_event(owner, cal.source, cal.id, {
-                    "uid": ev.uid, "summary": ev.summary, "description": ev.description,
-                    "location": ev.location, "dtstart": ev.dtstart, "dtend": ev.dtend,
-                    "all_day": ev.all_day, "is_utc": ev.is_utc, "rrule": ev.rrule or "",
-                })
-            return {"ok": True}
+            writeback = await writeback_calendar_event(owner, cal, event_writeback_payload(ev))
+            return {"ok": True, "writeback": writeback}
         except HTTPException:
             raise
         except Exception as e:
@@ -1095,10 +1130,12 @@ def setup_calendar_routes() -> APIRouter:
             _cal_id, _ev_uid = ev.calendar_id, ev.uid
             db.delete(ev)
             db.commit()
+            writeback = {"ok": True, "skipped": "not a caldav calendar"}
             if _is_caldav:
-                from src.caldav_writeback import writeback_event
-                await writeback_event(owner, "caldav", _cal_id, {"uid": _ev_uid}, delete=True)
-            return {"ok": True}
+                writeback = await writeback_calendar_event(
+                    owner, _cal, {"uid": _ev_uid}, delete=True,
+                )
+            return {"ok": True, "writeback": writeback}
         except HTTPException:
             raise
         except Exception as e:

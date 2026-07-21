@@ -127,6 +127,36 @@ class TestIsOllamaOpenAICompatUrl:
 
 
 # ---------------------------------------------------------------------------
+# _prefer_native_ollama_for_thinking — /v1 think:false is broken for qwen3.5+
+# ---------------------------------------------------------------------------
+
+class TestPreferNativeOllamaForThinking:
+    def test_rewrites_v1_thinking_model_to_native(self):
+        out = llm_core._prefer_native_ollama_for_thinking(
+            "http://127.0.0.1:11434/v1/chat/completions", "qwen3.5:4b"
+        )
+        assert out == "http://127.0.0.1:11434/api/chat"
+
+    def test_rewrites_qwen3_tag(self):
+        out = llm_core._prefer_native_ollama_for_thinking(
+            "http://localhost:11434/v1", "qwen3:14b"
+        )
+        assert out == "http://localhost:11434/api/chat"
+
+    def test_leaves_non_thinking_model_on_v1(self):
+        url = "http://127.0.0.1:11434/v1/chat/completions"
+        assert llm_core._prefer_native_ollama_for_thinking(url, "llama3.2:3b") == url
+
+    def test_leaves_native_url_unchanged(self):
+        url = "http://127.0.0.1:11434/api/chat"
+        assert llm_core._prefer_native_ollama_for_thinking(url, "qwen3.5:4b") == url
+
+    def test_leaves_openai_unchanged(self):
+        url = "https://api.openai.com/v1/chat/completions"
+        assert llm_core._prefer_native_ollama_for_thinking(url, "qwen3:14b") == url
+
+
+# ---------------------------------------------------------------------------
 # Payload injection — think: false only when both conditions hold
 # ---------------------------------------------------------------------------
 
@@ -134,11 +164,41 @@ class TestThinkSuppression:
     """Assert think:false is present/absent in the outgoing HTTP payload."""
 
     def test_think_false_for_ollama_v1_thinking_model(self, monkeypatch):
-        """think:false must be set for qwen3 on Ollama /v1."""
+        """Thinking models on Ollama /v1 are rewritten to native /api/chat,
+        which must still receive think:false."""
         payload = _capture_payload(
             monkeypatch, "http://127.0.0.1:11434/v1/chat/completions", "qwen3:14b"
         )
         assert payload.get("think") is False
+
+    def test_v1_thinking_model_hits_native_chat_url(self, monkeypatch):
+        """Regression: qwen3.5 on /v1 must not stay on OpenAI-compat (empty content)."""
+        client = _FakeClient()
+        captured_url = {"url": None}
+
+        class _CapturingClient(_FakeClient):
+            def stream(self, method, url, **kw):
+                captured_url["url"] = url
+                self.captured_payload = kw.get("json") or {}
+                return _FakeStreamCtx(self.captured_payload)
+
+        client = _CapturingClient()
+        monkeypatch.setattr(llm_core, "_get_http_client", lambda: client)
+        monkeypatch.setattr(llm_core, "_is_host_dead", lambda u: False)
+        monkeypatch.setattr(llm_core, "note_model_activity", lambda *a, **k: None)
+        monkeypatch.setattr(llm_core, "_clear_host_dead", lambda *a, **k: None)
+        monkeypatch.setattr(llm_core, "get_context_length", lambda u, m: 32768)
+
+        async def run():
+            return [c async for c in llm_core.stream_llm(
+                "http://127.0.0.1:11434/v1/chat/completions",
+                "qwen3.5:4b",
+                [{"role": "user", "content": "hi"}],
+            )]
+
+        asyncio.run(run())
+        assert captured_url["url"] == "http://127.0.0.1:11434/api/chat"
+        assert client.captured_payload.get("think") is False
 
     def test_no_think_for_ollama_v1_non_thinking_model(self, monkeypatch):
         """think must NOT be set for a plain (non-thinking) model on Ollama /v1."""

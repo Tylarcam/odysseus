@@ -250,6 +250,8 @@ def _uid_from_fetch_meta(meta_b: bytes) -> str:
 
 
 def _smtp_ready(cfg: dict) -> bool:
+    if cfg.get("provider") == "gmail_gog":
+        return True  # gogcli handles sending; no SMTP credentials needed
     return bool(cfg.get("smtp_host") and cfg.get("smtp_user") and cfg.get("smtp_password"))
 
 
@@ -618,6 +620,12 @@ def setup_email_routes():
         SECURITY: `owner` is propagated so when `account_id` is missing,
         the fallback config lookup is scoped to this user's accounts only.
         """
+        _cfg = _get_email_config(account_id, owner=owner)
+        if _cfg.get("provider") == "gmail_gog":
+            from src import gmail_gog as _gog
+            _gog_account = _cfg.get("from_address") or _cfg.get("imap_user") or ""
+            return _gog.list_inbox(_gog_account, folder, limit, offset, filter_, from_addr)
+
         conn = None
         try:
             conn = _imap_connect(account_id, owner=owner)
@@ -1165,6 +1173,12 @@ def setup_email_routes():
         of the same UID, then flip \\Seen in a separate readwrite session.
         BODY.PEEK[] keeps the fetch itself from tripping \\Seen.
         """
+        _cfg_r = _get_email_config(account_id, owner=owner)
+        if _cfg_r.get("provider") == "gmail_gog":
+            from src import gmail_gog as _gog
+            _gog_account = _cfg_r.get("from_address") or _cfg_r.get("imap_user") or ""
+            return _gog.read_message(_gog_account, uid, folder, mark_seen)
+
         import time as _t
         _t0 = _t.monotonic()
         raw = None
@@ -1683,6 +1697,11 @@ def setup_email_routes():
     async def mark_unread(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
         """Mark an email as unread (clear \\Seen flag)."""
         try:
+            _cfg_mu = _get_email_config(account_id, owner=owner)
+            if _cfg_mu.get("provider") == "gmail_gog":
+                from src import gmail_gog as _gog
+                _r = await _asyncio.to_thread(_gog.mark_unread, _cfg_mu.get("from_address") or _cfg_mu.get("imap_user") or "", uid)
+                return {"success": _r.get("ok", False), "error": _r.get("error")}
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Seen", add=False):
@@ -1697,6 +1716,11 @@ def setup_email_routes():
     async def mark_read(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
         """Mark an email as read (set \\Seen flag)."""
         try:
+            _cfg_mr = _get_email_config(account_id, owner=owner)
+            if _cfg_mr.get("provider") == "gmail_gog":
+                from src import gmail_gog as _gog
+                _r = await _asyncio.to_thread(_gog.mark_read, _cfg_mr.get("from_address") or _cfg_mr.get("imap_user") or "", uid)
+                return {"success": _r.get("ok", False), "error": _r.get("error")}
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _store_email_flag(conn, uid, "\\Seen", add=True):
@@ -1711,6 +1735,11 @@ def setup_email_routes():
     async def archive_email(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
         """Move email to Archive folder."""
         try:
+            _cfg_ar = _get_email_config(account_id, owner=owner)
+            if _cfg_ar.get("provider") == "gmail_gog":
+                from src import gmail_gog as _gog
+                _r = await _asyncio.to_thread(_gog.archive_message, _cfg_ar.get("from_address") or _cfg_ar.get("imap_user") or "", uid)
+                return {"success": _r.get("ok", False), "error": _r.get("error")}
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _move_email_message(conn, uid, "Archive", role="archive"):
@@ -1725,6 +1754,11 @@ def setup_email_routes():
     async def delete_email(uid: str, folder: str = Query("INBOX"), account_id: str | None = Query(None), owner: str = Depends(require_owner)):
         """Move email to Trash."""
         try:
+            _cfg_del = _get_email_config(account_id, owner=owner)
+            if _cfg_del.get("provider") == "gmail_gog":
+                from src import gmail_gog as _gog
+                _r = await _asyncio.to_thread(_gog.trash_message, _cfg_del.get("from_address") or _cfg_del.get("imap_user") or "", uid)
+                return {"success": _r.get("ok", False), "error": _r.get("error")}
             with _imap(account_id, owner=owner) as conn:
                 conn.select(_q(folder))
                 if not _move_email_message(conn, uid, "Trash", role="trash"):
@@ -1841,8 +1875,12 @@ def setup_email_routes():
 
     @router.get("/folders")
     async def list_folders(account_id: str | None = Query(None), owner: str = Depends(require_owner)):
-        """List IMAP folders."""
+        """List IMAP folders (or Gmail pseudo-folders for gog accounts)."""
         try:
+            _cfg_fl = _get_email_config(account_id, owner=owner)
+            if _cfg_fl.get("provider") == "gmail_gog":
+                from src import gmail_gog as _gog
+                return {"folders": _gog.GMAIL_FOLDERS}
             with _imap(account_id, owner=owner) as conn:
                 status, folders = conn.list()
             result = []
@@ -2132,6 +2170,24 @@ def setup_email_routes():
             cfg = _resolve_send_config(req.account_id, owner=owner)
         except Exception as e:
             return {"success": False, "error": str(e) or "No SMTP-capable email account configured"}
+
+        # Route Gmail/gog accounts through gogcli — no MIME building needed
+        if cfg.get("provider") == "gmail_gog":
+            from src import gmail_gog as _gog
+            _gog_account = cfg.get("from_address") or cfg.get("imap_user") or ""
+            _result = await _asyncio.to_thread(
+                _gog.send_message,
+                _gog_account,
+                req.to, req.subject, req.body,
+                req.body_html or "",
+                req.cc or "", req.bcc or "",
+                (req.in_reply_to or "").strip(),
+                "",
+                cfg.get("from_address") or "",
+            )
+            if _result.get("ok"):
+                return {"success": True, "message_id": _result.get("id", "")}
+            return {"success": False, "error": _result.get("error", "Send failed")}
 
         # Use 'mixed' if we have attachments, 'alternative' otherwise
         has_attachments = bool(req.attachments)
@@ -2948,6 +3004,7 @@ def setup_email_routes():
                     "name": r.name,
                     "is_default": bool(r.is_default),
                     "enabled": bool(r.enabled),
+                    "provider": getattr(r, "provider", None) or "imap",
                     "imap_host": r.imap_host or "",
                     "imap_port": int(r.imap_port or 993),
                     "imap_user": r.imap_user or "",
@@ -2966,13 +3023,16 @@ def setup_email_routes():
 
     @router.post("/accounts")
     async def create_email_account(data: dict, owner: str = Depends(require_owner)):
-        """Create a new email account."""
+        """Create a new email account (IMAP or gmail_gog provider)."""
         from core.database import SessionLocal, EmailAccount
         from src.secret_storage import encrypt as _enc
         import uuid as _uuid
         name = (data.get("name") or "").strip()
         if not name:
             return {"ok": False, "error": "name required"}
+        provider = (data.get("provider") or "imap").strip().lower()
+        if provider not in ("imap", "gmail_gog"):
+            return {"ok": False, "error": f"Unknown provider: {provider!r}"}
         db = SessionLocal()
         try:
             row = EmailAccount(
@@ -2980,6 +3040,7 @@ def setup_email_routes():
                 name=name,
                 is_default=bool(data.get("is_default", False)),
                 enabled=bool(data.get("enabled", True)),
+                provider=provider,
                 imap_host=(data.get("imap_host") or "").strip(),
                 imap_port=int(data.get("imap_port") or 993),
                 imap_user=(data.get("imap_user") or "").strip(),
@@ -3043,6 +3104,28 @@ def setup_email_routes():
                 row.imap_password = _enc(data["imap_password"])
             if data.get("smtp_password"):
                 row.smtp_password = _enc(data["smtp_password"])
+            if "is_default" in data:
+                want_default = bool(data["is_default"])
+                scope_q = db.query(EmailAccount)
+                if owner:
+                    scope_q = scope_q.filter(EmailAccount.owner == owner)
+                if want_default:
+                    scope_q.update({EmailAccount.is_default: False})
+                    row.is_default = True
+                elif row.is_default:
+                    row.is_default = False
+                    promote_q = db.query(EmailAccount).filter(
+                        EmailAccount.enabled == True,  # noqa: E712
+                        EmailAccount.id != account_id,
+                    )
+                    if owner:
+                        promote_q = promote_q.filter(EmailAccount.owner == owner)
+                    promote = promote_q.order_by(EmailAccount.created_at.asc()).first()
+                    if promote:
+                        promote.is_default = True
+                    else:
+                        # Sole account — keep it default.
+                        row.is_default = True
             db.commit()
             return {"ok": True, "id": row.id}
         finally:
@@ -3110,6 +3193,8 @@ def setup_email_routes():
                 if not row:
                     return {"ok": False, "imap": {"ok": False, "error": "Account not found"}}
                 saved_body = {
+                    "provider": getattr(row, "provider", None) or "imap",
+                    "from_address": row.from_address or "",
                     "imap_host": row.imap_host or "",
                     "imap_port": row.imap_port or 993,
                     "imap_user": row.imap_user or "",
@@ -3129,6 +3214,25 @@ def setup_email_routes():
                 body = saved_body
             finally:
                 db.close()
+
+        provider = (body.get("provider") or "imap").strip().lower()
+        if provider == "gmail_gog":
+            from src import gmail_gog as _gog
+            account = (body.get("from_address") or body.get("imap_user") or "").strip()
+            if not account:
+                return {
+                    "ok": False,
+                    "imap": {"ok": False, "error": "Need Gmail address"},
+                    "smtp": None,
+                }
+            result = await asyncio.to_thread(_gog.list_inbox, account, "INBOX", 1)
+            if result.get("error"):
+                return {
+                    "ok": False,
+                    "imap": {"ok": False, "error": result["error"]},
+                    "smtp": None,
+                }
+            return {"ok": True, "imap": {"ok": True}, "smtp": None}
 
         imap_result = {"ok": False}
         smtp_result = None

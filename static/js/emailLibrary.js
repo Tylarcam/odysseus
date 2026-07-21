@@ -22,6 +22,12 @@ import {
   _tryFoldHintSig, _foldSignature, _SIG_ICON, _QUOTE_ICON,
 } from './emailLibrary/signatureFold.js';
 import { state } from './emailLibrary/state.js';
+import { NOTE_BTN_ICON, saveEmailToNote } from './noteFromCodeBlock.js';
+import { JOB_PIPELINE_BTN_ICON, runJobPipelineFromEmail } from './jobPipeline.js';
+import {
+  buildEmailSearchCorpus,
+  searchEmailCorpus,
+} from './emailLibrary/localSearch.js';
 
 const API_BASE = window.location.origin;
 let _emailUnreadChipClickWired = false;
@@ -29,6 +35,8 @@ let _libLoadSeq = 0;
 let _libFolderSeq = 0;
 let _libSearchSeq = 0;
 let _libSearchHadResults = false;
+/** Snapshot of the last loaded list slice — kept for local fuzzy search. */
+let _libSearchCorpusEmails = [];
 let _activeEmailReaderForSelectAll = null;
 
 function _isEmailTypingTarget(t) {
@@ -1525,6 +1533,42 @@ function _crossFolderCandidates() {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
+/**
+ * Ensure list rows for search are in `_libListCache`, then build a fuzzy corpus.
+ * Uses `/api/email/list` (works on all providers) instead of IMAP SEARCH.
+ */
+async function _ensureEmailSearchCorpus(accountId, { crossFolder = false } = {}) {
+  const folders = crossFolder ? _crossFolderCandidates() : [state._libFolder || 'INBOX'];
+  const acctQS = accountId ? `&account_id=${encodeURIComponent(accountId)}` : '';
+  const missing = folders.filter((f) => {
+    const ck = _libCacheKeyFor(accountId, f, 'all', false);
+    return !_libCacheGet(ck);
+  });
+  if (missing.length) {
+    await Promise.all(missing.map(async (f) => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/email/list?folder=${encodeURIComponent(f)}${acctQS}&limit=100&offset=0&filter=all`,
+        );
+        const data = await res.json();
+        if (data && !data.error) {
+          const emails = (data.emails || []).map((em) => ({ ...em, _folder: f }));
+          _libCachePut(_libCacheKeyFor(accountId, f, 'all', false), {
+            emails,
+            total: data.total || emails.length,
+          });
+        }
+      } catch (_) {}
+    }));
+  }
+  return buildEmailSearchCorpus({
+    emails: _libSearchCorpusEmails,
+    listCache: _libListCache,
+    accountId,
+    folderFallback: state._libFolder || 'INBOX',
+  });
+}
+
 async function _doSearch() {
   const seq = ++_libSearchSeq;
   const q = state._libSearch.trim();
@@ -1547,9 +1591,7 @@ async function _doSearch() {
   const folderAtStart = state._libFolder || 'INBOX';
 
   try {
-    const accountQS = accountAtStart ? `&account_id=${encodeURIComponent(accountAtStart)}` : '';
-    const res = await fetch(`${API_BASE}/api/email/search?folder=${encodeURIComponent(folderAtStart)}${accountQS}&q=${encodeURIComponent(q)}&limit=100`);
-    const data = await res.json();
+    const corpus = await _ensureEmailSearchCorpus(accountAtStart, { crossFolder: true });
     sp.destroy();
     if (
       seq !== _libSearchSeq ||
@@ -1559,15 +1601,16 @@ async function _doSearch() {
     ) {
       return;
     }
-    if (data.error) throw new Error(data.error);
 
-    const results = data.emails || [];
+    const results = searchEmailCorpus(q, corpus, { limit: 100 });
     _libSearchHadResults = true;
-    state._libEmails = results;  // temporarily replace with search results
+    state._libEmails = results;
     _renderGrid();
 
     const stats = document.getElementById('email-lib-stats');
-    if (stats) stats.textContent = `${data.total || results.length} match${(data.total || results.length) === 1 ? '' : 'es'}`;
+    if (stats) {
+      stats.textContent = `${results.length} match${results.length === 1 ? '' : 'es'}`;
+    }
   } catch (e) {
     sp.destroy();
     grid.innerHTML = '<div class="email-loading">Search failed</div>';
@@ -1664,6 +1707,7 @@ async function _loadEmails({ force = false, useCache = true } = {}) {
   if (cached) {
     state._libEmails = cached.emails || [];
     state._libTotal = cached.total || 0;
+    _libSearchCorpusEmails = state._libEmails.slice();
     // Suppress the open-cascade animation when we're painting from
     // cache — the data was already on screen a moment ago, so sliding
     // each card in fresh feels janky. Also prevents the cascade from
@@ -1696,6 +1740,7 @@ async function _loadEmails({ force = false, useCache = true } = {}) {
       if (data.error) throw new Error(data.error);
       state._libEmails = data.emails || [];
       state._libTotal = data.total || 0;
+      _libSearchCorpusEmails = state._libEmails.slice();
       if (sp) sp.destroy();
       _renderGrid();
       const stats = document.getElementById('email-lib-stats');
@@ -3250,17 +3295,15 @@ async function _toggleFromSenderPanel(reader, data, btn) {
     loading.appendChild(sp.element);
 
     const params = new URLSearchParams({
-      q: fromAddr,
+      from: fromAddr,
       folder: state._libFolder || 'INBOX',
       limit: '25',
     });
     const acct = _acct();
     const acctSuffix = acct ? acct.replace(/^&?/, '&') : '';
-    const res = await fetch(`${API_BASE}/api/email/search?${params.toString()}${acctSuffix}`);
+    const res = await fetch(`${API_BASE}/api/email/list?${params.toString()}${acctSuffix}`);
     const j = await res.json();
     let raw = Array.isArray(j.emails) ? j.emails : [];
-    const target = fromAddr.toLowerCase();
-    raw = raw.filter(e => String(e.from_address || '').toLowerCase() === target);
     raw = raw.filter(e => String(e.uid) !== String(data.uid));
     emails = raw;
 
@@ -3343,23 +3386,14 @@ async function _toggleFromSenderPanel(reader, data, btn) {
     // _applyToggles inside panel._setResults.
     const runSearch = async (q) => {
       const myToken = ++searchToken;
-      const folders = _crossFolderCandidates();
-      const acct = _acct();
-      const acctSuffix = acct ? acct.replace(/^&?/, '&') : '';
+      listEl.innerHTML = `<div class="from-sender-loading"></div>`;
       try {
-        const results = await Promise.all(folders.map(async (f) => {
-          const params = new URLSearchParams({ q, folder: f, limit: '15' });
-          const res = await fetch(`${API_BASE}/api/email/search?${params.toString()}${acctSuffix}`);
-          const j = await res.json();
-          return (j.emails || []).map(em => ({ ...em, _folder: f }));
-        }));
+        const sp = spinnerModule.createWhirlpool(18);
+        listEl.querySelector('.from-sender-loading')?.appendChild(sp.element);
+        const accountId = (state._libAccountId || '').trim();
+        const corpus = await _ensureEmailSearchCorpus(accountId, { crossFolder: true });
         if (myToken !== searchToken) return;
-        let merged = [].concat(...results);
-        merged.sort((a, b) => {
-          const da = a.date ? Date.parse(a.date) : 0;
-          const db = b.date ? Date.parse(b.date) : 0;
-          return db - da;
-        });
+        let merged = searchEmailCorpus(q, corpus, { limit: 60 });
         if (!merged.length) {
           listEl.innerHTML = `<div class="from-sender-empty">No matches for "${_esc(q)}".</div>`;
           return;
@@ -4483,6 +4517,7 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
 
   const _bubblesIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   const _contactIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>';
+  const _noteIcon = NOTE_BTN_ICON;
   const actions = [
     {
       label: 'Open in new tab',
@@ -4490,6 +4525,36 @@ function _showReaderMoreMenu(em, card, reader, anchor) {
       action: async () => {
         const folder = state._libFolder || 'INBOX';
         await _openEmailAsTab(em, folder);
+      },
+    },
+    {
+      label: 'Save to Notes',
+      icon: _noteIcon,
+      action: async () => {
+        try {
+          await saveEmailToNote(em, {
+            reader,
+            folder: state._libFolder || 'INBOX',
+            accountQuery: _acct(),
+          });
+        } catch (err) {
+          import('./ui.js').then((m) => m.showError?.(err?.message || 'Failed to save note')).catch(() => {});
+        }
+      },
+    },
+    {
+      label: 'Run job pipeline',
+      icon: JOB_PIPELINE_BTN_ICON,
+      action: async () => {
+        try {
+          await runJobPipelineFromEmail(em, {
+            reader,
+            folder: state._libFolder || 'INBOX',
+            accountQuery: _acct(),
+          });
+        } catch (err) {
+          import('./ui.js').then((m) => m.showError?.(err?.message || 'Job pipeline failed')).catch(() => {});
+        }
       },
     },
     {
@@ -4674,6 +4739,7 @@ function _showCardMenu(em, anchor) {
   const isSentFolder = /sent/i.test(state._libFolder);
 
   const _newTabIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+  const _noteIcon = NOTE_BTN_ICON;
   const actions = [
     { label: 'Open', icon: _replyIcon, action: async () => {
       // Just expand inline (same as tapping the row).
@@ -4688,6 +4754,32 @@ function _showCardMenu(em, anchor) {
       // its own chip in the minimized dock.
       const folder = state._libFolder || 'INBOX';
       await _openEmailAsTab(em, folder);
+    }},
+    { label: 'Save to Notes', icon: _noteIcon, action: async () => {
+      const card = anchor.closest('.doclib-card');
+      const reader = card?.querySelector('.email-card-reader');
+      try {
+        await saveEmailToNote(em, {
+          reader: reader || undefined,
+          folder: state._libFolder || 'INBOX',
+          accountQuery: _acct(),
+        });
+      } catch (err) {
+        import('./ui.js').then((m) => m.showError?.(err?.message || 'Failed to save note')).catch(() => {});
+      }
+    }},
+    { label: 'Run job pipeline', icon: JOB_PIPELINE_BTN_ICON, action: async () => {
+      const card = anchor.closest('.doclib-card');
+      const reader = card?.querySelector('.email-card-reader');
+      try {
+        await runJobPipelineFromEmail(em, {
+          reader: reader || undefined,
+          folder: state._libFolder || 'INBOX',
+          accountQuery: _acct(),
+        });
+      } catch (err) {
+        import('./ui.js').then((m) => m.showError?.(err?.message || 'Job pipeline failed')).catch(() => {});
+      }
     }},
     { label: 'Remind to reply', icon: _cardBellIcon, submenu: 'remind' },
   ];

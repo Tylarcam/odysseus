@@ -1,0 +1,32 @@
+{
+  "name": "realtime_barge_in",
+  "description": "User interrupts agent mid-response",
+  "steps": [
+    ["turn.start"],
+    ["response.created"],
+    ["first_audio_out", "response.first_audio_out"],
+    ["speech.start", "input_audio_buffer.speech_started"],
+    ["barge_in"],
+    ["response.cancelled", "output_audio_buffer.cleared"],
+    ["speech.stop"],
+    ["turn.committed"],
+    ["response.created"],
+    ["response.done"]
+  ],
+  "forbidden_after": {
+    "barge_in": ["first_audio_out"]
+  },
+  "sample_events": [
+    {"event": "turn.start", "elapsedMs": 0},
+    {"event": "response.created", "elapsedMs": 500},
+    {"event": "first_audio_out", "elapsedMs": 700},
+    {"event": "speech.start", "elapsedMs": 1200},
+    {"event": "barge_in", "elapsedMs": 1250, "latencyMs": 180},
+    {"event": "response.cancelled", "elapsedMs": 1260},
+    {"event": "output_audio_buffer.cleared", "elapsedMs": 1265},
+    {"event": "speech.stop", "elapsedMs": 2800},
+    {"event": "turn.committed", "elapsedMs": 2900},
+    {"event": "response.created", "elapsedMs": 3100},
+    {"event": "response.done", "elapsedMs": 7500}
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "ptt_happy_turn",
+  "description": "Push-to-talk fallback: record, STT, chat stream, TTS idle",
+  "steps": [
+    ["turn.start"],
+    ["mic.start"],
+    ["mic.stop"],
+    ["stt.final", "stt.server.done", "stt.browser.end"],
+    ["turn.committed"],
+    ["response.created"],
+    ["response.done"],
+    ["first_audio_out", "response.first_audio_out", "tts.idle"]
+  ],
+  "forbidden_after": {
+    "turn.committed": ["stt.empty", "turn.submit.blocked"],
+    "response.done": ["loop.stuck"]
+  },
+  "sample_events": [
+    {"event": "turn.start", "elapsedMs": 0},
+    {"event": "mic.start", "elapsedMs": 10},
+    {"event": "mic.stop", "elapsedMs": 2100},
+    {"event": "stt.server.done", "elapsedMs": 3400},
+    {"event": "turn.committed", "elapsedMs": 3450},
+    {"event": "response.created", "elapsedMs": 5200},
+    {"event": "response.done", "elapsedMs": 8900, "willPlayTts": true},
+    {"event": "first_audio_out", "elapsedMs": 9100},
+    {"event": "tts.idle", "elapsedMs": 14200}
+  ]
+}

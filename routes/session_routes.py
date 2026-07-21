@@ -4,7 +4,7 @@ import html
 import json
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Form, HTTPException, Response, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Response, Request
 import logging
 
 from core.session_manager import SessionManager
@@ -74,6 +74,24 @@ def _message_text(message) -> str:
     else:
         content = getattr(message, "content", None)
     return _content_to_text(content)
+
+
+def _preview_text(text: str, max_len: int = 140) -> str:
+    """Collapse whitespace and truncate for list previews."""
+    collapsed = " ".join((text or "").split())
+    if len(collapsed) <= max_len:
+        return collapsed
+    return collapsed[: max_len - 1].rstrip() + "…"
+
+
+def _recent_session_activity(row) -> str | None:
+    if row.last_message_at:
+        return row.last_message_at.isoformat()
+    if row.updated_at:
+        return row.updated_at.isoformat()
+    if row.created_at:
+        return row.created_at.isoformat()
+    return None
 
 
 def _message_metadata(message) -> dict:
@@ -180,6 +198,15 @@ _HIDDEN_SYSTEM_SESSION_NAMES = {
     "[Task] Email Tags",
     "[Task] Skills Audit",
 }
+
+
+def _is_hidden_session_name(name: str) -> bool:
+    clean = (name or "").strip()
+    return (
+        clean in ("Nobody", "Incognito")
+        or clean in _HIDDEN_SYSTEM_SESSION_NAMES
+        or clean.startswith(COMPARE_SESSION_PREFIX)
+    )
 
 
 def _pick_endpoint_for_sort(owner=None):
@@ -311,6 +338,58 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
 
         return sessions
+
+    @router.get("/sessions/recent")
+    def list_recent_sessions(request: Request, limit: int = Query(5, ge=1, le=20)):
+        """Recent chats for the welcome-screen Jump Back In row."""
+        from sqlalchemy import func
+        from core.database import ChatMessage as DbChatMessage
+        from src.auth_helpers import owner_filter
+
+        user = effective_user(request)
+        db = SessionLocal()
+        try:
+            q = db.query(DbSession).filter(DbSession.archived == False)  # noqa: E712
+            if user:
+                q = owner_filter(q, DbSession, user)
+            activity = func.coalesce(
+                DbSession.last_message_at,
+                DbSession.updated_at,
+                DbSession.created_at,
+            )
+            rows = (
+                q.filter(DbSession.message_count > 0)
+                .order_by(activity.desc())
+                .limit(max(limit * 3, limit))
+                .all()
+            )
+
+            out = []
+            for row in rows:
+                if _is_hidden_session_name(row.name or ""):
+                    continue
+                last_msg = (
+                    db.query(DbChatMessage)
+                    .filter(DbChatMessage.session_id == row.id)
+                    .order_by(DbChatMessage.timestamp.desc())
+                    .first()
+                )
+                preview = _preview_text(_message_text(last_msg)) if last_msg else ""
+                title = (row.name or "").strip() or "Untitled chat"
+                out.append(
+                    {
+                        "id": row.id,
+                        "title": title,
+                        "preview": preview,
+                        "last_message_at": _recent_session_activity(row),
+                    }
+                )
+                if len(out) >= limit:
+                    break
+
+            return {"sessions": out, "count": len(out)}
+        finally:
+            db.close()
     
     @router.post("/session", response_model=SessionResponse)
     def create_session(

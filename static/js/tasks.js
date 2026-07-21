@@ -2705,6 +2705,6 @@ function stopNotificationPolling() {
 // Start polling on module load
 startNotificationPolling();
 
-const tasksModule = { openTasks, closeTasks, isTasksOpen, startNotificationPolling, stopNotificationPolling };
+const tasksModule = { openTasks, closeTasks, isTasksOpen, startNotificationPolling, stopNotificationPolling, pollNotificationsNow: _pollTaskNotifications };
 export default tasksModule;
 window.tasksModule = tasksModule;

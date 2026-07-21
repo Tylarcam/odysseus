@@ -1,0 +1,2216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NPR Panel 2 — Contact emails (thank-you send sheet)</title>
+<meta name="description" content="Question: What are the best-supported professional emails / contact paths for Greta Pittenger, Nicolette Khan, and Kriti Singh NPR Panel 2, AI Research / Ethics">
+<meta property="og:title" content="NPR Panel 2 — Contact emails (thank-you send sheet)">
+<meta property="og:description" content="Question: What are the best-supported professional emails / contact paths for Greta Pittenger, Nicolette Khan, and Kriti Singh NPR Panel 2, AI Research / Ethics">
+<meta property="og:type" content="article">
+
+<meta name="theme-color" content="#b8543a" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131214" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>O</text></svg>">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --font-display: 'Charter', 'Iowan Old Style', Georgia, serif;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --bg: #fbf9f4;
+  --bg-surface: #ffffff;
+  --bg-surface-alt: #f1ede4;
+  --border: rgba(0,0,0,0.08);
+  --border-strong: rgba(0,0,0,0.16);
+  --text: #1a1817;
+  --text-dim: #5a5651;
+  --text-muted: #8a8580;
+  --accent: #b8543a;
+  --accent-light: #d97a5e;
+  --accent-bg: rgba(184,84,58,0.06);
+  --gold: #c9952e;
+  --gold-bg: rgba(201,149,46,0.09);
+  --aurora-a: rgba(184,84,58,0.10);
+  --aurora-b: rgba(201,149,46,0.08);
+  --aurora-c: rgba(64,98,128,0.07);
+  --radius: 12px;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 24px rgba(0,0,0,0.07);
+  --max-w: 760px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131214; --bg-surface: #1c1a1e; --bg-surface-alt: #25232a;
+    --border: rgba(255,255,255,0.07); --border-strong: rgba(255,255,255,0.16);
+    --text: #ece8e2; --text-dim: #a8a39c; --text-muted: #6f6b66;
+    --accent: #e88f73; --accent-light: #f4ad95; --accent-bg: rgba(232,143,115,0.09);
+    --gold: #e8c05a; --gold-bg: rgba(232,192,90,0.09);
+    --aurora-a: rgba(232,143,115,0.13);
+    --aurora-b: rgba(232,192,90,0.09);
+    --aurora-c: rgba(125,180,224,0.10);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.4); --shadow-md: 0 4px 28px rgba(0,0,0,0.55);
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Give smooth-scroll some breathing room so anchors land below the
+     fixed toolbar instead of being shoved straight under it. */
+  scroll-padding-top: 4rem;
+}
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+  font-size: 17px;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* ── Aurora background ─────────────────────────────────
+   Slowly-drifting layered blobs in the accent palette. Sits behind
+   the content, fixed to the viewport so scrolling doesn't reset the
+   composition. Subtle grain on top stops it reading as 'flat CSS'. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -20vh -20vw;
+  z-index: -2;
+  background:
+    radial-gradient(40vw 50vh at 18% 22%, var(--aurora-a) 0%, transparent 60%),
+    radial-gradient(45vw 55vh at 82% 12%, var(--aurora-b) 0%, transparent 65%),
+    radial-gradient(55vw 60vh at 50% 88%, var(--aurora-c) 0%, transparent 70%);
+  filter: blur(20px);
+  animation: aurora-drift 28s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Subtle film-grain — SVG turbulence baked to a data-URL. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.32 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+}
+@keyframes aurora-drift {
+  0%   { transform: translate3d(0,0,0) scale(1);     }
+  50%  { transform: translate3d(2vw,-1vh,0) scale(1.04); }
+  100% { transform: translate3d(-1vw,1.5vh,0) scale(1.02); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}
+
+/* ── Toolbar (top-right) ──────────────────────────── */
+.toolbar {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 100;
+  display: flex;
+  gap: 0.4rem;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.toolbar:hover { opacity: 1; }
+.toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s;
+  position: relative;
+}
+.toolbar button:hover { background: var(--bg-surface-alt); }
+.toolbar button svg { width: 14px; height: 14px; flex-shrink: 0; }
+.toolbar .toast {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--text);
+  color: var(--bg);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.toolbar .toast.show { opacity: 1; }
+/* Floating listen dock — stays on screen while scrolling; not a blocking overlay */
+.listen-modal-backdrop {
+  position: fixed;
+  inset: auto;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 120;
+  background: transparent;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+  max-width: calc(100vw - 1.5rem);
+}
+.listen-modal-backdrop.hidden { display: none; }
+/* Keep page content clear of the floating dock while open */
+body.listen-dock-open {
+  padding-bottom: min(52vh, 460px);
+}
+.listen-modal {
+  pointer-events: auto;
+  width: min(380px, calc(100vw - 2rem));
+  max-height: min(60vh, 480px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 0.9rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md, 0 12px 40px rgba(0,0,0,0.22));
+  font-size: 0.78rem;
+  color: var(--text);
+}
+.listen-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.listen-modal-title {
+  font-weight: 650;
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+}
+.listen-modal-sub {
+  margin-top: 0.15rem;
+  opacity: 0.7;
+  font-size: 0.72rem;
+}
+.listen-modal-close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.25rem 0.45rem;
+  opacity: 0.7;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+}
+.listen-modal-close:hover { opacity: 1; }
+.listen-time-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.75rem;
+}
+.listen-scrub {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #ddd);
+  overflow: hidden;
+}
+.listen-scrub > span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--accent, #6366f1);
+  transition: width 0.2s linear;
+}
+.listen-transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}
+.listen-transport button {
+  min-width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg, #fff);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  touch-action: manipulation;
+}
+.listen-transport button:hover:not(:disabled) {
+  border-color: var(--accent, #6366f1);
+}
+.listen-transport button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.listen-transport button.primary {
+  background: var(--accent, #6366f1);
+  border-color: var(--accent, #6366f1);
+  color: #fff;
+  min-width: 3rem;
+  height: 3rem;
+}
+.listen-segments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  max-height: 12rem;
+  border-top: 1px solid var(--border, #e5e5e5);
+  padding-top: 0.45rem;
+  -webkit-overflow-scrolling: touch;
+}
+.listen-segments li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.5rem;
+  padding: 0.5rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.listen-segments li:hover { background: var(--bg-muted, rgba(0,0,0,0.04)); }
+.listen-segments li.active {
+  background: color-mix(in srgb, var(--accent, #6366f1) 14%, transparent);
+}
+.listen-seg-label {
+  font-weight: 600;
+  font-size: 0.74rem;
+}
+.listen-seg-meta {
+  opacity: 0.65;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, Consolas, monospace;
+}
+.listen-seg-preview {
+  grid-column: 1 / -1;
+  opacity: 0.7;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Portrait / narrow phones: full-width bottom dock */
+@media (max-width: 640px), ((orientation: portrait) and (max-width: 920px)) {
+  .listen-modal-backdrop {
+    left: 0.65rem;
+    right: 0.65rem;
+    bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+  .listen-modal {
+    width: 100%;
+    max-height: min(52vh, 420px);
+    border-radius: 16px 16px 12px 12px;
+    padding: 0.9rem 0.85rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+    font-size: 0.82rem;
+  }
+  .listen-modal-title { font-size: 0.95rem; }
+  .listen-modal-sub { font-size: 0.75rem; }
+  .listen-transport { gap: 0.75rem; }
+  .listen-transport button {
+    min-width: 3rem;
+    height: 3rem;
+  }
+  .listen-transport button.primary {
+    min-width: 3.4rem;
+    height: 3.4rem;
+  }
+  .listen-segments { max-height: 9.5rem; }
+  .listen-segments li { padding: 0.55rem 0.5rem; }
+  .toolbar {
+    top: max(0.5rem, env(safe-area-inset-top, 0px));
+    right: 0.5rem;
+  }
+}
+.toolbar button.loading { opacity: 0.65; pointer-events: none; }
+.toolbar button.playing { border-color: var(--accent, #6366f1); }
+.dropdown { position: relative; }
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  min-width: 140px;
+}
+.dropdown-menu.open { display: block; }
+.dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+.dropdown-menu button:hover { background: var(--bg-surface-alt); }
+
+/* ── Hero ──────────────────────────────────────────── */
+.hero {
+  position: relative;
+  background: transparent;
+  color: var(--text);
+  padding: 5.5rem 2rem 2.5rem;
+  text-align: center;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 40%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 70%);
+  pointer-events: none;
+}
+/* A hair-thin gradient hairline divider under the hero to anchor it
+   without putting it on a heavy boxed background. */
+.hero::after {
+  content: '';
+  position: absolute;
+  left: 50%; bottom: 0;
+  width: min(60%, 320px);
+  height: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+.hero-label {
+  position: relative;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.85;
+  margin-bottom: 1.4rem;
+  font-family: var(--font-body);
+}
+.hero-rq {
+  position: relative;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  max-width: 720px;
+  margin: 1.25rem auto 0;
+  padding: 0 0.5rem;
+  color: var(--text-muted, color-mix(in srgb, var(--text) 72%, transparent));
+  word-break: break-word;
+  text-align: left;
+}
+.hero-rq-label {
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.9;
+  margin-right: 0.35rem;
+}
+
+/* ── Hero image ───────────────────────────────────── */
+.hero-image {
+  max-width: min(1020px, calc(100% - 2rem));
+  margin: 0.75rem auto 0;
+  position: relative;
+  z-index: 1;
+  padding: 0;
+}
+.hero-image-placeholder {
+  padding: 0;
+}
+.hero-placeholder {
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  min-height: 280px;
+  max-height: 440px;
+  border-radius: var(--radius);
+  /* Split-complementary gradient: blue, orange, red-orange */
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 50%),
+    linear-gradient(135deg, #1d3557 0%, #f4a261 50%, #e76f51 100%);
+  box-shadow: var(--shadow-sm);
+}
+.hero-image img {
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  min-height: 280px;
+  max-height: 440px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  display: block;
+}
+@media (max-width: 640px) {
+  .hero-placeholder,
+  .hero-image img {
+    aspect-ratio: 16 / 9;
+    min-height: 200px;
+    max-height: 320px;
+  }
+}
+
+/* ── Section images ───────────────────────────────── */
+.section-image {
+  margin: 1.5rem 0;
+  position: relative;
+}
+.section-image img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: block;
+}
+
+/* ── Per-image hide button ────────────────────────────
+   A small X that appears on hover (or always on touch) so users can
+   remove irrelevant OG images. Click POSTs the URL to the backend so
+   the next render skips it. */
+.img-hide-btn {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.05s ease;
+  z-index: 2;
+  padding: 0;
+}
+.hero-image .img-hide-btn { top: 14px; right: 14px; }
+/* Reroll sits just to the left of the hide button. */
+.img-reroll-btn {
+  position: absolute;
+  top: 10px; right: 46px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.05s ease;
+  z-index: 2;
+  padding: 0;
+}
+.hero-image .img-reroll-btn { top: 14px; right: calc(14px + 36px); }
+.section-image:hover .img-hide-btn,
+.section-image:hover .img-reroll-btn,
+.hero-image:hover .img-hide-btn,
+.hero-image:hover .img-reroll-btn { opacity: 1; }
+.img-hide-btn:hover { background: var(--accent); }
+.img-reroll-btn:hover { background: var(--accent); }
+.img-hide-btn:active,
+.img-reroll-btn:active { transform: scale(0.92); }
+.img-reroll-btn.spinning svg { animation: img-reroll-spin 0.6s linear infinite; }
+.img-reroll-btn:disabled { display: none; }
+@keyframes img-reroll-spin { to { transform: rotate(360deg); } }
+@media (hover: none) {
+  /* Touch devices have no hover — show the buttons at low opacity always. */
+  .img-hide-btn, .img-reroll-btn { opacity: 0.7; }
+}
+.section-image.fading,
+.hero-image.fading {
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+/* ── Stats bar ─────────────────────────────────────── */
+.stats-bar {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 2rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.stat { display: flex; align-items: center; gap: 0.35rem; }
+.stat-value { font-weight: 600; color: var(--text); }
+
+/* ── Layout ────────────────────────────────────────── */
+.layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  max-width: calc(var(--max-w) + 260px);
+  margin: 0 auto;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc-sidebar { display: none; }
+}
+
+/* ── TOC sidebar ───────────────────────────────────── */
+.toc-sidebar {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  padding: 3.2rem 0.8rem 2rem 1.4rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+.toc-sidebar nav { position: relative; }
+.toc-sidebar nav a {
+  position: relative;
+  display: block;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 0.42rem 0.7rem 0.42rem 0.85rem;
+  margin: 1px 0;
+  border-radius: 6px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  transition: color 0.18s ease, background 0.18s ease, padding-left 0.18s ease;
+}
+/* Sliding accent indicator on the left edge of each TOC link */
+.toc-sidebar nav a::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  width: 2px; height: 0;
+  background: var(--accent);
+  transform: translateY(-50%);
+  border-radius: 1px;
+  transition: height 0.18s ease, opacity 0.18s ease;
+  opacity: 0;
+}
+.toc-sidebar nav a:hover {
+  color: var(--text);
+  background: var(--accent-bg);
+  padding-left: 1rem;
+}
+.toc-sidebar nav a:hover::before {
+  height: 60%;
+  opacity: 1;
+}
+.toc-sidebar nav a.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-bg);
+}
+.toc-sidebar nav a.active::before {
+  height: 80%;
+  opacity: 1;
+}
+.toc-sidebar nav a.depth-3 {
+  padding-left: 1.3rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.toc-sidebar nav a.depth-3:hover { padding-left: 1.45rem; }
+
+/* ── Content ───────────────────────────────────────── */
+.content { max-width: var(--max-w); padding: 3rem 2.5rem 4rem; }
+
+/* Display headings — Fraunces optical-size driven so they get more
+   contrast and personality at the larger end. */
+.content h2 {
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 2.4vw, 1.85rem);
+  font-weight: 600;
+  font-variation-settings: 'opsz' 96, 'SOFT' 50;
+  margin: 3rem 0 1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, var(--accent) 0%, transparent 65%) 1;
+  letter-spacing: -0.022em;
+  line-height: 1.2;
+  color: var(--text);
+}
+.content h2:first-child { margin-top: 0; }
+.content h3 {
+  font-family: var(--font-display);
+  font-size: 1.22rem;
+  font-weight: 600;
+  font-variation-settings: 'opsz' 32;
+  margin: 2.2rem 0 0.6rem;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+.content h4 {
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  margin: 1.6rem 0 0.5rem;
+}
+.content p { margin-bottom: 1.1rem; hanging-punctuation: first last; }
+
+/* Drop cap on the very first paragraph of the body — old-school editorial
+   touch that anchors the reader. */
+.content > p:first-of-type::first-letter,
+.content > h2:first-child + p::first-letter {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variation-settings: 'opsz' 144;
+  font-size: 3.6em;
+  line-height: 0.85;
+  float: left;
+  margin: 0.15em 0.12em 0 -0.04em;
+  color: var(--accent);
+}
+
+.content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s, color 0.15s;
+}
+.content a:hover {
+  text-decoration-color: var(--accent);
+  color: var(--accent-light);
+}
+.content ul, .content ol { margin: 0 0 1.1rem 1.6rem; }
+.content li { margin-bottom: 0.4rem; }
+.content li::marker { color: var(--accent); }
+.content li > ul, .content li > ol { margin-top: 0.4rem; margin-bottom: 0; }
+.content blockquote {
+  position: relative;
+  border-left: 3px solid var(--gold);
+  background: var(--gold-bg);
+  padding: 1.1rem 1.4rem 1.1rem 2.6rem;
+  margin: 1.5rem 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+.content blockquote::before {
+  content: '\201C';
+  position: absolute;
+  left: 0.5rem; top: 0.3rem;
+  font-family: var(--font-display);
+  font-size: 3rem;
+  font-style: normal;
+  color: var(--gold);
+  opacity: 0.5;
+  line-height: 1;
+}
+.content hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, var(--border-strong), transparent); margin: 2rem 0; }
+.content code { font-family: var(--font-mono); font-size: 0.86em; background: var(--bg-surface-alt); padding: 0.15em 0.4em; border-radius: 4px; }
+.content pre { background: var(--bg-surface-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.5rem; overflow-x: auto; margin: 1.25rem 0; font-size: 0.86rem; line-height: 1.6; }
+.content pre code { background: none; padding: 0; }
+.content table { width: 100%; border-collapse: collapse; margin: 1.25rem 0; font-size: 0.9rem; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+.content th { text-align: left; padding: 0.7rem 1rem; background: var(--accent-bg); font-weight: 600; border-bottom: 2px solid var(--border-strong); }
+.content td { padding: 0.6rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.content tr:last-child td { border-bottom: none; }
+.content tr:hover td { background: var(--accent-bg); }
+
+/* ── Sources (collapsible list) ───────────────────── */
+.sources-panel { margin-top: 3rem; border-top: 2px solid var(--border); padding-top: 1.5rem; }
+.sources-panel details { margin: 0; }
+.sources-panel summary {
+  display: flex; align-items: center; gap: 0.5rem;
+  cursor: pointer; font-size: 1rem; font-weight: 600;
+  color: var(--text); padding: 0.5rem 0; list-style: none;
+  user-select: none;
+}
+.sources-panel summary::-webkit-details-marker { display: none; }
+.sources-panel summary::before {
+  content: '\25B6'; font-size: 0.65em; color: var(--text-muted);
+  transition: transform 0.2s;
+}
+.sources-panel details[open] summary::before { transform: rotate(90deg); }
+.sources-list { padding: 0.5rem 0 0 0.25rem; }
+.sources-list a {
+  display: flex; align-items: baseline; gap: 0.5rem;
+  padding: 0.35rem 0; font-size: 0.85rem;
+  color: var(--text); text-decoration: none;
+  transition: color 0.15s;
+}
+.sources-list a:hover { color: var(--accent); }
+.sources-list .snum {
+  color: var(--text-muted); font-size: 0.75rem;
+  min-width: 1.5rem; text-align: right; flex-shrink: 0;
+}
+.sources-list .sdomain {
+  color: var(--text-muted); font-size: 0.75rem;
+  margin-left: auto; flex-shrink: 0;
+}
+
+/* ── Chat-about CTA ────────────────────────────────── */
+.chat-cta {
+  margin: 3rem 0 1rem; padding: 1.5rem;
+  text-align: center;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg-surface);
+}
+.chat-cta-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px; font-size: 0.95rem; font-weight: 600;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: 8px; cursor: pointer;
+  font-family: inherit;
+  transition: filter 0.15s, transform 0.05s;
+}
+.chat-cta-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.chat-cta-btn:active:not(:disabled) { transform: translateY(1px); }
+.chat-cta-btn:disabled { opacity: 0.6; cursor: progress; }
+.chat-cta-hint {
+  margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);
+}
+
+/* ── Footer ────────────────────────────────────────── */
+.report-footer {
+  text-align: center; padding: 2rem; font-size: 0.75rem;
+  color: var(--text-muted); border-top: 1px solid var(--border); margin-top: 2rem;
+}
+
+/* ── Animations ────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  .content h2, .content h3, .content p, .content ul, .content ol,
+  .content blockquote, .content table, .content pre, .section-image {
+    animation: fadeUp 0.4s ease both;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* ── Print ─────────────────────────────────────────── */
+@media print {
+  .toc-sidebar, .toolbar, .listen-modal-backdrop { display: none !important; }
+  .layout { grid-template-columns: 1fr; }
+  .hero { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+
+/* ── Category palettes ───────────────────────────────────
+   Override the accent + aurora vars per category so each report
+   type has a distinct visual identity. */
+body.category-product {
+  --accent: #2a8a8c;
+  --accent-light: #4ab0b2;
+  --accent-bg: rgba(42,138,140,0.07);
+  --aurora-a: rgba(42,138,140,0.11);
+  --aurora-b: rgba(201,149,46,0.06);
+  --aurora-c: rgba(64,98,128,0.06);
+}
+body.category-comparison {
+  --accent: #7a4cb8;
+  --accent-light: #9d76d0;
+  --accent-bg: rgba(122,76,184,0.07);
+  --aurora-a: rgba(122,76,184,0.11);
+  --aurora-b: rgba(184,84,58,0.05);
+  --aurora-c: rgba(64,98,128,0.07);
+}
+body.category-howto {
+  --accent: #3d8a3d;
+  --accent-light: #62b162;
+  --accent-bg: rgba(61,138,61,0.07);
+  --aurora-a: rgba(61,138,61,0.11);
+  --aurora-b: rgba(201,149,46,0.07);
+  --aurora-c: rgba(42,138,140,0.05);
+}
+body.category-landscape {
+  --accent: #b88a2e;
+  --accent-light: #d4a955;
+  --accent-bg: rgba(184,138,46,0.08);
+  --aurora-a: rgba(184,138,46,0.13);
+  --aurora-b: rgba(184,84,58,0.06);
+  --aurora-c: rgba(122,76,184,0.05);
+}
+@media (prefers-color-scheme: dark) {
+  body.category-product {
+    --accent: #5cc8cb; --accent-light: #8fdde0;
+    --accent-bg: rgba(92,200,203,0.10);
+    --aurora-a: rgba(92,200,203,0.13);
+    --aurora-b: rgba(232,192,90,0.07);
+    --aurora-c: rgba(125,180,224,0.08);
+  }
+  body.category-comparison {
+    --accent: #b896e8; --accent-light: #d0b8f0;
+    --accent-bg: rgba(184,150,232,0.10);
+    --aurora-a: rgba(184,150,232,0.13);
+    --aurora-b: rgba(232,143,115,0.06);
+    --aurora-c: rgba(125,180,224,0.08);
+  }
+  body.category-howto {
+    --accent: #82c882; --accent-light: #a8dba8;
+    --accent-bg: rgba(130,200,130,0.09);
+    --aurora-a: rgba(130,200,130,0.12);
+    --aurora-b: rgba(232,192,90,0.07);
+    --aurora-c: rgba(92,200,203,0.07);
+  }
+  body.category-landscape {
+    --accent: #e6c069; --accent-light: #f0d390;
+    --accent-bg: rgba(230,192,105,0.10);
+    --aurora-a: rgba(230,192,105,0.15);
+    --aurora-b: rgba(232,143,115,0.07);
+    --aurora-c: rgba(184,150,232,0.06);
+  }
+}
+
+/* ── Per-category font pairings ───────────────────────
+   Body font shifts between serif (long-form categories) and sans
+   (practical/data categories) so each report reads as a different
+   publication, not just a re-tinted version of the same template. */
+
+/* Long-form: literary serif for both display and body */
+body:not([class*="category-"]),
+body.category-landscape {
+  --font-body: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+}
+
+/* Comparison: analytical serif display + clean sans body */
+body.category-comparison {
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+/* How-to: friendly geometric sans, top to bottom */
+body.category-howto {
+  --font-display: 'Manrope', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+/* Product: techy/engineery — IBM Plex Sans display + Inter body */
+body.category-product {
+  --font-display: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+}
+
+/* Source Serif sits visually larger than Inter at the same px — pull it
+   back one notch for the categories that use it as body so line length
+   and rhythm stay comparable across categories. */
+body:not([class*="category-"]) body, /* no-op selector, kept for clarity */
+body.category-landscape { font-size: 16.5px; }
+
+/* Drop cap looks bad on geometric sans — kill it for those categories */
+body.category-product   .content > p:first-of-type::first-letter,
+body.category-howto     .content > p:first-of-type::first-letter,
+body.category-comparison .content > p:first-of-type::first-letter,
+body.category-product   .content > h2:first-child + p::first-letter,
+body.category-howto     .content > h2:first-child + p::first-letter,
+body.category-comparison .content > h2:first-child + p::first-letter {
+  font-size: 1em; float: none; margin: 0; color: inherit;
+  font-family: inherit; font-weight: inherit;
+}
+
+/* ── Per-category background effects ───────────────
+   Each category overrides body::before so the page reads as a
+   distinctly-textured surface. Aurora stays the default. */
+
+/* Product → blueprint grid that slowly pans */
+body.category-product::before {
+  background:
+    linear-gradient(to right, var(--aurora-a) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--aurora-a) 1px, transparent 1px),
+    radial-gradient(70vw 60vh at 50% 50%, var(--aurora-a) 0%, transparent 75%);
+  background-size: 56px 56px, 56px 56px, 100% 100%;
+  filter: none;
+  animation: cat-grid-pan 60s linear infinite;
+}
+@keyframes cat-grid-pan {
+  to { background-position: 56px 56px, 56px 56px, 0 0; }
+}
+
+/* Comparison → dot grid + slow opacity pulse */
+body.category-comparison::before {
+  background:
+    radial-gradient(circle, var(--aurora-a) 1.4px, transparent 1.8px),
+    radial-gradient(60vw 55vh at 25% 25%, var(--aurora-b) 0%, transparent 65%),
+    radial-gradient(60vw 55vh at 75% 75%, var(--aurora-c) 0%, transparent 65%);
+  background-size: 26px 26px, 100% 100%, 100% 100%;
+  filter: none;
+  animation: cat-dot-pulse 14s ease-in-out infinite alternate;
+}
+@keyframes cat-dot-pulse {
+  from { opacity: 0.65; }
+  to   { opacity: 1; }
+}
+
+/* How-to → flat surface with a very subtle vignette. Drop the flow-lines
+   pattern — it competes visually with the step number rails on the
+   right-hand side of each H2. The reading should feel like an O'Reilly
+   procedure: clean, scannable, no decoration in the way. */
+body.category-howto::before {
+  background:
+    radial-gradient(70vw 70vh at 50% 0%, var(--aurora-a) 0%, transparent 60%),
+    radial-gradient(50vw 50vh at 50% 100%, var(--aurora-b) 0%, transparent 65%);
+  filter: blur(40px);
+  animation: none;
+}
+
+/* Landscape → horizontal horizon bands that slowly shift sideways */
+body.category-landscape::before {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      var(--aurora-a) 22%,
+      transparent 35%,
+      var(--aurora-b) 55%,
+      transparent 68%,
+      var(--aurora-c) 85%,
+      transparent 100%
+    );
+  background-size: 100% 200%;
+  filter: blur(40px);
+  animation: cat-horizon-drift 36s ease-in-out infinite alternate;
+}
+@keyframes cat-horizon-drift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.category-product::before,
+  body.category-comparison::before,
+  body.category-howto::before,
+  body.category-landscape::before {
+    animation: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────
+   PER-CATEGORY STRUCTURAL TREATMENTS
+   Each category gets distinctive structural CSS so the page
+   reads as a different publication — not just retinted.
+   ───────────────────────────────────────────────────── */
+
+/* ── HOWTO: O'Reilly-style numbered procedure ─────── */
+body.category-howto .content { counter-reset: howto-step; }
+body.category-howto .content h2 {
+  counter-increment: howto-step;
+  display: flex; align-items: center; gap: 14px;
+  border-bottom: none;
+  padding-left: 0;
+  margin-top: 3.5rem;
+}
+body.category-howto .content h2::before {
+  content: counter(howto-step);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Step body gets a colored left rail so you can scan "this is step 1's stuff" */
+body.category-howto .content h2 ~ p,
+body.category-howto .content h2 ~ ul,
+body.category-howto .content h2 ~ ol,
+body.category-howto .content h2 ~ pre,
+body.category-howto .content h2 ~ blockquote {
+  border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  padding-left: 1rem;
+  margin-left: 4px;
+}
+body.category-howto .content h2:has(+ *) ~ h2 ~ * { border-left: none; padding-left: 0; margin-left: 0; }
+/* Terminal-style code blocks — green $ prompt, monospaced, dark surface */
+body.category-howto .content pre {
+  background: #1a1a1e;
+  color: #d4e4d4;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  border-radius: 8px;
+  position: relative;
+  padding-left: 2.6rem;
+}
+body.category-howto .content pre::before {
+  content: '$';
+  position: absolute;
+  left: 1.1rem; top: 1.15rem;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.86rem;
+  opacity: 0.85;
+}
+body.category-howto .content pre code { color: inherit; }
+
+/* ── LANDSCAPE: editorial briefing with H3 player cards ─ */
+body.category-landscape .content h3 {
+  /* Each H3 in landscape = a "player" in the field — give it a card frame */
+  margin-top: 2.5rem;
+  padding: 14px 18px 4px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border-radius: 0 8px 8px 0;
+  font-family: var(--font-display);
+  font-size: 1.18rem;
+}
+body.category-landscape .content h3 + p {
+  margin-top: 0;
+  padding: 0 18px 14px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border-left: 3px solid var(--accent);
+  margin-left: 0;
+  border-radius: 0 0 8px 0;
+}
+/* Pull-quote treatment for any standalone blockquote */
+body.category-landscape .content blockquote {
+  font-size: 1.2rem;
+  line-height: 1.5;
+  max-width: 90%;
+  margin: 2rem auto;
+  text-align: center;
+  border-left: none;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: transparent;
+  border-radius: 0;
+  padding: 1.5rem 1rem;
+  font-style: italic;
+}
+body.category-landscape .content blockquote::before {
+  display: none;
+}
+
+/* ── COMPARISON: lab-report tables with winner badges ─ */
+body.category-comparison .content {
+  font-feature-settings: 'tnum' on, 'ss01';  /* tabular numerals for tables */
+}
+body.category-comparison .content table {
+  font-size: 0.92rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+}
+body.category-comparison .content th {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface));
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+body.category-comparison .content td:first-child {
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+/* The first H3 inside a comparison report often names the recommended pick */
+body.category-comparison .content h3:first-of-type::after {
+  content: 'Pick';
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+/* ── PRODUCT: spec-sheet cards for each H3 ─────────── */
+body.category-product .content h3 {
+  /* Each product gets a spec-card frame — bordered, slight bg lift */
+  margin-top: 2.4rem;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: var(--bg-surface);
+  border-radius: 10px;
+  display: flex; align-items: baseline; gap: 10px;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+body.category-product .content h3::after {
+  /* small "spec" tag on each product heading */
+  content: 'SPEC';
+  margin-left: auto;
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+body.category-product .content h3 + p,
+body.category-product .content h3 + ul,
+body.category-product .content h3 + table {
+  margin-top: 0.8rem;
+  padding-left: 4px;
+}
+
+</style>
+</head>
+<body class="category-interview_prep">
+
+<!-- Toolbar: Listen + Export + Restore hidden images -->
+<div class="toolbar">
+  
+  <button id="btn-listen" type="button" title="Listen to audio brief">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+    Listen
+  </button>
+  <div class="dropdown">
+    <button id="btn-export" title="Export">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export &#9662;
+    </button>
+    <div class="dropdown-menu" id="export-menu">
+      <button id="btn-pdf">Save as PDF</button>
+      <button id="btn-md">Download Markdown</button>
+      <button id="btn-html">Download HTML</button>
+    </div>
+  </div>
+</div>
+<div id="listen-modal-backdrop" class="listen-modal-backdrop hidden" role="dialog" aria-modal="false" aria-labelledby="listen-modal-title">
+  <div class="listen-modal" id="listen-modal">
+    <div class="listen-modal-head">
+      <div>
+        <div class="listen-modal-title" id="listen-modal-title">Audio brief</div>
+        <div class="listen-modal-sub" id="listen-modal-sub">Preparing…</div>
+      </div>
+      <button type="button" class="listen-modal-close" id="listen-modal-close" title="Close player" aria-label="Close player">&times;</button>
+    </div>
+    <div class="listen-time-row">
+      <span id="listen-elapsed">0:00</span>
+      <span id="listen-status-label">Idle</span>
+      <span id="listen-total">0:00</span>
+    </div>
+    <div class="listen-scrub" aria-hidden="true"><span id="listen-scrub-fill"></span></div>
+    <div class="listen-transport" role="group" aria-label="Playback controls">
+      <button type="button" id="listen-btn-stop" title="Stop" aria-label="Stop" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+      </button>
+      <button type="button" id="listen-btn-play" class="primary" title="Play" aria-label="Play" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button type="button" id="listen-btn-pause" title="Pause" aria-label="Pause" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+      </button>
+    </div>
+    <ul class="listen-segments" id="listen-segments" aria-label="Segments by duration"></ul>
+  </div>
+</div>
+
+<div class="hero">
+  <div class="hero-label">Odysseus &mdash; Deep Research Report</div>
+  <div class="hero-image hero-image-placeholder" aria-hidden="true"><div class="hero-placeholder"></div></div>
+  <p class="hero-rq"><span class="hero-rq-label">RQ:</span> Professional emails / contact paths for Greta Pittenger, Nicolette Khan, Kriti Singh (NPR Panel 2 thank-yous)</p>
+</div>
+
+<div class="stats-bar">
+  
+</div>
+
+<div class="layout">
+  <aside class="toc-sidebar">
+    <nav>
+      <a href="#executive-summary-read-first" class="depth-2">Executive summary (read first)</a>
+      <a href="#answers-to-brief-questions" class="depth-2">Answers to brief questions</a>
+      <a href="#risks" class="depth-2">Risks</a>
+      <a href="#appendix-research-legs" class="depth-2">Appendix — research legs</a>
+      <a href="#a1-last30days" class="depth-3">A1 last30days</a>
+      <a href="#a2-firecrawl" class="depth-3">A2 Firecrawl</a>
+      <a href="#a3-perplexity" class="depth-3">A3 Perplexity</a>
+    </nav>
+  </aside>
+  <main class="content">
+    <p><strong>Question:</strong> What are the best-supported professional emails / contact paths for Greta Pittenger, Nicolette Khan, and Kriti Singh (NPR Panel 2, AI Research / Ethics &amp; Readiness)?
+<strong>Engines:</strong> A1 last30days · A2 Firecrawl · A3 Perplexity
+<strong>Date:</strong> 2026-07-20
+<strong>Session:</strong> <code>rp-npr-panel-emails-20260720</code></p>
+<hr/>
+<h2 id="executive-summary-read-first">Executive summary (read first)</h2>
+<p>No public page prints personal <code>@npr.org</code> addresses for the three panelists. NPR’s dominant staff pattern is <strong><code>[first_initial][last]@npr.org</code></strong> (RocketReach: <strong>92.3%</strong>; matches known <code>braynor@npr.org</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Person</th>
+<th>Best attempt</th>
+<th>Confidence</th>
+<th>Backup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Greta Pittenger</strong></td>
+<td><code>gpittenger@npr.org</code></td>
+<td>likely-pattern</td>
+<td>LinkedIn <code>/in/gretapittenger</code></td>
+</tr>
+<tr>
+<td><strong>Nicolette Khan</strong></td>
+<td><code>nkhan@npr.org</code></td>
+<td>likely-pattern</td>
+<td>LinkedIn <code>/in/nicolette-khan-889393109</code></td>
+</tr>
+<tr>
+<td><strong>Kriti Singh</strong></td>
+<td><code>ksingh@npr.org</code></td>
+<td>likely-pattern (name collision risk)</td>
+<td>LinkedIn <code>/in/kritisinghh</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Send plan:</strong> Use the three pattern addresses for the approved thank-yous. On bounce → LinkedIn. Optional escalate via <code>braynor@npr.org</code> only if needed. Reject Limestone Title / KY “Greta Pittenger” and show inboxes (<code>TheSundayStory@npr.org</code>, etc.).</p>
+<hr/>
+<h2 id="answers-to-brief-questions">Answers to brief questions</h2>
+<ol>
+<li><strong>Greta:</strong> Best = <code>gpittenger@npr.org</code> (not verified cleartext).</li>
+<li><strong>Nicolette:</strong> Best = <code>nkhan@npr.org</code> (not verified cleartext).</li>
+<li><strong>Kriti:</strong> Best = <code>ksingh@npr.org</code> (not verified; higher collision risk).</li>
+<li><strong>Pattern:</strong> Primary <code>flast@npr.org</code> (~78–92% of directory samples). Secondary <code>firstlast@npr.org</code>.</li>
+<li><strong>Public pages:</strong> NPR people / LinkedIn / GitHub confirm identity &amp; roles; none list personal mailto. RocketReach person pages are paywalled.</li>
+<li><strong>Confidence labels:</strong> All three candidates = <strong>likely-pattern</strong>, not verified.</li>
+<li><strong>Alternates:</strong> LinkedIn InMail; recruiter Ben Raynor <code>braynor@npr.org</code> as forwarder.</li>
+</ol>
+<hr/>
+<h2 id="risks">Risks</h2>
+<ul>
+<li>Pattern guesses can bounce or hit the wrong person (especially <code>ksingh</code>).</li>
+<li>Do not confuse NPR Greta with KY real-estate Greta (<code>Greta@Limestone-Title.com</code>).</li>
+</ul>
+<hr/>
+<h2 id="appendix-research-legs">Appendix — research legs</h2>
+<h3 id="a1-last30days">A1 last30days</h3>
+<p>See <code>a1_last30days.md</code>.</p>
+<h3 id="a2-firecrawl">A2 Firecrawl</h3>
+<p>See <code>a2_firecrawl.md</code>.</p>
+<h3 id="a3-perplexity">A3 Perplexity</h3>
+<p>See <code>a3_perplexity.md</code> / <code>a3_perplexity_raw.json</code>.</p>
+
+    <div class="sources-panel">
+<details>
+<summary>Sources (13)</summary>
+<div class="sources-list">
+<a href="https://rocketreach.co/npr-email-format_b5c60063f42e0c56" target="_blank" rel="noopener noreferrer"><span class="snum">1.</span><span>https://rocketreach.co/npr-email-format_b5c60063f42e0c56</span><span class="sdomain">rocketreach.co</span></a>
+<a href="https://rocketreach.co/nicolette-khan-email_19619156" target="_blank" rel="noopener noreferrer"><span class="snum">2.</span><span>https://rocketreach.co/nicolette-khan-email_19619156</span><span class="sdomain">rocketreach.co</span></a>
+<a href="https://rocketreach.co/kriti-singh-email_508337853" target="_blank" rel="noopener noreferrer"><span class="snum">3.</span><span>https://rocketreach.co/kriti-singh-email_508337853</span><span class="sdomain">rocketreach.co</span></a>
+<a href="https://www.npr.org/people/g-s1-111855/greta-pittenger" target="_blank" rel="noopener noreferrer"><span class="snum">4.</span><span>https://www.npr.org/people/g-s1-111855/greta-pittenger</span><span class="sdomain">npr.org</span></a>
+<a href="https://www.linkedin.com/in/gretapittenger" target="_blank" rel="noopener noreferrer"><span class="snum">5.</span><span>https://www.linkedin.com/in/gretapittenger</span><span class="sdomain">linkedin.com</span></a>
+<a href="https://www.linkedin.com/in/nicolette-khan-889393109" target="_blank" rel="noopener noreferrer"><span class="snum">6.</span><span>https://www.linkedin.com/in/nicolette-khan-889393109</span><span class="sdomain">linkedin.com</span></a>
+<a href="https://www.linkedin.com/in/kritisinghh" target="_blank" rel="noopener noreferrer"><span class="snum">7.</span><span>https://www.linkedin.com/in/kritisinghh</span><span class="sdomain">linkedin.com</span></a>
+<a href="https://github.com/kritisgh" target="_blank" rel="noopener noreferrer"><span class="snum">8.</span><span>https://github.com/kritisgh</span><span class="sdomain">github.com</span></a>
+<a href="https://www.npr.org/2026/06/03/nx-s1-5843359/white-house-gov-website-alien-immigration" target="_blank" rel="noopener noreferrer"><span class="snum">9.</span><span>https://www.npr.org/2026/06/03/nx-s1-5843359/white-house-gov-website-alien-immigration</span><span class="sdomain">npr.org</span></a>
+<a href="https://www.npr.org/2026/01/18/nx-s1-5647661/defending-the-disabled" target="_blank" rel="noopener noreferrer"><span class="snum">10.</span><span>https://www.npr.org/2026/01/18/nx-s1-5647661/defending-the-disabled</span><span class="sdomain">npr.org</span></a>
+<a href="https://limestonetitleandescrow.com/team/greta-pittenger/" target="_blank" rel="noopener noreferrer"><span class="snum">11.</span><span>https://limestonetitleandescrow.com/team/greta-pittenger/</span><span class="sdomain">limestonetitleandescrow.com</span></a>
+<a href="https://x.com/regreters" target="_blank" rel="noopener noreferrer"><span class="snum">12.</span><span>https://x.com/regreters</span><span class="sdomain">x.com</span></a>
+<a href="https://www.theawl.com/2010/11/how-to-email-npr/" target="_blank" rel="noopener noreferrer"><span class="snum">13.</span><span>https://www.theawl.com/2010/11/how-to-email-npr/</span><span class="sdomain">theawl.com</span></a>
+</div>
+</details>
+</div>
+
+    <div class="chat-cta"><button id="btn-chat-about" class="chat-cta-btn" data-research-id="rp-npr-panel-emails-20260720"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Discuss</span></button><div class="chat-cta-hint">Opens a new chat with this report as context.</div></div>
+  </main>
+</div>
+
+<div class="report-footer">
+  Generated by Odysseus Deep Research &middot; July 20, 2026 at 18:54
+</div>
+
+<script>
+(function() {
+  // ESC closes the report tab. window.close() works when the tab was
+  // opened via window.open() (which is how the panel launches it). If the
+  // browser blocks self-close (rare — e.g. report opened by direct URL),
+  // fall back to history.back() so ESC still feels responsive.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    // Don't hijack ESC while typing in a field or with an open dropdown.
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    var menu = document.getElementById('export-menu');
+    if (menu && menu.classList.contains('open')) { menu.classList.remove('open'); return; }
+    var listenBackdrop = document.getElementById('listen-modal-backdrop');
+    if (listenBackdrop && !listenBackdrop.classList.contains('hidden')) {
+      if (typeof __listenCloseModal === 'function') __listenCloseModal();
+      return;
+    }
+    try { window.close(); } catch (err) {}
+    // window.close() is a no-op when the tab wasn't script-opened; in that
+    // case fall back to navigation so the key isn't ignored.
+    setTimeout(function() { if (!window.closed) history.back(); }, 50);
+  });
+
+  // Export dropdown toggle
+  var exportBtn = document.getElementById('btn-export');
+  var exportMenu = document.getElementById('export-menu');
+  exportBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    exportMenu.classList.toggle('open');
+  });
+  document.addEventListener('click', function() { exportMenu.classList.remove('open'); });
+
+  // Save as PDF (browser print)
+  document.getElementById('btn-pdf').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    window.print();
+  });
+
+  // Download Markdown
+  var exportMarkdown = "# NPR Panel 2 \u2014 Contact emails (thank-you send sheet)\n\n> **Research question:** Professional emails / contact paths for Greta Pittenger, Nicolette Khan, Kriti Singh (NPR Panel 2 thank-yous)\n\n*Generated by Odysseus Deep Research \u00b7 July 20, 2026 at 18:54*\n\n---\n\n**Question:** What are the best-supported professional emails / contact paths for Greta Pittenger, Nicolette Khan, and Kriti Singh (NPR Panel 2, AI Research / Ethics & Readiness)?\n**Engines:** A1 last30days \u00b7 A2 Firecrawl \u00b7 A3 Perplexity\n**Date:** 2026-07-20\n**Session:** `rp-npr-panel-emails-20260720`\n\n---\n\n## Executive summary (read first)\n\nNo public page prints personal `@npr.org` addresses for the three panelists. NPR\u2019s dominant staff pattern is **`[first_initial][last]@npr.org`** (RocketReach: **92.3%**; matches known `braynor@npr.org`).\n\n| Person | Best attempt | Confidence | Backup |\n|--------|--------------|------------|--------|\n| **Greta Pittenger** | `gpittenger@npr.org` | likely-pattern | LinkedIn `/in/gretapittenger` |\n| **Nicolette Khan** | `nkhan@npr.org` | likely-pattern | LinkedIn `/in/nicolette-khan-889393109` |\n| **Kriti Singh** | `ksingh@npr.org` | likely-pattern (name collision risk) | LinkedIn `/in/kritisinghh` |\n\n**Send plan:** Use the three pattern addresses for the approved thank-yous. On bounce \u2192 LinkedIn. Optional escalate via `braynor@npr.org` only if needed. Reject Limestone Title / KY \u201cGreta Pittenger\u201d and show inboxes (`TheSundayStory@npr.org`, etc.).\n\n---\n\n## Answers to brief questions\n\n1. **Greta:** Best = `gpittenger@npr.org` (not verified cleartext).\n2. **Nicolette:** Best = `nkhan@npr.org` (not verified cleartext).\n3. **Kriti:** Best = `ksingh@npr.org` (not verified; higher collision risk).\n4. **Pattern:** Primary `flast@npr.org` (~78\u201392% of directory samples). Secondary `firstlast@npr.org`.\n5. **Public pages:** NPR people / LinkedIn / GitHub confirm identity & roles; none list personal mailto. RocketReach person pages are paywalled.\n6. **Confidence labels:** All three candidates = **likely-pattern**, not verified.\n7. **Alternates:** LinkedIn InMail; recruiter Ben Raynor `braynor@npr.org` as forwarder.\n\n---\n\n## Risks\n\n- Pattern guesses can bounce or hit the wrong person (especially `ksingh`).\n- Do not confuse NPR Greta with KY real-estate Greta (`Greta@Limestone-Title.com`).\n\n---\n\n## Appendix \u2014 research legs\n\n### A1 last30days\n\nSee `a1_last30days.md`.\n\n### A2 Firecrawl\n\nSee `a2_firecrawl.md`.\n\n### A3 Perplexity\n\nSee `a3_perplexity.md` / `a3_perplexity_raw.json`.\n\n## Sources\n\n1. [https://rocketreach.co/npr-email-format_b5c60063f42e0c56](https://rocketreach.co/npr-email-format_b5c60063f42e0c56)\n2. [https://rocketreach.co/nicolette-khan-email_19619156](https://rocketreach.co/nicolette-khan-email_19619156)\n3. [https://rocketreach.co/kriti-singh-email_508337853](https://rocketreach.co/kriti-singh-email_508337853)\n4. [https://www.npr.org/people/g-s1-111855/greta-pittenger](https://www.npr.org/people/g-s1-111855/greta-pittenger)\n5. [https://www.linkedin.com/in/gretapittenger](https://www.linkedin.com/in/gretapittenger)\n6. [https://www.linkedin.com/in/nicolette-khan-889393109](https://www.linkedin.com/in/nicolette-khan-889393109)\n7. [https://www.linkedin.com/in/kritisinghh](https://www.linkedin.com/in/kritisinghh)\n8. [https://github.com/kritisgh](https://github.com/kritisgh)\n9. [https://www.npr.org/2026/06/03/nx-s1-5843359/white-house-gov-website-alien-immigration](https://www.npr.org/2026/06/03/nx-s1-5843359/white-house-gov-website-alien-immigration)\n10. [https://www.npr.org/2026/01/18/nx-s1-5647661/defending-the-disabled](https://www.npr.org/2026/01/18/nx-s1-5647661/defending-the-disabled)\n11. [https://limestonetitleandescrow.com/team/greta-pittenger/](https://limestonetitleandescrow.com/team/greta-pittenger/)\n12. [https://x.com/regreters](https://x.com/regreters)\n13. [https://www.theawl.com/2010/11/how-to-email-npr/](https://www.theawl.com/2010/11/how-to-email-npr/)";
+  document.getElementById('btn-md').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    var blob = new Blob([exportMarkdown], { type: 'text/markdown' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = document.title.replace(/[^a-z0-9]+/gi, '-').substring(0, 60) + '.md';
+    a.click();
+  });
+
+  // Download HTML
+  document.getElementById('btn-html').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    var blob = new Blob([document.documentElement.outerHTML], { type: 'text/html' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = document.title.replace(/[^a-z0-9]+/gi, '-').substring(0, 60) + '.html';
+    a.click();
+  });
+
+  // ── Audio brief listen (transport modal) ───────────────────────────
+  // State machine mirrors synth-wav-studio playback handoff:
+  // IDLE → PLAYING ↔ PAUSED → STOPPED / IDLE
+  var __sessionId = "rp-npr-panel-emails-20260720";
+  var listenBtn = document.getElementById('btn-listen');
+  var listenBackdrop = document.getElementById('listen-modal-backdrop');
+  var listenModal = document.getElementById('listen-modal');
+  var listenSub = document.getElementById('listen-modal-sub');
+  var listenElapsedEl = document.getElementById('listen-elapsed');
+  var listenTotalEl = document.getElementById('listen-total');
+  var listenStatusEl = document.getElementById('listen-status-label');
+  var listenScrubFill = document.getElementById('listen-scrub-fill');
+  var listenSegList = document.getElementById('listen-segments');
+  var listenBtnPlay = document.getElementById('listen-btn-play');
+  var listenBtnPause = document.getElementById('listen-btn-pause');
+  var listenBtnStop = document.getElementById('listen-btn-stop');
+  var listenBtnClose = document.getElementById('listen-modal-close');
+  var listenIconDefault = listenBtn ? listenBtn.innerHTML : '';
+  var listenIconLoad = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg> Preparing…';
+  var LS = { IDLE: 'IDLE', PLAYING: 'PLAYING', PAUSED: 'PAUSED', STOPPED: 'STOPPED' };
+  var __listen = {
+    state: LS.IDLE,
+    mode: null,
+    segments: [],
+    segIdx: 0,
+    totalSec: 0,
+    elapsedSec: 0,
+    tickTimer: null,
+    audio: null,
+    objectUrl: null,
+    prepared: false
+  };
+
+  function __listenToast(msg) {
+    if (!listenBtn) return;
+    var t = listenBtn.querySelector('.toast');
+    if (!t) {
+      t = document.createElement('span');
+      t.className = 'toast';
+      listenBtn.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function() { t.classList.remove('show'); }, 3200);
+  }
+
+  function __fmtTime(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  function __estimateSec(text) {
+    var words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+    return Math.max(2, words / 2.5);
+  }
+
+  function __parseScriptSegments(script) {
+    var lines = String(script || '').split(/\n+/);
+    var segs = [];
+    var cur = null;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      var m = line.match(/^(HOST|ANALYST)\s*:\s*(.*)$/i);
+      if (m) {
+        if (cur) segs.push(cur);
+        cur = { label: m[1].toUpperCase() === 'HOST' ? 'Host' : 'Analyst', text: m[2], startSec: 0, durationSec: 0 };
+      } else if (cur) {
+        cur.text += ' ' + line;
+      } else {
+        cur = { label: 'Brief', text: line, startSec: 0, durationSec: 0 };
+      }
+    }
+    if (cur) segs.push(cur);
+    if (!segs.length && String(script || '').trim()) {
+      var words = String(script).trim().split(/\s+/);
+      var chunkSize = Math.max(40, Math.ceil(words.length / 4));
+      for (var c = 0, n = 1; c < words.length; c += chunkSize, n++) {
+        segs.push({
+          label: 'Part ' + n,
+          text: words.slice(c, c + chunkSize).join(' '),
+          startSec: 0,
+          durationSec: 0
+        });
+      }
+    }
+    var t = 0;
+    segs.forEach(function(s) {
+      s.durationSec = __estimateSec(s.text);
+      s.startSec = t;
+      t += s.durationSec;
+    });
+    return segs;
+  }
+
+  function __setListenState(next) {
+    __listen.state = next;
+    if (listenStatusEl) listenStatusEl.textContent = next.charAt(0) + next.slice(1).toLowerCase();
+    var playing = next === LS.PLAYING;
+    var paused = next === LS.PAUSED;
+    if (listenBtnPlay) listenBtnPlay.disabled = !__listen.prepared || playing;
+    if (listenBtnPause) listenBtnPause.disabled = !playing;
+    if (listenBtnStop) listenBtnStop.disabled = !(playing || paused);
+    if (listenBtn) {
+      listenBtn.classList.toggle('playing', playing || paused);
+      if (!listenBtn.classList.contains('loading')) {
+        listenBtn.innerHTML = listenIconDefault;
+      }
+    }
+  }
+
+  function __updateListenClock() {
+    if (listenElapsedEl) listenElapsedEl.textContent = __fmtTime(__listen.elapsedSec);
+    if (listenTotalEl) listenTotalEl.textContent = __fmtTime(__listen.totalSec);
+    var pct = __listen.totalSec > 0 ? Math.min(100, (__listen.elapsedSec / __listen.totalSec) * 100) : 0;
+    if (listenScrubFill) listenScrubFill.style.width = pct + '%';
+    if (listenSegList) {
+      var items = listenSegList.querySelectorAll('li');
+      for (var i = 0; i < items.length; i++) {
+        items[i].classList.toggle('active', i === __listen.segIdx);
+      }
+    }
+  }
+
+  function __renderSegments() {
+    if (!listenSegList) return;
+    listenSegList.innerHTML = '';
+    __listen.segments.forEach(function(seg, idx) {
+      var li = document.createElement('li');
+      li.setAttribute('role', 'button');
+      li.tabIndex = 0;
+      li.dataset.idx = String(idx);
+      li.innerHTML =
+        '<span class="listen-seg-label">' + seg.label + '</span>' +
+        '<span class="listen-seg-meta">' + __fmtTime(seg.startSec) + ' · ' + __fmtTime(seg.durationSec) + '</span>' +
+        '<span class="listen-seg-preview"></span>';
+      li.querySelector('.listen-seg-preview').textContent = seg.text || ('Audio part ' + (idx + 1));
+      li.addEventListener('click', function() { __listenJumpTo(idx); });
+      li.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); __listenJumpTo(idx); }
+      });
+      listenSegList.appendChild(li);
+    });
+    __updateListenClock();
+  }
+
+  function __clearListenTick() {
+    if (__listen.tickTimer) { clearInterval(__listen.tickTimer); __listen.tickTimer = null; }
+  }
+
+  function __startListenTick() {
+    __clearListenTick();
+    __listen.tickTimer = setInterval(function() {
+      if (__listen.state !== LS.PLAYING) return;
+      if (__listen.mode === 'chunks' && __listen.audio && !isNaN(__listen.audio.currentTime)) {
+        var base = (__listen.segments[__listen.segIdx] && __listen.segments[__listen.segIdx].startSec) || 0;
+        __listen.elapsedSec = base + __listen.audio.currentTime;
+      } else {
+        __listen.elapsedSec = Math.min(__listen.totalSec, __listen.elapsedSec + 0.25);
+        var seg = __listen.segments[__listen.segIdx];
+        if (seg && __listen.elapsedSec >= seg.startSec + seg.durationSec && __listen.segIdx < __listen.segments.length - 1) {
+          // keep segIdx in sync for TTS estimate clock
+        }
+      }
+      __updateListenClock();
+    }, 250);
+  }
+
+  function __revokeAudio() {
+    if (__listen.audio) {
+      try { __listen.audio.pause(); } catch (e) {}
+      __listen.audio = null;
+    }
+    if (__listen.objectUrl) {
+      try { URL.revokeObjectURL(__listen.objectUrl); } catch (e2) {}
+      __listen.objectUrl = null;
+    }
+  }
+
+  function __hardStopMedia() {
+    __clearListenTick();
+    __revokeAudio();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+  }
+
+  function __listenCloseModal() {
+    __hardStopMedia();
+    __listen.elapsedSec = 0;
+    __listen.segIdx = 0;
+    __setListenState(LS.IDLE);
+    __updateListenClock();
+    if (listenBackdrop) listenBackdrop.classList.add('hidden');
+    document.body.classList.remove('listen-dock-open');
+    if (listenBtn) {
+      listenBtn.classList.remove('loading', 'playing');
+      listenBtn.innerHTML = listenIconDefault;
+    }
+  }
+
+  function __openListenModal() {
+    if (listenBackdrop) listenBackdrop.classList.remove('hidden');
+    document.body.classList.add('listen-dock-open');
+  }
+
+  function __fetchBriefStatus() {
+    if (!__sessionId) return Promise.reject(new Error('No session'));
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/status', {
+      credentials: 'same-origin'
+    }).then(function(r) { return r.ok ? r.json() : r.json().then(function(j) { throw new Error(j.detail || 'status failed'); }); });
+  }
+
+  function __fetchTranscript() {
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/transcript', {
+      credentials: 'same-origin'
+    }).then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('transcript failed')); });
+  }
+
+  function __waitForBriefReady(maxMs) {
+    var started = Date.now();
+    return new Promise(function(resolve, reject) {
+      function tick() {
+        __fetchBriefStatus().then(function(st) {
+          if (st.status === 'ready' || st.status === 'skipped') { resolve(st); return; }
+          if (st.status === 'failed') {
+            __fetchTranscript().then(function(t) {
+              if ((t.script || '').trim()) {
+                resolve(Object.assign({}, st, { status: 'skipped' }));
+                return;
+              }
+              reject(new Error(st.error || 'Audio brief failed'));
+            }).catch(reject);
+            return;
+          }
+          if (Date.now() - started > maxMs) { reject(new Error('Timed out waiting for audio brief')); return; }
+          setTimeout(tick, 2000);
+        }).catch(reject);
+      }
+      tick();
+    });
+  }
+
+  function __speakSegment(idx) {
+    return new Promise(function(resolve, reject) {
+      if (!window.speechSynthesis) { reject(new Error('Browser speech not available')); return; }
+      if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) { resolve(); return; }
+      var seg = __listen.segments[idx];
+      if (!seg) { resolve(); return; }
+      __listen.segIdx = idx;
+      __listen.elapsedSec = seg.startSec;
+      __updateListenClock();
+      var u = new SpeechSynthesisUtterance(seg.text);
+      u.onend = function() { resolve(); };
+      u.onerror = function(e) {
+        if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) { resolve(); return; }
+        reject(new Error(e.error || 'speech error'));
+      };
+      window.speechSynthesis.speak(u);
+    });
+  }
+
+  function __playTtsFrom(idx) {
+    __listen.mode = 'tts';
+    __setListenState(LS.PLAYING);
+    __startListenTick();
+    var chain = Promise.resolve();
+    for (var i = idx; i < __listen.segments.length; i++) {
+      (function(segIndex) {
+        chain = chain.then(function() {
+          if (__listen.state !== LS.PLAYING) return;
+          return __speakSegment(segIndex);
+        });
+      })(i);
+    }
+    return chain.then(function() {
+      if (__listen.state === LS.PLAYING) {
+        __listen.elapsedSec = __listen.totalSec;
+        __updateListenClock();
+        __setListenState(LS.STOPPED);
+        __clearListenTick();
+      }
+    });
+  }
+
+  function __playChunk(index) {
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/chunk/' + index, {
+      credentials: 'same-origin'
+    }).then(function(r) {
+      if (!r.ok) throw new Error('Chunk ' + index + ' unavailable');
+      return r.blob();
+    }).then(function(blob) {
+      if (__listen.state !== LS.PLAYING) return;
+      return new Promise(function(resolve, reject) {
+        __revokeAudio();
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        __listen.objectUrl = url;
+        __listen.audio = audio;
+        __listen.segIdx = index;
+        __updateListenClock();
+        audio.onloadedmetadata = function() {
+          if (__listen.segments[index] && isFinite(audio.duration) && audio.duration > 0) {
+            var oldDur = __listen.segments[index].durationSec;
+            __listen.segments[index].durationSec = audio.duration;
+            __listen.totalSec = __listen.totalSec - oldDur + audio.duration;
+            var t = 0;
+            __listen.segments.forEach(function(s) { s.startSec = t; t += s.durationSec; });
+            __renderSegments();
+          }
+        };
+        audio.ontimeupdate = function() {
+          var base = (__listen.segments[index] && __listen.segments[index].startSec) || 0;
+          __listen.elapsedSec = base + (audio.currentTime || 0);
+          __updateListenClock();
+        };
+        audio.onended = function() { resolve(); };
+        audio.onerror = function() { reject(new Error('Playback error')); };
+        audio.play().catch(reject);
+      });
+    });
+  }
+
+  function __playChunksFrom(idx) {
+    __listen.mode = 'chunks';
+    __setListenState(LS.PLAYING);
+    __startListenTick();
+    var chain = Promise.resolve();
+    for (var i = idx; i < __listen.segments.length; i++) {
+      (function(segIndex) {
+        chain = chain.then(function() {
+          if (__listen.state !== LS.PLAYING) return;
+          return __playChunk(segIndex);
+        });
+      })(i);
+    }
+    return chain.then(function() {
+      if (__listen.state === LS.PLAYING) {
+        __listen.elapsedSec = __listen.totalSec;
+        __updateListenClock();
+        __setListenState(LS.STOPPED);
+        __clearListenTick();
+      }
+    });
+  }
+
+  function __listenPlay() {
+    if (!__listen.prepared) return;
+    if (__listen.state === LS.PAUSED) {
+      if (__listen.mode === 'tts' && window.speechSynthesis) {
+        window.speechSynthesis.resume();
+        __setListenState(LS.PLAYING);
+        __startListenTick();
+        return;
+      }
+      if (__listen.mode === 'chunks' && __listen.audio) {
+        __listen.audio.play().then(function() {
+          __setListenState(LS.PLAYING);
+          __startListenTick();
+        }).catch(function(err) { __listenToast(err.message || 'Resume failed'); });
+        return;
+      }
+    }
+    var startIdx = (__listen.state === LS.STOPPED) ? 0 : __listen.segIdx;
+    if (__listen.state === LS.STOPPED) {
+      __listen.elapsedSec = 0;
+      __listen.segIdx = 0;
+      startIdx = 0;
+    }
+    var p = __listen.mode === 'chunks' ? __playChunksFrom(startIdx) : __playTtsFrom(startIdx);
+    p.catch(function(err) {
+      console.warn('Listen play failed', err);
+      __listenToast(err.message || 'Playback failed');
+      __setListenState(LS.STOPPED);
+      __hardStopMedia();
+    });
+  }
+
+  function __listenPause() {
+    if (__listen.state !== LS.PLAYING) return;
+    if (__listen.mode === 'tts' && window.speechSynthesis) {
+      window.speechSynthesis.pause();
+    } else if (__listen.audio) {
+      try { __listen.audio.pause(); } catch (e) {}
+    }
+    __clearListenTick();
+    __setListenState(LS.PAUSED);
+  }
+
+  function __listenStopTransport() {
+    __hardStopMedia();
+    __listen.elapsedSec = 0;
+    __listen.segIdx = 0;
+    __setListenState(LS.STOPPED);
+    __updateListenClock();
+  }
+
+  function __listenJumpTo(idx) {
+    if (!__listen.prepared || idx < 0 || idx >= __listen.segments.length) return;
+    __hardStopMedia();
+    __listen.segIdx = idx;
+    __listen.elapsedSec = __listen.segments[idx].startSec;
+    __updateListenClock();
+    __setListenState(LS.STOPPED);
+    __listenPlay();
+  }
+
+  function __prepareFromTranscript(script, subLabel) {
+    __listen.segments = __parseScriptSegments(script);
+    __listen.totalSec = __listen.segments.reduce(function(sum, s) { return sum + s.durationSec; }, 0);
+    __listen.segIdx = 0;
+    __listen.elapsedSec = 0;
+    __listen.mode = 'tts';
+    __listen.prepared = true;
+    if (listenSub) listenSub.textContent = (subLabel || 'Browser voice') + ' · ' + __listen.segments.length + ' segments · ~' + __fmtTime(__listen.totalSec);
+    __renderSegments();
+    __setListenState(LS.STOPPED);
+  }
+
+  function __prepareFromChunks(count) {
+    var segs = [];
+    var est = 45;
+    for (var i = 0; i < count; i++) {
+      segs.push({
+        label: 'Part ' + (i + 1),
+        text: 'Server audio chunk ' + (i + 1) + ' of ' + count,
+        startSec: i * est,
+        durationSec: est,
+        chunkIndex: i
+      });
+    }
+    __listen.segments = segs;
+    __listen.totalSec = count * est;
+    __listen.segIdx = 0;
+    __listen.elapsedSec = 0;
+    __listen.mode = 'chunks';
+    __listen.prepared = true;
+    if (listenSub) listenSub.textContent = 'Server audio · ' + count + ' parts · ~' + __fmtTime(__listen.totalSec) + ' (refines on play)';
+    __renderSegments();
+    __setListenState(LS.STOPPED);
+  }
+
+  function __openAndPrepare() {
+    if (!__sessionId || !listenBtn) {
+      __listenToast('Audio unavailable for saved HTML');
+      return;
+    }
+    __openListenModal();
+    listenBtn.classList.add('loading');
+    listenBtn.innerHTML = listenIconLoad;
+    if (listenSub) listenSub.textContent = 'Loading audio brief…';
+    __fetchBriefStatus().then(function(st) {
+      if (st.status === 'generating' || st.status === 'pending') {
+        if (listenSub) listenSub.textContent = 'Generating audio brief…';
+        return __waitForBriefReady(180000);
+      }
+      return st;
+    }).then(function(st) {
+      listenBtn.classList.remove('loading');
+      listenBtn.innerHTML = listenIconDefault;
+      if (st.status === 'skipped') {
+        return __fetchTranscript().then(function(t) {
+          var script = (t.script || '').trim();
+          if (!script) throw new Error(st.error || 'No transcript');
+          __prepareFromTranscript(script, 'Browser voice');
+        });
+      }
+      if (st.status === 'failed') {
+        return __fetchTranscript().then(function(t) {
+          var script = (t.script || '').trim();
+          if (!script) throw new Error(st.error || 'Audio brief failed');
+          __prepareFromTranscript(script, 'Browser voice');
+        });
+      }
+      if (st.status === 'ready' && st.chunk_count) {
+        __prepareFromChunks(st.chunk_count);
+        return __fetchTranscript().then(function(t) {
+          var script = (t.script || '').trim();
+          if (script) {
+            var labeled = __parseScriptSegments(script);
+            if (labeled.length) {
+              if (listenSub) listenSub.textContent = 'Server audio · ' + st.chunk_count + ' parts · transcript available';
+            }
+          }
+        }).catch(function() { /* transcript optional for ready audio */ });
+      }
+      throw new Error(st.error || 'Audio brief not ready');
+    }).catch(function(err) {
+      console.warn('Listen prepare failed', err);
+      listenBtn.classList.remove('loading');
+      listenBtn.innerHTML = listenIconDefault;
+      __listenToast(err.message || 'Listen failed');
+      if (listenSub) listenSub.textContent = err.message || 'Failed to load';
+    });
+  }
+
+  if (listenBtn) {
+    listenBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var wasOpen = !!(listenBackdrop && !listenBackdrop.classList.contains('hidden'));
+      // Floating dock: do not toggle-close from toolbar (close via X / Esc only)
+      if (wasOpen) {
+        if (!__listen.prepared) __openAndPrepare();
+        return;
+      }
+      __openAndPrepare();
+    });
+  }
+  if (listenBtnPlay) listenBtnPlay.addEventListener('click', function(e) { e.stopPropagation(); __listenPlay(); });
+  if (listenBtnPause) listenBtnPause.addEventListener('click', function(e) { e.stopPropagation(); __listenPause(); });
+  if (listenBtnStop) listenBtnStop.addEventListener('click', function(e) { e.stopPropagation(); __listenStopTransport(); });
+  if (listenBtnClose) listenBtnClose.addEventListener('click', function(e) { e.stopPropagation(); __listenCloseModal(); });
+  // No outside-click dismiss — dock floats while scrolling; close only via X / Esc
+  if (listenModal) listenModal.addEventListener('click', function(e) { e.stopPropagation(); });
+
+  // Per-image hide — fades the image out, then POSTs to the backend so
+  // future renders of this report skip the URL. Falls back to a silent
+  // no-op if there's no session_id (e.g. the report was opened from a
+  // saved-HTML download where the backend isn't reachable).
+  // Unused scraped images — the reroll pool. Each is used at most once.
+  var __spareImages = [];
+  var __heroImageStatus = "";
+  var __heroImageIsAi = 0 === 1;
+
+  // When hero generation is still running, poll and reload once ready.
+  if (__sessionId && __heroImageStatus === 'pending' && !__heroImageIsAi) {
+    (function __pollHeroImage() {
+      var started = Date.now();
+      function tick() {
+        if (Date.now() - started > 180000) return;
+        fetch('/api/research/' + encodeURIComponent(__sessionId) + '/hero-image/status', {
+          credentials: 'same-origin'
+        }).then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(st) {
+            if (!st) { setTimeout(tick, 3000); return; }
+            if (st.status === 'done' && st.url) { window.location.reload(); return; }
+            if (st.status === 'error' || st.status === 'skipped') return;
+            setTimeout(tick, 3000);
+          }).catch(function() { setTimeout(tick, 5000); });
+      }
+      setTimeout(tick, 3000);
+    })();
+  }
+
+  function __regenerateHeroImage(btn) {
+    if (!__sessionId || !btn) return;
+    btn.dataset._busy = '1';
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    fetch('/api/research/' + encodeURIComponent(__sessionId) + '/regenerate-hero', {
+      method: 'POST',
+      credentials: 'same-origin',
+    }).then(function(r) {
+      if (!r.ok) throw new Error('Regenerate failed');
+      return r.json();
+    }).then(function() {
+      var started = Date.now();
+      function poll() {
+        if (Date.now() - started > 180000) {
+          btn.classList.remove('spinning');
+          btn.disabled = false;
+          delete btn.dataset._busy;
+          return;
+        }
+        fetch('/api/research/' + encodeURIComponent(__sessionId) + '/hero-image/status', {
+          credentials: 'same-origin'
+        }).then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(st) {
+            if (st && st.status === 'done' && st.url) { window.location.reload(); return; }
+            if (st && (st.status === 'error' || st.status === 'skipped')) {
+              btn.classList.remove('spinning');
+              btn.disabled = false;
+              delete btn.dataset._busy;
+              return;
+            }
+            setTimeout(poll, 3000);
+          }).catch(function() { setTimeout(poll, 5000); });
+      }
+      setTimeout(poll, 2000);
+    }).catch(function(err) {
+      console.warn('regenerate-hero failed', err);
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+      delete btn.dataset._busy;
+    });
+  }
+
+  // Persist a rejected URL so future renders skip it.
+  function __persistHide(url) {
+    if (!__sessionId || !url) return;
+    fetch('/api/research/' + encodeURIComponent(__sessionId) + '/hide-image', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url }),
+    }).catch(function(err) { console.warn('hide-image POST failed', err); });
+  }
+
+  // Once the pool is empty, there's nothing to swap to — hide all reroll btns.
+  function __syncRerollAvailability() {
+    if (__spareImages.length === 0) {
+      document.querySelectorAll('.img-reroll-btn').forEach(function(b) { b.disabled = true; });
+    }
+  }
+
+  document.querySelectorAll('.img-hide-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      var wrap = btn.closest('[data-img-url]');
+      if (!wrap) return;
+      var url = wrap.dataset.imgUrl;
+      wrap.classList.add('fading');
+      setTimeout(function() { wrap.remove(); }, 280);
+      __persistHide(url);
+    });
+  });
+
+  // Reroll — AI hero images regenerate via the backend; OG heroes swap
+  // from the spare scraped pool.
+  document.querySelectorAll('.img-reroll-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      var wrap = btn.closest('[data-img-url], .hero-image-ai');
+      if (wrap && wrap.dataset.heroAi === '1') {
+        __regenerateHeroImage(btn);
+        return;
+      }
+      // Per-button busy flag — a rapid double-click would otherwise both
+      // shift the spare pool, but only the second probe's image would land,
+      // silently consuming the first one. Bail until finish() clears it.
+      if (btn.dataset._busy === '1') return;
+      if (__spareImages.length === 0) { btn.disabled = true; return; }
+      var wrap = btn.closest('[data-img-url]');
+      if (!wrap) return;
+      var img = wrap.querySelector('img');
+      if (!img) return;
+      btn.dataset._busy = '1';
+      var oldUrl = wrap.dataset.imgUrl;
+      var newUrl = __spareImages.shift();
+      btn.classList.add('spinning');
+      // Swap once the new image has loaded (or failed) to avoid a flash of empty.
+      var probe = new Image();
+      var done = false;
+      var finish = function(ok) {
+        if (done) return; done = true;
+        btn.classList.remove('spinning');
+        delete btn.dataset._busy;
+        if (ok) {
+          img.src = newUrl;
+          wrap.dataset.imgUrl = newUrl;
+          __persistHide(oldUrl);
+        } else {
+          // Bad candidate — persist-hide it so it can't resurface on reload,
+          // then try the next spare if any remain. Busy flag already cleared
+          // so the synthetic click below proceeds.
+          __persistHide(newUrl);
+          if (__spareImages.length) btn.click();
+        }
+        __syncRerollAvailability();
+      };
+      probe.onload = function() { finish(true); };
+      probe.onerror = function() { finish(false); };
+      probe.src = newUrl;
+    });
+  });
+  __syncRerollAvailability();
+
+  // "Show hidden (N)" button — clears the hidden_images list on the
+  // server, then reloads the page so all images come back.
+  var restoreBtn = document.getElementById('btn-restore-images');
+  if (restoreBtn && __sessionId) {
+    restoreBtn.addEventListener('click', function() {
+      restoreBtn.disabled = true;
+      restoreBtn.textContent = 'Restoring…';
+      fetch('/api/research/' + encodeURIComponent(__sessionId) + '/unhide-images', {
+        method: 'POST', credentials: 'same-origin',
+      }).then(function() { window.location.reload(); })
+        .catch(function(err) {
+          restoreBtn.disabled = false;
+          restoreBtn.textContent = 'Failed — retry?';
+          console.warn('unhide-images POST failed', err);
+        });
+    });
+  }
+
+  // TOC: explicit smooth-scroll handler (some browsers/anchor plugins
+  // bypass the CSS `scroll-behavior: smooth` rule on hash clicks).
+  // Also keeps the URL hash updated and toggles an `.active` highlight.
+  var tocLinks = document.querySelectorAll('.toc-sidebar nav a[href^="#"]');
+  tocLinks.forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      var id = link.getAttribute('href').slice(1);
+      var target = document.getElementById(id);
+      if (!target) return;
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      history.replaceState(null, '', '#' + id);
+    });
+  });
+
+  // Highlight the TOC entry that matches whichever heading is currently
+  // closest to the top of the viewport. IntersectionObserver keeps it
+  // cheap (no scroll listener spam).
+  var tocMap = {};
+  tocLinks.forEach(function(link) {
+    tocMap[link.getAttribute('href').slice(1)] = link;
+  });
+  var activeId = null;
+  function setActive(id) {
+    if (id === activeId) return;
+    if (activeId && tocMap[activeId]) tocMap[activeId].classList.remove('active');
+    if (id && tocMap[id]) tocMap[id].classList.add('active');
+    activeId = id;
+  }
+  var headings = document.querySelectorAll('.content h2[id], .content h3[id]');
+  if (headings.length && 'IntersectionObserver' in window) {
+    var visible = new Set();
+    var io = new IntersectionObserver(function(entries) {
+      entries.forEach(function(en) {
+        if (en.isIntersecting) visible.add(en.target.id);
+        else visible.delete(en.target.id);
+      });
+      // Pick the visible heading that's furthest down in document order
+      // before the current scroll — i.e. the section we're reading.
+      var current = null;
+      for (var i = 0; i < headings.length; i++) {
+        if (visible.has(headings[i].id)) { current = headings[i].id; break; }
+      }
+      if (current) setActive(current);
+    }, { rootMargin: '-10% 0px -75% 0px', threshold: 0 });
+    headings.forEach(function(h) { io.observe(h); });
+  }
+
+  // Chat about this research — POST to spinoff and redirect to the new chat
+  var chatBtn = document.getElementById('btn-chat-about');
+  if (chatBtn) {
+    chatBtn.addEventListener('click', function() {
+      var researchId = chatBtn.dataset.researchId;
+      if (!researchId) return;
+      var origLabel = chatBtn.innerHTML;
+      chatBtn.disabled = true;
+      chatBtn.innerHTML = '<span>Creating chat…</span>';
+      fetch('/api/research/spinoff/' + encodeURIComponent(researchId), {
+        method: 'POST', credentials: 'same-origin',
+      }).then(function(res) {
+        if (!res.ok) {
+          return res.json().then(function(d) {
+            throw new Error(d && d.detail ? d.detail : ('HTTP ' + res.status));
+          }, function() { throw new Error('HTTP ' + res.status); });
+        }
+        return res.json();
+      }).then(function(data) {
+        if (!data || !data.session_id) {
+          throw new Error('Server did not return a session id');
+        }
+        var url = '/#' + data.session_id;
+        var opened = false;
+        // The report typically opens in a new tab — if we have access to the
+        // original Odysseus tab, navigate it and close this report tab so the
+        // user lands directly in the new chat.
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.location.href = url;
+            window.opener.location.reload();
+            window.opener.focus();
+            opened = true;
+            window.close();
+          }
+        } catch (e) { /* cross-origin or detached opener — fall through */ }
+        if (!opened) {
+          // No opener (report was opened directly via URL) — open the chat in a
+          // new tab so the report stays available.
+          var w = window.open(url, '_blank');
+          if (w) {
+            chatBtn.disabled = false;
+            chatBtn.innerHTML = '<span>Chat opened in new tab</span>';
+          } else {
+            // Popup blocked — navigate this tab as a last resort.
+            window.location.href = url;
+            window.location.reload();
+          }
+        }
+      }).catch(function(err) {
+        chatBtn.disabled = false;
+        chatBtn.innerHTML = origLabel;
+        alert('Could not start follow-up chat: ' + err.message);
+      });
+    });
+  }
+})();
+
+// Colorize comparison table cells
+if (document.body.classList.contains('category-comparison')) {
+  const pos = /^(yes|excellent|best|great|strong|fast|high|superior|winner|free|unlimited|native|full|advanced|built[- ]in|✓|✅|⭐)/i;
+  const neg = /^(no|none|poor|weak|slow|low|limited|lacking|missing|basic|minimal|✗|❌|N\/A$)/i;
+  const mid = /^(moderate|average|fair|partial|some|decent|okay|mixed|varies|depends)/i;
+  document.querySelectorAll('.content table td').forEach(td => {
+    if (td.cellIndex === 0) return;
+    const t = td.textContent.trim();
+    if (pos.test(t)) td.classList.add('cmp-pos');
+    else if (neg.test(t)) td.classList.add('cmp-neg');
+    else if (mid.test(t)) td.classList.add('cmp-mid');
+  });
+}
+</script>
+</body>
+</html>

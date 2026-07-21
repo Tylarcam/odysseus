@@ -8,11 +8,36 @@ This directory contains the Codex plugin/skill bundle for Odysseus.
 2. Add a Codex Agent.
 3. Copy the full setup commands shown after the generated token.
 4. Toggle the tools Codex is allowed to use.
-5. Configure the terminal Codex session:
+5. Configure credentials for Codex and handoff scripts.
+
+Add to your Odysseus `.env` (see `.env.example` → External agent clients):
 
 ```bash
-export ODYSSEUS_URL=http://your-odysseus-host:7000
+ODYSSEUS_URL=http://127.0.0.1:7000
+ODYSSEUS_API_TOKEN=ody_generated_token
+```
+
+**Recommended — persistent env (set once, all new terminals inherit):**
+
+Windows PowerShell:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable('ODYSSEUS_URL', 'http://127.0.0.1:7000', 'User')
+[System.Environment]::SetEnvironmentVariable('ODYSSEUS_API_TOKEN', 'ody_generated_token', 'User')
+```
+
+macOS/Linux (`~/.bashrc` or `~/.zshrc`):
+
+```bash
+export ODYSSEUS_URL=http://127.0.0.1:7000
 export ODYSSEUS_API_TOKEN=ody_generated_token
+```
+
+Restart Codex / Cursor terminals after setting User-level vars on Windows.
+
+6. Install the plugin:
+
+```bash
 mkdir -p ~/plugins
 curl -fsSL -H "Authorization: Bearer $ODYSSEUS_API_TOKEN" "$ODYSSEUS_URL/api/codex/plugin.zip" -o /tmp/odysseus-codex-plugin.zip
 python3 -m zipfile -e /tmp/odysseus-codex-plugin.zip ~/plugins
@@ -42,7 +67,7 @@ PY
 codex plugin add odysseus@personal
 ```
 
-6. Verify:
+7. Verify:
 
 ```bash
 python3 ~/plugins/odysseus/scripts/odysseus_api.py capabilities

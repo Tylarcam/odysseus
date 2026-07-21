@@ -11,10 +11,20 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { snapModalToZone } from './tileManager.js';
 import { applyEdgeDock, clearDockSide } from './modalSnap.js';
 import { wireSwipeDismiss, collapseSidebarForMobileSheet } from './panelSheet.js';
+import {
+  handoffTargetIsExternal as _handoffTargetIsExternal,
+  handoffStatusLabel as _handoffStatusLabel,
+  handoffChipTitle as _handoffChipTitle,
+  openHandoffDocument as _openHandoffDocument,
+  openHandoffAgentSession as _openHandoffAgentSession,
+  notifyHandoffPickup as _notifyHandoffPickup,
+  resolveHandoffDocId as _resolveHandoffDocId,
+} from './handoff.js';
 
 const API_BASE = window.location.origin;
 let _open = false;
 let _notes = [];
+const _handoffPollActive = new Set();
 let _editingId = null;
 let _selectedIds = new Set();
 let _activeLabel = null;
@@ -25,6 +35,10 @@ let _activeFilter = null; // null | 'default' | 'reminders' | 'no-reminders'
 let _reminderChipNext = 'reminders';
 let _searchQuery = '';
 let _viewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('odysseus-notes-view')) || 'list'; // 'list' or 'grid'
+const NOTES_SORT_KEY = 'odysseus-notes-sort';
+const NOTES_SORT_MODES = ['manual', 'recent', 'oldest', 'title', 'due'];
+let _notesSort = (typeof localStorage !== 'undefined' && localStorage.getItem(NOTES_SORT_KEY)) || 'manual';
+if (!NOTES_SORT_MODES.includes(_notesSort)) _notesSort = 'manual';
 let _showingArchived = false;
 let _selectMode = false;
 let _reminderTimer = null;
@@ -355,6 +369,59 @@ function _pickCustomBgImage() {
     setTimeout(() => { if (!done && !input.files?.length) finish(null); }, 30000);
     input.click();
   });
+}
+
+// Ephemeral file picker for note photos. iOS Safari blocks programmatic
+// .click() on display:none inputs and breaks the user-gesture chain when
+// deferred via setTimeout — spawn an off-screen input synchronously instead.
+// No `capture` so the native sheet offers Photo Library + Take Photo.
+// Do NOT use a window-focus dismiss hack — iOS fires focus while the user is
+// still browsing the photo library, which removed the input before `change`.
+function _pickNoteImageFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(input);
+    let done = false;
+    const finish = (file) => {
+      if (done) return;
+      done = true;
+      clearTimeout(fallbackTimer);
+      try { input.remove(); } catch {}
+      resolve(file || null);
+    };
+    input.addEventListener('change', () => finish(input.files?.[0] || null));
+    input.addEventListener('cancel', () => finish(null));
+    const fallbackTimer = setTimeout(() => {
+      if (!done && !input.files?.length) finish(null);
+    }, 300000);
+    input.click();
+  });
+}
+
+async function _attachNoteImageFile(form, file) {
+  if (!file || !form) return;
+  const fd = new FormData();
+  fd.append('files', file);
+  try {
+    const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: fd, credentials: 'same-origin' });
+    const data = await res.json();
+    const fileId = data.files?.[0]?.id;
+    if (!fileId) throw new Error('Upload failed');
+    const url = `${API_BASE}/api/upload/${fileId}`;
+    form._noteImageUrl = url;
+    form.querySelector('.note-form-image-wrap')?.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'note-form-image-wrap';
+    wrap.innerHTML = '<img class="note-form-image" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button>';
+    form.querySelector('.note-form-header').after(wrap);
+    wrap.querySelector('.note-form-image-rm').addEventListener('click', () => { wrap.remove(); form._noteImageUrl = ''; });
+    wrap.querySelector('img').src = url;
+  } catch {
+    uiModule.showError('Image upload failed');
+  }
 }
 
 const COLOR_HEX = {
@@ -1038,7 +1105,16 @@ export async function refreshDueBadge(opts = {}) {
 // ---- Panel ----
 
 export function openPanel() {
-  if (_open) return;
+  if (_open) {
+    // Already open — bring existing pane forward; never spawn a second copy.
+    const existing = document.getElementById('notes-pane');
+    if (existing) {
+      try { existing.style.zIndex = String(Date.now() % 100000 + 200); } catch {}
+      return;
+    }
+    // State said open but DOM is gone (stuck modal / race) — recover.
+    _open = false;
+  }
   _open = true;
   _editingId = null;
   _clearViewedReminderGlows();
@@ -1046,7 +1122,15 @@ export function openPanel() {
   try { localStorage.setItem(REMINDER_DISMISSED_AT_KEY, String(_firedDotDismissedAt)); } catch {}
 
   const container = document.getElementById('chat-container');
-  if (!container) return;
+  if (!container) {
+    _open = false;
+    return;
+  }
+
+  // Tear down any orphan panes left by a prior close/open race.
+  document.querySelectorAll('#notes-pane-backdrop, #notes-pane').forEach((el) => {
+    try { el.remove(); } catch {}
+  });
 
   document.body.classList.add('notes-view');
 
@@ -1083,6 +1167,13 @@ export function openPanel() {
       <button id="notes-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize notes" style="position:relative;left:2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg></button>
     </div>
     <div class="notes-search-bar">
+      <select class="memory-sort-select notes-sort-select" id="notes-sort" aria-label="Sort notes" title="Sort notes">
+        <option value="manual">Custom</option>
+        <option value="recent">Recent</option>
+        <option value="oldest">Oldest</option>
+        <option value="title">A\u2013Z</option>
+        <option value="due">Due date</option>
+      </select>
       <input type="text" id="notes-search" class="memory-search-input" placeholder="Search notes…" autocomplete="off" />
       <button id="notes-select-btn" class="notes-select-trigger" type="button">Select</button>
     </div>
@@ -1143,13 +1234,23 @@ export function openPanel() {
     e.stopPropagation();
     closePanel('down');
   });
-  // Search
+  // Search + sort
   const searchEl = document.getElementById('notes-search');
   if (searchEl) {
     searchEl.addEventListener('input', () => {
       _searchQuery = searchEl.value.trim().toLowerCase();
       _renderNotes();
     });
+  }
+  const sortEl = document.getElementById('notes-sort');
+  if (sortEl) {
+    sortEl.value = _notesSort;
+    sortEl.addEventListener('change', () => {
+      _notesSort = NOTES_SORT_MODES.includes(sortEl.value) ? sortEl.value : 'manual';
+      try { localStorage.setItem(NOTES_SORT_KEY, _notesSort); } catch {}
+      _renderNotes();
+    });
+    _syncNotesSortSelect();
   }
 
   // View toggle
@@ -1392,6 +1493,84 @@ function _isPastReminder(n) {
   return !isNaN(due) && due <= Date.now();
 }
 
+// Ephemeral multi-file picker for importing text notes from disk.
+function _pickNoteImportFiles() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.txt,.md,.markdown,.csv,.json,.log,.html,.htm,.text,text/plain,text/markdown';
+    input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+    document.body.appendChild(input);
+    let done = false;
+    const finish = (files) => {
+      if (done) return;
+      done = true;
+      clearTimeout(fallbackTimer);
+      try { input.remove(); } catch {}
+      resolve(files || []);
+    };
+    input.addEventListener('change', () => finish(Array.from(input.files || [])));
+    input.addEventListener('cancel', () => finish([]));
+    const fallbackTimer = setTimeout(() => {
+      if (!done && !input.files?.length) finish([]);
+    }, 300000);
+    input.click();
+  });
+}
+
+async function _importNotesFromDevice() {
+  const files = await _pickNoteImportFiles();
+  if (!files.length) return;
+
+  let imported = 0;
+  let failed = 0;
+  let firstErr = '';
+  let firstId = null;
+
+  for (const file of files) {
+    try {
+      const name = file.name || 'Untitled';
+      const dotIdx = name.lastIndexOf('.');
+      const baseTitle = (dotIdx > 0 ? name.slice(0, dotIdx) : name).trim() || 'Untitled';
+      const content = await file.text();
+      const saved = await _saveNote({
+        title: baseTitle,
+        content: content || '',
+        note_type: 'note',
+        label: 'imported',
+        source: 'import',
+      });
+      if (!firstId && saved?.id) firstId = saved.id;
+      imported++;
+    } catch (e) {
+      console.error('Failed to import note file:', file?.name, e);
+      if (!firstErr) firstErr = (e && e.message) || String(e);
+      failed++;
+    }
+  }
+
+  // Show the imported tag filter so the new cards are easy to spot.
+  _showingArchived = false;
+  _activeFilter = null;
+  _activeLabel = imported ? 'imported' : null;
+  _searchQuery = '';
+  const searchEl = document.getElementById('notes-search');
+  if (searchEl) searchEl.value = '';
+
+  await _fetchNotes();
+  _renderNotes();
+
+  const msg = `Imported ${imported} note${imported !== 1 ? 's' : ''}` +
+    (failed ? `, ${failed} failed${firstErr ? ' — ' + firstErr : ''}` : '');
+  if (failed && !imported) uiModule.showError?.(msg);
+  else uiModule.showToast?.(msg);
+
+  if (firstId) {
+    try { _editNote(firstId); } catch {}
+  }
+}
+
 async function _clearPastReminders() {
   const targets = _notes.filter(n => !n.archived && _isPastReminder(n));
   if (!targets.length) {
@@ -1451,9 +1630,15 @@ function _renderLabels(root = document) {
   for (const lbl of sortedLabels) {
     html += `<button class="notes-label-chip${_activeLabel === lbl ? ' active' : ''}" data-label="${_esc(lbl)}">#${_esc(lbl)}</button>`;
   }
+  const importIcon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px" aria-hidden="true"><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="21" x2="19" y2="21"/></svg>';
+  html += `<button class="notes-label-chip notes-label-import" data-action="import" type="button" title="Import notes from files (.txt, .md, …)">${importIcon}Import</button>`;
   bar.innerHTML = html;
   bar.querySelectorAll('.notes-label-chip').forEach(chip => {
     chip.addEventListener('click', () => {
+      if (chip.dataset.action === 'import') {
+        _importNotesFromDevice();
+        return;
+      }
       if (chip.dataset.action === 'all') {
         _activeLabel = null;
         _activeFilter = null;
@@ -1620,8 +1805,75 @@ function _animateReflow(prevPositions) {
   });
 }
 
+function _notesDragReorderEnabled() {
+  return _notesSort === 'manual' && !_showingArchived
+    && _activeFilter !== 'reminders' && _activeFilter !== 'today';
+}
+
+function _noteTitleSortKey(note) {
+  return (note?.title || '').trim() || '\uffff';
+}
+
+function _compareNotes(a, b) {
+  if (_activeFilter === 'reminders') {
+    return new Date(a.due_date || 0) - new Date(b.due_date || 0);
+  }
+  if (_showingArchived) {
+    if (_notesSort === 'oldest') {
+      return new Date(a.updated_at || 0) - new Date(b.updated_at || 0);
+    }
+    if (_notesSort === 'title') {
+      const cmp = _noteTitleSortKey(a).localeCompare(_noteTitleSortKey(b), undefined, { sensitivity: 'base' });
+      if (cmp !== 0) return cmp;
+      return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+    }
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  }
+  if (a.pinned && !b.pinned) return -1;
+  if (!a.pinned && b.pinned) return 1;
+  if (_notesSort === 'manual') {
+    const aActive = _hasActiveReminder(a);
+    const bActive = _hasActiveReminder(b);
+    if (aActive && !bActive) return -1;
+    if (!aActive && bActive) return 1;
+    const so = (a.sort_order || 0) - (b.sort_order || 0);
+    if (so !== 0) return so;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  }
+  if (_notesSort === 'recent') {
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  }
+  if (_notesSort === 'oldest') {
+    return new Date(a.updated_at || 0) - new Date(b.updated_at || 0);
+  }
+  if (_notesSort === 'title') {
+    const cmp = _noteTitleSortKey(a).localeCompare(_noteTitleSortKey(b), undefined, { sensitivity: 'base' });
+    if (cmp !== 0) return cmp;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  }
+  if (_notesSort === 'due') {
+    const da = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+    const db = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+    if (da !== db) return da - db;
+    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+  }
+  return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+}
+
+function _syncNotesSortSelect() {
+  const sortEl = document.getElementById('notes-sort');
+  if (!sortEl) return;
+  sortEl.value = _notesSort;
+  const forced = _activeFilter === 'reminders' || _activeFilter === 'today';
+  sortEl.disabled = forced;
+  sortEl.title = forced
+    ? 'Sort is fixed in this view'
+    : (_notesSort === 'manual' ? 'Custom order — drag cards to reorder' : 'Sort notes');
+}
+
 function _renderNotes() {
   _updateRailBadge();
+  _syncNotesSortSelect();
   const body = document.querySelector('#notes-pane .notes-pane-body');
   if (!body) return;
   const prevPositions = _captureCardPositions();
@@ -1650,29 +1902,7 @@ function _renderNotes() {
       return false;
     });
   }
-  const sorted = [...filtered].sort((a, b) => {
-    // In reminders view: sort by due date ascending (soonest first)
-    if (_activeFilter === 'reminders') {
-      const da = new Date(a.due_date || 0).getTime();
-      const db = new Date(b.due_date || 0).getTime();
-      return da - db;
-    }
-    // Archived view: newest archived first (ignore manual sort_order).
-    if (_showingArchived) {
-      return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
-    }
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    // Active reminders (due date in the past, not done/archived) rank
-    // immediately under the pinned block.
-    const aActive = _hasActiveReminder(a);
-    const bActive = _hasActiveReminder(b);
-    if (aActive && !bActive) return -1;
-    if (!aActive && bActive) return 1;
-    const so = (a.sort_order || 0) - (b.sort_order || 0);
-    if (so !== 0) return so;
-    return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
-  });
+  const sorted = [...filtered].sort(_compareNotes);
 
   let html = '';
   // Today view: render a compact card listing the next-unchecked step from
@@ -1771,7 +2001,7 @@ function _renderNotes() {
           Goal${_goalProgress(note)}
         </span>`
       : '';
-    html += `<div class="note-card${note.pinned ? ' note-card-pinned' : ''}${cc}${sel}${goalClass}${reminderGlowClass}${_selectMode ? ' note-card-selectmode' : ''}" draggable="${(_selectMode || _isNotesMobileMode()) ? 'false' : 'true'}" data-note-id="${note.id}"${cardStyle}>
+    html += `<div class="note-card${note.pinned ? ' note-card-pinned' : ''}${cc}${sel}${goalClass}${reminderGlowClass}${_selectMode ? ' note-card-selectmode' : ''}" draggable="${(_selectMode || _isNotesMobileMode() || !_notesDragReorderEnabled()) ? 'false' : 'true'}" data-note-id="${note.id}"${cardStyle}>
       ${_selectMode ? `<input type="checkbox" class="memory-select-cb note-card-cb" data-note-id="${note.id}" ${_selectedIds.has(note.id) ? 'checked' : ''} />` : ''}
       ${goalPill}
       <button class="note-card-pin${note.pinned ? ' active' : ''}" data-note-id="${note.id}" title="${note.pinned ? 'Unpin' : 'Pin'}">
@@ -1803,6 +2033,8 @@ function _renderNotes() {
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
         <span>Agent</span>
       </button>` : ''}
+      ${_renderHandoffChip(note)}
+      ${note.handoff_outcome && (note.handoff_relay_status === 'complete' || note.handoff_relay_status === 'failed') ? `<div class="note-handoff-outcome note-handoff-outcome--${note.handoff_relay_status === 'failed' ? 'failed' : 'ok'}">${_esc(note.handoff_outcome.slice(0, 180))}${note.handoff_outcome.length > 180 ? '…' : ''}</div>` : ''}
       <div class="note-card-actions">
         <div class="note-card-colors">${colorDots}</div>
         <span style="flex:1"></span>
@@ -2036,6 +2268,7 @@ function _renderQuickAdd(body) {
       // Move caret to end
       titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length);
     }
+    return form;
   };
   // Expand only on real intent: a click directly on the input, or actual
   // typing. Focus alone — including focus stolen from a missed nearby
@@ -2044,9 +2277,10 @@ function _renderQuickAdd(body) {
   input.addEventListener('input', () => expandToForm(currentType, input.value));
   wrap.querySelector('[data-action="photo"]').addEventListener('click', (e) => {
     e.stopPropagation();
-    expandToForm(currentType);
-    // Trigger photo input on the new form
-    setTimeout(() => document.querySelector('.note-form-photo-btn')?.click(), 50);
+    // Open picker synchronously in this tap — setTimeout breaks iOS.
+    const pickPromise = _pickNoteImageFile();
+    const form = expandToForm(currentType);
+    pickPromise.then(file => { if (file && form) _attachNoteImageFile(form, file); });
   });
 }
 
@@ -2067,22 +2301,30 @@ function _bindCardEvents(body) {
       _editNote(id);
     }
   };
-  // Mobile: long-press anywhere on a note card → enter drag-to-reorder mode.
-  // Cancelled by movement (so it doesn't interfere with vertical scrolling)
-  // or by lifting the finger before the timer fires.
-  if (_isNotesMobileMode()) {
-    body.querySelectorAll('.note-card').forEach(card => _bindLongPressDrag(card));
+  // Mobile gestures: swipe L/R, 600ms quick menu, 450ms drag-to-reorder.
+  if (_isNotesMobileMode() && !_selectMode && !_showingArchived) {
+    body.querySelectorAll('.note-card').forEach(card => _bindMobileCardGestures(card));
   }
   body.querySelectorAll('.note-card.note-card-reminder-fired-sticky').forEach(card => {
     card.addEventListener('click', () => _setReminderCardGlow(card.dataset.noteId, false), true);
   });
   // Click title — edit, or toggle select in select mode
   body.querySelectorAll('.note-card-title[data-action="edit"]').forEach(el => {
-    el.addEventListener('click', (e) => { e.stopPropagation(); tapToEditOrSelect(el.closest('.note-card')); });
+    el.addEventListener('click', (e) => {
+      const card = el.closest('.note-card');
+      if (card?._suppressNextClick) return;
+      e.stopPropagation();
+      tapToEditOrSelect(card);
+    });
   });
   // Click content — edit, or toggle select in select mode
   body.querySelectorAll('.note-content-preview').forEach(el => {
-    el.addEventListener('click', (e) => { e.stopPropagation(); tapToEditOrSelect(el.closest('.note-card')); });
+    el.addEventListener('click', (e) => {
+      const card = el.closest('.note-card');
+      if (card?._suppressNextClick) return;
+      e.stopPropagation();
+      tapToEditOrSelect(card);
+    });
   });
   // Click empty area of checklist preview (not on checkbox/X) — edit
   body.querySelectorAll('.note-checklist-preview').forEach(el => {
@@ -2113,9 +2355,10 @@ function _bindCardEvents(body) {
   // title / content preview triggered edit, so padding + empty gutters were
   // dead zones that felt broken on mobile.
   if (_isNotesMobileMode() && !_selectMode) {
-    const _INTERACTIVE = 'button, a, input, label, .note-card-color-dot, .note-checkbox, .note-checkbox-rm, .note-cl-quickadd, .note-agent-tag, .note-card-pin, .note-card-corner-trash, .note-card-corner-menu, .note-card-corner-unarchive, .note-card-edit-corner, .note-card-reminder, .note-card-cb';
+    const _INTERACTIVE = 'button, a, input, label, .note-card-color-dot, .note-checkbox, .note-checkbox-rm, .note-cl-quickadd, .note-agent-tag, .note-handoff-tag, .note-card-pin, .note-card-corner-trash, .note-card-corner-menu, .note-card-corner-unarchive, .note-card-edit-corner, .note-card-reminder, .note-card-cb';
     body.querySelectorAll('.note-card').forEach(card => {
       card.addEventListener('click', (e) => {
+        if (card._suppressNextClick) return;
         if (e.target.closest(_INTERACTIVE)) return;
         e.stopPropagation();
         tapToEditOrSelect(card);
@@ -2215,6 +2458,14 @@ function _bindCardEvents(body) {
       const sid = tag.dataset.sessionId;
       const _sm = window.sessionModule;
       if (sid && _sm && _sm.selectSession) { closePanel(); _sm.selectSession(sid); }
+    });
+  });
+  body.querySelectorAll('.note-handoff-tag').forEach(tag => {
+    tag.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const docId = tag.dataset.docId;
+      if (docId) _openHandoffDocument(docId);
     });
   });
   body.querySelectorAll('.note-card-label-chip').forEach(chip => {
@@ -2491,12 +2742,12 @@ function _bindCardEvents(body) {
   });
 
   // Drag-reorder notes on pointer/mouse devices. Mobile uses the custom
-  // placeholder sorter below `_bindLongPressDrag`; native HTML5 dragging is
+  // placeholder sorter below `_bindMobileCardGestures`; native HTML5 dragging is
   // unreliable on touch browsers and can compete with the long-press flow.
-  if (!_isNotesMobileMode()) {
+  if (!_isNotesMobileMode() && _notesDragReorderEnabled()) {
     body.querySelectorAll('.note-card').forEach(card => {
       card.addEventListener('dragstart', (e) => {
-        if (e.target.closest('.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-menu, .note-agent-tag, .note-card-label-chip')) {
+        if (e.target.closest('.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip')) {
           e.preventDefault();
           return;
         }
@@ -2558,7 +2809,7 @@ function _bindCardEvents(body) {
   body.addEventListener('dragend', () => { _lastSwapId = null; });
 
   // Legacy touch drag for larger touch devices only. Phone-sized Notes uses
-  // the placeholder sorter wired by `_bindLongPressDrag`; running both flows
+  // the placeholder sorter wired by `_bindMobileCardGestures`; running both flows
   // makes one press start two independent drag sessions.
   if (!_isNotesMobileMode() && 'ontouchstart' in window && !body.dataset.touchDragBound) {
     body.dataset.touchDragBound = '1';
@@ -2568,7 +2819,7 @@ function _bindCardEvents(body) {
     let startX = 0, startY = 0;
     const LONG_PRESS_MS = 350;
     const MOVE_THRESHOLD_PX = 8;
-    const _selectorSkip = '.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-menu, .note-agent-tag, .note-card-label-chip, input, textarea, button, a';
+    const _selectorSkip = '.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip, input, textarea, button, a';
 
     // Anchor for the finger-follow transform. Recomputed after every swap so
     // the card stays under the finger across reorderings.
@@ -2658,6 +2909,8 @@ function _bindCardEvents(body) {
     body.addEventListener('touchend', () => _endDrag(true));
     body.addEventListener('touchcancel', () => _endDrag(false));
   }
+
+  _resumeHandoffPolling();
 }
 
 // ── Draft autosave ──────────────────────────────────────────────────
@@ -2741,7 +2994,7 @@ function _buildForm(note = null) {
   form.className = 'note-form';
   if (color && !_isBgImage(color)) form.classList.add('note-color-' + color);
   if (_isBgImage(color)) form.setAttribute('style', _customColorStyle(color));
-  let currentImageUrl = _safeImgSrc(note?.image_url || '');
+  form._noteImageUrl = _safeImgSrc(note?.image_url || '');
   form.innerHTML = `
     <div class="note-form-header">
       <input type="text" class="note-form-title" placeholder="Title" value="${_esc(note?.title || '')}" />
@@ -2751,7 +3004,7 @@ function _buildForm(note = null) {
       <input type="hidden" class="note-form-due" value="${note?.due_date || ''}" />
       <input type="hidden" class="note-form-repeat" value="${note?.repeat || 'none'}" />
     </div>
-    ${currentImageUrl && type !== 'draw' ? `<div class="note-form-image-wrap"><img class="note-form-image" src="${_esc(currentImageUrl)}" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button></div>` : ''}
+    ${form._noteImageUrl && type !== 'draw' ? `<div class="note-form-image-wrap"><img class="note-form-image" src="${_esc(form._noteImageUrl)}" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button></div>` : ''}
     <div class="note-form-body">
       ${type === 'note'
         ? `<textarea class="note-form-content" placeholder="Take a note..." rows="4">${_esc(note?.content || '')}</textarea>`
@@ -2777,10 +3030,9 @@ function _buildForm(note = null) {
           <span>Draw</span>
         </button>
       </div>
-      <button class="note-form-photo-btn" title="Attach photo">
+      <button type="button" class="note-form-photo-btn" title="Attach photo">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
       </button>
-      <input type="file" class="note-form-photo-input" accept="image/*" capture="environment" style="display:none" />
       <div class="note-color-picker">
         ${COLORS.map(c => `<span class="note-color-dot${_dotIsActive(c.value, color) ? ' active' : ''}" data-color="${c.value}" style="background:${_dotBg(c.value, color)}" title="${c.name || 'default'}"></span>`).join('')}
       </div>
@@ -2790,6 +3042,14 @@ function _buildForm(note = null) {
         <button type="button" class="note-form-text-btn note-form-archive-btn note-form-collapsible" title="Archive">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8"/><path d="M10 12h4"/></svg><span class="nft-label">Archive</span>
         </button>
+        ` : ''}
+        <button type="button" class="note-form-text-btn note-form-create-doc-btn note-form-collapsible" title="Create document from this note">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span class="nft-label">Create doc</span>
+        </button>
+        <button type="button" class="note-form-text-btn note-form-handoff-btn note-form-collapsible" title="Hand off to an agent">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg><span class="nft-label">Handoff</span>
+        </button>
+        ${isEdit ? `
         <button type="button" class="note-form-text-btn note-form-delete-btn note-form-collapsible danger" title="Delete">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg><span class="nft-label">Delete</span>
         </button>
@@ -2875,7 +3135,7 @@ function _buildForm(note = null) {
         // toggled to Draw, paint that photo onto the canvas so they can draw
         // on top of it. _stashedDrawUrl wins if they were drawing earlier in
         // the same edit session.
-        _wireCanvas(bodyEl, _stashedDrawUrl || currentImageUrl || _safeImgSrc(note?.image_url) || null);
+        _wireCanvas(bodyEl, _stashedDrawUrl || form._noteImageUrl || _safeImgSrc(note?.image_url) || null);
       } else {
         const text = (_stashedNoteText !== null && _stashedNoteText !== undefined && _stashedNoteText !== '')
           ? _stashedNoteText
@@ -3311,43 +3571,19 @@ function _buildForm(note = null) {
   if (remindBtn) remindBtn.addEventListener('click', (e) => { e.stopPropagation(); _openReminderMenu(remindBtn, !!dueInput.value); });
   _renderReminderTag();
 
-  // Photo upload
+  // Photo upload — ephemeral picker (see _pickNoteImageFile).
   const photoBtn = form.querySelector('.note-form-photo-btn');
-  const photoInput = form.querySelector('.note-form-photo-input');
-  if (photoBtn && photoInput) {
-    photoBtn.addEventListener('click', () => photoInput.click());
-    photoInput.addEventListener('change', async () => {
-      const file = photoInput.files?.[0];
-      if (!file) return;
-      const fd = new FormData();
-      fd.append('files', file);
-      try {
-        const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', body: fd, credentials: 'same-origin' });
-        const data = await res.json();
-        const fileId = data.files?.[0]?.id;
-        if (!fileId) throw new Error('Upload failed');
-        currentImageUrl = `${API_BASE}/api/upload/${fileId}`;
-        // Only ever keep the latest attached photo — drop any existing wrap
-        // before inserting a fresh one. Picking a second photo replaces the
-        // first instead of stacking.
-        form.querySelector('.note-form-image-wrap')?.remove();
-        const wrap = document.createElement('div');
-        wrap.className = 'note-form-image-wrap';
-        wrap.innerHTML = `<img class="note-form-image" draggable="false" /><button class="note-form-image-rm" title="Remove">&times;</button>`;
-        // Insert AFTER the whole header (a flex-row), not after the
-        // title input itself — otherwise the image lands as a sibling
-        // of the title inside the header and flex puts them side-by-side.
-        form.querySelector('.note-form-header').after(wrap);
-        wrap.querySelector('.note-form-image-rm').addEventListener('click', () => { wrap.remove(); currentImageUrl = ''; });
-        wrap.querySelector('img').src = currentImageUrl;
-      } catch (err) { uiModule.showError('Image upload failed'); }
-      photoInput.value = '';
+  if (photoBtn) {
+    photoBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _pickNoteImageFile().then(file => { if (file) _attachNoteImageFile(form, file); });
     });
   }
   // Existing image remove
   form.querySelector('.note-form-image-rm')?.addEventListener('click', () => {
     form.querySelector('.note-form-image-wrap')?.remove();
-    currentImageUrl = '';
+    form._noteImageUrl = '';
   });
 
   // Title Enter -> focus body (textarea or first checklist item)
@@ -3457,7 +3693,7 @@ function _buildForm(note = null) {
       label: labelVal,
       due_date: form.querySelector('.note-form-due').value || null,
       repeat: form.querySelector('.note-form-repeat')?.value || 'none',
-      image_url: currentImageUrl || null,
+      image_url: form._noteImageUrl || null,
     };
     if (currentType === 'note') {
       payload.content = form.querySelector('.note-form-content')?.value || '';
@@ -3580,6 +3816,15 @@ function _buildForm(note = null) {
       uiModule.showError('Failed to archive');
     });
   });
+  form.querySelector('.note-form-create-doc-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _createDocFromNote(form, note);
+  });
+  form.querySelector('.note-form-handoff-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openNoteHandoffMenu(form, note, e.currentTarget, isEdit);
+  });
+
   form.querySelector('.note-form-delete-btn')?.addEventListener('click', async () => {
     if (!isEdit) return;
     const id = note.id;
@@ -4211,8 +4456,588 @@ function _serializeNoteForCopy(note) {
   return lines.join('\n').trim();
 }
 
+function _notePayloadForDoc(form, note) {
+  if (form) {
+    const draft = _collectFormDraft(form);
+    const type = draft.note_type || 'note';
+    const payload = {
+      title: draft.title || '',
+      content: draft.content || '',
+      items: draft.items || [],
+      label: draft.label || '',
+      note_type: type,
+      image_url: form._noteImageUrl || null,
+    };
+    if (type === 'draw' && !payload.image_url) {
+      const canvas = form.querySelector('.note-form-canvas');
+      if (canvas) {
+        try { payload.image_url = canvas.toDataURL('image/png'); } catch {}
+      }
+    }
+    return payload;
+  }
+  return {
+    title: note?.title || '',
+    content: note?.content || '',
+    items: note?.items || [],
+    label: note?.label || '',
+    note_type: note?.note_type || 'note',
+    image_url: _safeImgSrc(note?.image_url) || null,
+  };
+}
+
+function _isNotePayloadEmpty(payload) {
+  if (!payload) return true;
+  if ((payload.title || '').trim()) return false;
+  if ((payload.content || '').trim()) return false;
+  if (Array.isArray(payload.items) && payload.items.some(it => (it.text || '').trim())) return false;
+  if (payload.note_type === 'draw' && _safeImgSrc(payload.image_url)) return false;
+  return true;
+}
+
+function _serializeNoteForDoc(payload) {
+  const title = (payload.title || '').trim();
+  const lines = [];
+  if (title) lines.push(`# ${title}`);
+  if ((payload.content || '').trim()) {
+    if (lines.length) lines.push('');
+    lines.push(payload.content.trim());
+  }
+  if (Array.isArray(payload.items) && payload.items.length) {
+    if (lines.length) lines.push('');
+    for (const it of payload.items) {
+      if (!it || !(it.text || '').trim()) continue;
+      lines.push(`- [${it.done ? 'x' : ' '}] ${(it.text || '').trim()}`);
+    }
+  }
+  const img = _safeImgSrc(payload.image_url);
+  if (img && payload.note_type === 'draw') {
+    if (lines.length) lines.push('');
+    lines.push(`![Drawing](${img})`);
+  }
+  const label = (payload.label || '').trim();
+  if (label) {
+    lines.push('', `*Tags: ${label}*`);
+  }
+  const content = lines.join('\n').trim();
+  const docTitle = title
+    || (payload.content || '').trim().split('\n').find(l => l.trim())?.trim()
+    || (Array.isArray(payload.items) && payload.items.find(it => (it.text || '').trim())?.text?.trim())
+    || (payload.note_type === 'draw' ? 'Drawing' : 'Untitled note');
+  return { title: docTitle.slice(0, 200), content };
+}
+
+async function _ensureDocSessionId() {
+  let sid = '';
+  try { sid = window.sessionModule?.getCurrentSessionId?.() || ''; } catch {}
+  if (sid) return sid;
+  try {
+    const fd = new FormData();
+    fd.append('name', 'Note → Doc');
+    fd.append('skip_validation', 'true');
+    const res = await fetch(`${API_BASE}/api/session`, { method: 'POST', credentials: 'same-origin', body: fd });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.id) return data.id;
+    }
+  } catch {}
+  return null;
+}
+
+async function _createDocFromNote(form, note) {
+  const payload = _notePayloadForDoc(form, note);
+  if (_isNotePayloadEmpty(payload)) {
+    uiModule.showToast('Nothing to convert — add a title or note first');
+    return;
+  }
+  const { title, content } = _serializeNoteForDoc(payload);
+  if (!content) {
+    uiModule.showToast('Nothing to convert — add a title or note first');
+    return;
+  }
+
+  const docMod = window.documentModule;
+  if (!docMod?.injectFreshDoc) {
+    uiModule.showError('Document panel not available');
+    return;
+  }
+
+  uiModule.showToast('Creating document…', { duration: 8000, leadingIcon: 'spinner' });
+
+  const sid = await _ensureDocSessionId();
+  if (!sid) {
+    uiModule.showError('Could not start a session for the document');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/document`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sid,
+        title,
+        content,
+        language: 'markdown',
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      throw new Error(err || `Create failed (${res.status})`);
+    }
+    const doc = await res.json();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    docMod.injectFreshDoc(doc);
+    uiModule.showToast('Document created');
+  } catch (err) {
+    uiModule.showError('Failed to create document: ' + (err.message || err));
+  }
+}
+
 // Copy a note to the clipboard, briefly swap btnEl's icon to a checkmark, and
 // toast. Shared by the corner-copy button click and the Ctrl/Cmd+C shortcut.
+
+function _draftToHandoffPayload(draft, note) {
+  if (_isDraftEmpty(draft)) return null;
+
+  const title = (draft.title || '').trim();
+  const label = (draft.label || '').trim();
+  const type = draft.note_type || 'note';
+
+  let goal = title;
+  if (!goal && (draft.content || '').trim()) {
+    goal = draft.content.trim().split('\n').find(l => l.trim()) || '';
+  }
+  if (!goal && Array.isArray(draft.items)) {
+    const first = draft.items.find(it => (it.text || '').trim());
+    if (first) goal = first.text.trim();
+  }
+  if (!goal) goal = `Note handoff (${new Date().toLocaleString()})`;
+
+  const context = [`Odysseus note type: ${type}`];
+  if (note?.id) context.push(`Note ID: ${note.id}`);
+  if (label) context.push(`Tags: ${label}`);
+  if (draft.due_date) context.push(`Reminder: ${draft.due_date}`);
+
+  const done = [];
+  const pending = [];
+  if (Array.isArray(draft.items)) {
+    draft.items.forEach(it => {
+      const text = (it.text || '').trim();
+      if (!text) return;
+      if (it.done) done.push(text);
+      else pending.push(text);
+    });
+  }
+
+  const noteBodyParts = [];
+  if (title) noteBodyParts.push(`# ${title}`);
+  if ((draft.content || '').trim()) noteBodyParts.push(draft.content.trim());
+  if (pending.length) {
+    noteBodyParts.push('', 'Open items:');
+    pending.forEach(t => noteBodyParts.push(`- [ ] ${t}`));
+  }
+  if (done.length) {
+    noteBodyParts.push('', 'Completed items:');
+    done.forEach(t => noteBodyParts.push(`- [x] ${t}`));
+  }
+
+  const next = [
+    'Decompose the goal into smaller jobs and a concrete plan.',
+    'Execute the plan in order — ship working changes, not just suggestions.',
+    'Report what was done and what remains.',
+  ];
+  if (pending.length) {
+    next.unshift(`Tackle the ${pending.length} open checklist item${pending.length === 1 ? '' : 's'} first.`);
+  }
+
+  return {
+    title: goal.slice(0, 120),
+    goal,
+    context,
+    done,
+    next,
+    noteBody: noteBodyParts.join('\n').trim(),
+    sessionId: note?.agent_session_id || '',
+  };
+}
+
+function _openNoteHandoffMenu(form, note, anchorBtn, isEdit = !!note?.id, opts = {}) {
+  document.querySelectorAll('.note-handoff-menu-dropdown, .note-handoff-fan-backdrop').forEach(d => d.remove());
+
+  const draft = form ? _collectFormDraft(form) : {
+    note_type: note?.note_type || 'note',
+    title: note?.title || '',
+    label: note?.label || '',
+    due_date: note?.due_date || null,
+    content: note?.content || '',
+    items: note?.items || [],
+  };
+  const payload = _draftToHandoffPayload(draft, note);
+  if (!payload) {
+    uiModule.showToast('Nothing to hand off — add a title or note first');
+    return;
+  }
+
+  const isCardAnchor = anchorBtn?.classList?.contains('note-card');
+  if (_isNotesMobileMode() && isCardAnchor) {
+    _openNoteMobileHandoffFan(form, note, anchorBtn, isEdit, opts);
+    return;
+  }
+
+  const menu = document.createElement('div');
+  menu.className = 'note-corner-menu-dropdown note-handoff-menu-dropdown';
+  menu.innerHTML = `
+    <div class="note-handoff-menu-label">Send to</div>
+    <button type="button" class="ncm-item" data-target="cursor">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      <span>Cursor</span>
+    </button>
+    <button type="button" class="ncm-item" data-target="claude">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
+      <span>Claude Code</span>
+    </button>
+    <button type="button" class="ncm-item" data-target="odysseus">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      <span>Odysseus</span>
+    </button>
+    <button type="button" class="ncm-item" data-target="hermes">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
+      <span>Hermes Agent : brudda</span>
+    </button>`;
+  document.body.appendChild(menu);
+
+  const r = anchorBtn.getBoundingClientRect();
+  const mw = 220;
+  let left = Math.min(r.left, window.innerWidth - mw - 8);
+  left = Math.max(8, left);
+  const mh = menu.offsetHeight || 140;
+  const below = window.innerHeight - r.bottom;
+  let top = (below < mh + 8 && r.top > mh + 8) ? (r.top - mh - 4) : (r.bottom + 4);
+  top = Math.max(8, Math.min(top, window.innerHeight - mh - 8));
+  left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+  menu.style.cssText += `position:fixed;z-index:11000;top:${Math.round(top)}px;left:${Math.round(left)}px;`;
+
+  const closeDelay = opts.fromTouch ? 400 : 0;
+  const close = (ev) => {
+    if (ev && menu.contains(ev.target)) return;
+    if (opts.fromTouch && ev && anchorBtn?.contains?.(ev.target)) return;
+    menu.remove();
+    document.removeEventListener('click', close, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  setTimeout(() => document.addEventListener('click', close, true), closeDelay);
+  document.addEventListener('keydown', onKey, true);
+
+  menu.querySelectorAll('[data-target]').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      close();
+      await _executeNoteHandoff(form, note, isEdit, btn.dataset.target, anchorBtn);
+    });
+  });
+}
+
+const _HANDOFF_FAN_TARGETS = [
+  { pos: '12', target: 'cursor', label: 'Cursor', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>' },
+  { pos: '9', target: 'claude', label: 'Claude', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>' },
+  { pos: '3', target: 'odysseus', label: 'Odysseus', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>' },
+  { pos: '6', target: 'hermes', label: 'Hermes', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>' },
+];
+
+function _positionHandoffFanBtn(rect, pos, btnSize, gap) {
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const half = btnSize / 2;
+  let left = 0;
+  let top = 0;
+  if (pos === '12') {
+    left = cx - half;
+    top = rect.top - gap - btnSize;
+  } else if (pos === '9') {
+    left = rect.left - gap - btnSize;
+    top = cy - half;
+  } else if (pos === '3') {
+    left = rect.right + gap;
+    top = cy - half;
+  } else if (pos === '6') {
+    left = cx - half;
+    top = rect.bottom + gap;
+  }
+  left = Math.max(8, Math.min(left, window.innerWidth - btnSize - 8));
+  top = Math.max(8, Math.min(top, window.innerHeight - btnSize - 8));
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
+function _openNoteMobileHandoffFan(form, note, anchorCard, isEdit, opts = {}) {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'note-handoff-fan-backdrop';
+  const fan = document.createElement('div');
+  fan.className = 'note-handoff-fan';
+  fan.setAttribute('role', 'menu');
+  fan.setAttribute('aria-label', 'Send handoff to');
+
+  const btnSize = 56;
+  const gap = 10;
+  const rect = anchorCard.getBoundingClientRect();
+
+  _HANDOFF_FAN_TARGETS.forEach((item, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `note-handoff-fan-btn note-handoff-fan-btn-${item.pos}`;
+    btn.dataset.target = item.target;
+    btn.dataset.pos = item.pos;
+    btn.setAttribute('aria-label', `Hand off to ${item.label}`);
+    btn.innerHTML = `${item.svg}<span class="note-handoff-fan-label">${item.label}</span>`;
+    const { left, top } = _positionHandoffFanBtn(rect, item.pos, btnSize, gap);
+    btn.style.left = `${left}px`;
+    btn.style.top = `${top}px`;
+    btn.style.animationDelay = `${idx * 45}ms`;
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeFan();
+      await _executeNoteHandoff(form, note, isEdit, item.target, anchorCard);
+    });
+    fan.appendChild(btn);
+  });
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(fan);
+
+  const closeFan = () => {
+    backdrop.remove();
+    fan.remove();
+    document.removeEventListener('click', onOutside, true);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') closeFan(); };
+  const onOutside = (ev) => {
+    if (fan.contains(ev.target)) return;
+    if (anchorCard.contains(ev.target)) return;
+    closeFan();
+  };
+  backdrop.addEventListener('click', closeFan);
+  document.addEventListener('keydown', onKey, true);
+  const closeDelay = opts.fromTouch ? 400 : 0;
+  setTimeout(() => document.addEventListener('click', onOutside, true), closeDelay);
+}
+
+async function _ensureNoteIdForHandoff(form, note, isEdit) {
+  if (isEdit && note?.id && !String(note.id).startsWith('tmp_')) return note.id;
+  const draft = _collectFormDraft(form);
+  if (_isDraftEmpty(draft)) throw new Error('Note is empty');
+  const saved = await _saveNote({
+    title: draft.title || '',
+    content: draft.content || '',
+    items: draft.items,
+    note_type: draft.note_type || 'note',
+    label: draft.label || null,
+    due_date: draft.due_date || null,
+    repeat: draft.repeat || 'none',
+  });
+  if (!saved?.id) throw new Error('Could not save note');
+  Object.assign(note || {}, saved);
+  return saved.id;
+}
+
+function _renderHandoffChip(note) {
+  if (!note?.handoff_doc_id) return '';
+  const target = note.handoff_target || '';
+  const status = note.handoff_relay_status || '';
+  const label = _handoffStatusLabel(target, status);
+  const statusCls = status ? ` note-handoff-tag--${status}` : '';
+  const title = _handoffChipTitle(target, status);
+  return `<button class="note-handoff-tag${statusCls}" data-note-id="${note.id}" data-doc-id="${_esc(note.handoff_doc_id)}" data-handoff-target="${_esc(target)}" title="${_esc(title)}">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        <span>Handoff${target ? ' → ' + _esc(target) : ''} · ${_esc(label)}</span>
+      </button>`;
+}
+
+function _resumeHandoffPolling() {
+  for (const n of _notes) {
+    if (!n.handoff_doc_id) continue;
+    const st = n.handoff_relay_status;
+    if (st !== 'queued' && st !== 'running') continue;
+    if (_handoffPollActive.has(n.id)) continue;
+    _handoffPollActive.add(n.id);
+    _pollHandoffRelayStatus(n.id, n.handoff_doc_id);
+  }
+}
+
+function _renderHandoffFormBanner(form, { docId, noteId, target, relayStatus }) {
+  if (!form) return;
+  form.querySelector('.note-handoff-banner')?.remove();
+  const external = _handoffTargetIsExternal(target);
+  const banner = document.createElement('div');
+  banner.className = 'note-handoff-banner';
+  const statusLabel = _handoffStatusLabel(target, relayStatus);
+  const agentBtn = external
+    ? ''
+    : `<button type="button" class="note-handoff-banner-agent">Open agent</button>`;
+  banner.innerHTML =
+    `<span class="note-handoff-banner-text">${statusLabel} → ${uiModule.esc ? uiModule.esc(target) : target}</span>` +
+    `<button type="button" class="note-handoff-banner-open">Open doc</button>` +
+    agentBtn;
+  banner.querySelector('.note-handoff-banner-open')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openHandoffDocument(docId);
+  });
+  banner.querySelector('.note-handoff-banner-agent')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openHandoffAgentSession({ noteId, docId });
+  });
+  form.querySelector('.note-form-meta')?.prepend(banner);
+}
+
+async function _archiveNoteAsDone(noteId, cardEl) {
+  const idx = _notes.findIndex(n => n.id === noteId);
+  if (idx < 0) return;
+  if (cardEl) {
+    const r = cardEl.getBoundingClientRect();
+    spawnConfetti(r.left + r.width / 2, r.top + r.height / 2, 80);
+  }
+  const removed = _notes.splice(idx, 1)[0];
+  const undo = () => _undoArchive(removed, idx);
+  _pushUndo({ label: 'archive', run: undo });
+  const _undoIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><polyline points="9 14 4 9 9 4"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9"/></svg>';
+  _editingId = null;
+  _renderNotes();
+  try { _closeMobileFullscreenEdit({ save: false }); } catch {}
+  await _patchNote(noteId, { archived: true });
+  uiModule.showToast('Marked done — note archived', {
+    duration: 6000,
+    action: 'Undo',
+    actionIcon: _undoIcon,
+    onAction: undo,
+    actionHint: 'Ctrl+Z',
+    leadingIcon: 'check',
+  });
+}
+
+async function _pollHandoffRelayStatus(noteId, docId, attempt = 0) {
+  if (attempt > 120) {
+    _handoffPollActive.delete(noteId);
+    return;
+  }
+  const n = _notes.find(x => x.id === noteId);
+  const status = n?.handoff_relay_status;
+  if (status === 'complete' || status === 'failed') {
+    _handoffPollActive.delete(noteId);
+    _renderNotes();
+    if (status === 'complete') {
+      uiModule.showToast('Handoff relay complete', {
+        duration: 8000,
+        leadingIcon: 'check',
+        action: 'Mark done',
+        onAction: () => { _archiveNoteAsDone(noteId); },
+      });
+    } else if (status === 'failed') {
+      uiModule.showError('Handoff relay failed' + (n?.handoff_outcome ? ': ' + n.handoff_outcome.slice(0, 120) : ''));
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/notes/${encodeURIComponent(noteId)}`, { credentials: 'same-origin' });
+    if (res.ok) {
+      const fresh = await res.json();
+      const idx = _notes.findIndex(x => x.id === noteId);
+      if (idx >= 0) _notes[idx] = { ..._notes[idx], ...fresh };
+      _renderNotes();
+    }
+  } catch {}
+  setTimeout(() => _pollHandoffRelayStatus(noteId, docId, attempt + 1), 15000);
+}
+
+async function _executeNoteHandoff(form, note, isEdit, target, anchorBtn) {
+  const draft = form ? _collectFormDraft(form) : {
+    note_type: note?.note_type || 'note',
+    title: note?.title || '',
+    label: note?.label || '',
+    due_date: note?.due_date || null,
+    content: note?.content || '',
+    items: note?.items || [],
+  };
+  const payload = _draftToHandoffPayload(draft, note);
+  if (!payload) {
+    uiModule.showToast('Nothing to hand off — add a title or note first');
+    return;
+  }
+
+  uiModule.showToast('Creating handoff…', { duration: 12000, leadingIcon: 'spinner' });
+
+  let noteId;
+  try {
+    noteId = await _ensureNoteIdForHandoff(form, note, isEdit);
+  } catch (err) {
+    uiModule.showError('Save note before handoff: ' + (err.message || err));
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/notes/${encodeURIComponent(noteId)}/handoff`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target,
+        title: draft.title,
+        content: draft.content,
+        items: draft.items,
+        note_type: draft.note_type,
+        label: draft.label,
+        due_date: draft.due_date,
+        archive: false,
+        relay: true,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail || `Handoff failed (${res.status})`);
+    }
+    const data = await res.json();
+    const docId = data.doc_id;
+    const relayStatus = data.relay_status || 'queued';
+    const resolvedTarget = data.target || target;
+
+    if (data.note) {
+      const idx = _notes.findIndex(n => n.id === noteId);
+      if (idx >= 0) _notes[idx] = { ..._notes[idx], ...data.note };
+      else _notes.unshift(data.note);
+    }
+
+    const wasEditing = _editingId === noteId;
+    if (wasEditing) _editingId = null;
+    _renderNotes();
+    if (!wasEditing && form?.isConnected) {
+      _renderHandoffFormBanner(form, { docId, noteId, target: resolvedTarget, relayStatus });
+    }
+
+    window.tasksModule?.pollNotificationsNow?.();
+
+    await _notifyHandoffPickup({
+      target: resolvedTarget,
+      docId: _resolveHandoffDocId(data) || _resolveHandoffDocId({ id: docId }),
+      noteId,
+      relayStatus,
+    });
+
+    if (anchorBtn) {
+      anchorBtn.classList.add('note-handoff-sent');
+      setTimeout(() => anchorBtn.classList.remove('note-handoff-sent'), 2000);
+    }
+    if (!_handoffPollActive.has(noteId)) {
+      _handoffPollActive.add(noteId);
+    }
+    _pollHandoffRelayStatus(noteId, docId);
+  } catch (err) {
+    uiModule.showError('Handoff failed: ' + (err.message || err));
+  }
+}
+
 // ── ⋯ corner menu (Copy + Agent) ───────────────────────────────────
 function _openNoteCornerMenu(btn) {
   document.querySelectorAll('.note-corner-menu-dropdown').forEach(d => d.remove());
@@ -4225,6 +5050,14 @@ function _openNoteCornerMenu(btn) {
     <button type="button" class="ncm-item" data-act="copy">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       <span>Copy</span>
+    </button>
+    <button type="button" class="ncm-item" data-act="create-doc">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>Create doc</span>
+    </button>
+    <button type="button" class="ncm-item" data-act="handoff">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+      <span>Hand off</span>
     </button>
     <button type="button" class="ncm-item" data-act="agent">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></svg>
@@ -4249,6 +5082,8 @@ function _openNoteCornerMenu(btn) {
   };
   setTimeout(() => document.addEventListener('click', close, true), 0);
   menu.querySelector('[data-act="copy"]').addEventListener('click', () => { menu.remove(); _copyNote(id, btn); });
+  menu.querySelector('[data-act="create-doc"]').addEventListener('click', () => { menu.remove(); _createDocFromNote(null, note); });
+  menu.querySelector('[data-act="handoff"]').addEventListener('click', () => { menu.remove(); _openNoteHandoffMenu(null, note, btn); });
   menu.querySelector('[data-act="agent"]').addEventListener('click', () => { menu.remove(); _agentSolveNote(id); });
 }
 
@@ -4426,11 +5261,10 @@ async function _deleteNote(id) {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// MOBILE NOTES UX — fullscreen tap-to-edit + long-press drag-to-reorder.
-// On a touch device ≤768px wide, note tiles become read-only previews;
-// a single tap opens the note in a full-bleed overlay (where all real
-// editing happens), and a long-press flips the whole grid into
-// rearrange mode where tiles can be dragged to a new sort_order.
+// MOBILE NOTES UX — fullscreen tap-to-edit, swipe actions, 600ms quick
+// menu, and 450ms-hold + drag reorder. On a touch device ≤768px wide,
+// note tiles become read-only previews; a single tap opens the note in a
+// full-bleed overlay (where all real editing happens).
 // ────────────────────────────────────────────────────────────────────
 
 function _isNotesMobileMode() {
@@ -4531,7 +5365,11 @@ function _openMobileFullscreenEdit(id, fromCard) {
   // Cancel/Save only. Handlers stay attached when nodes move.
   const headerActions = overlay.querySelector('.note-fullscreen-actions');
   const archiveBtn = form.querySelector('.note-form-archive-btn');
+  const createDocBtn = form.querySelector('.note-form-create-doc-btn');
+  const handoffBtn = form.querySelector('.note-form-handoff-btn');
   const deleteBtn  = form.querySelector('.note-form-delete-btn');
+  if (headerActions && createDocBtn) headerActions.appendChild(createDocBtn);
+  if (headerActions && handoffBtn) headerActions.appendChild(handoffBtn);
   if (headerActions && archiveBtn) headerActions.appendChild(archiveBtn);
   if (headerActions && deleteBtn)  headerActions.appendChild(deleteBtn);
   // The built-in archive/delete handlers re-render the notes grid but
@@ -4653,46 +5491,376 @@ function _closeMobileFullscreenEdit(opts = {}) {
   }, 220);
 }
 
-// ── Long-press drag-to-reorder ───────────────────────────────────────
-function _bindLongPressDrag(card) {
-  let pressTimer = null;
-  let startX = 0, startY = 0;
-  let armed = false;
+// ── Mobile card gestures (swipe, quick menu, drag-to-reorder) ────────
+
+const _SWIPE_UNDERLAY_LEFT_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const _SWIPE_UNDERLAY_RIGHT_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>';
+
+function _unwrapLegacySwipeWrap(card) {
+  const wrap = card.parentElement;
+  if (!wrap?.classList?.contains('note-card-swipe-wrap')) return card;
+  const parent = wrap.parentNode;
+  if (!parent) return card;
+  const gridRowEnd = wrap.style.gridRowEnd;
+  parent.insertBefore(card, wrap);
+  wrap.remove();
+  if (gridRowEnd) card.style.gridRowEnd = gridRowEnd;
+  return card;
+}
+
+function _noteSwipeSurface(card) {
+  return card.querySelector(':scope > .note-card-swipe-surface');
+}
+
+function _resetNoteSwipeSurfaceStyles(surface) {
+  if (!surface) return;
+  surface.style.transform = '';
+  surface.style.opacity = '';
+  surface.style.transition = '';
+}
+
+// Underlays live inside .note-card (behind content) so the card stays a
+// direct grid item and looks identical to pre-gesture layout at rest.
+function _ensureNoteSwipeUnderlays(card) {
+  card = _unwrapLegacySwipeWrap(card);
+  let surface = _noteSwipeSurface(card);
+  if (!surface) {
+    surface = document.createElement('div');
+    surface.className = 'note-card-swipe-surface';
+    while (card.firstChild) surface.appendChild(card.firstChild);
+    card.appendChild(surface);
+  }
+  if (!card.querySelector(':scope > .note-swipe-underlay-left')) {
+    const note = _notes.find(n => n.id === card.dataset.noteId);
+    const leftLabel = note && _hasItems(note) ? 'Done' : 'Archive';
+    const left = document.createElement('div');
+    left.className = 'note-swipe-underlay note-swipe-underlay-left';
+    left.setAttribute('aria-hidden', 'true');
+    left.innerHTML = `${_SWIPE_UNDERLAY_LEFT_SVG}<span>${leftLabel}</span>`;
+    const right = document.createElement('div');
+    right.className = 'note-swipe-underlay note-swipe-underlay-right';
+    right.setAttribute('aria-hidden', 'true');
+    right.innerHTML = `${_SWIPE_UNDERLAY_RIGHT_SVG}<span>Handoff</span>`;
+    card.insertBefore(left, surface);
+    card.insertBefore(right, surface);
+  }
+  return { card, surface };
+}
+
+const _ARCHIVE_UNDO_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><polyline points="9 14 4 9 9 4"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9"/></svg>';
+
+function _archiveNoteWithAnimation(id, card, opts = {}) {
+  const idx = _notes.findIndex(n => n.id === id);
+  if (idx < 0) return;
+  if (opts.confetti && card) {
+    const r = card.getBoundingClientRect();
+    spawnConfetti(r.left + r.width / 2, r.top + r.height / 2, 80);
+  }
+  const removed = _notes.splice(idx, 1)[0];
+  const undo = () => _undoArchive(removed, idx);
+  _pushUndo({ label: 'archive', run: undo });
+  const finish = () => {
+    _renderNotes();
+    _patchNote(id, { archived: true }).then(() => {
+      uiModule.showToast(opts.toast || 'Archived', {
+        duration: 6000, action: 'Undo', actionIcon: _ARCHIVE_UNDO_ICON, onAction: undo, actionHint: 'Ctrl+Z',
+      });
+    }).catch(() => {
+      _notes.splice(idx, 0, removed);
+      _renderNotes();
+      uiModule.showError('Failed to archive');
+    });
+  };
+  const animCard = card || document.querySelector(`.note-card[data-note-id="${id}"]`);
+  if (animCard) {
+    animCard.classList.add('note-card-sliding-out');
+    let done = false;
+    const once = () => { if (done) return; done = true; finish(); };
+    animCard.addEventListener('transitionend', once, { once: true });
+    setTimeout(once, 400);
+  } else {
+    finish();
+  }
+}
+
+async function _toggleNotePin(id) {
+  const note = _notes.find(n => n.id === id);
+  if (!note) return;
+  const prevPinned = note.pinned;
+  const prevSortOrder = note.sort_order;
+  note.pinned = !prevPinned;
+  const patch = { pinned: note.pinned };
+  if (note.pinned) {
+    const minPinned = _notes
+      .filter(n => n.pinned && n.id !== id)
+      .reduce((m, n) => Math.min(m, n.sort_order || 0), 0);
+    note.sort_order = minPinned - 1;
+    patch.sort_order = note.sort_order;
+  }
+  _renderNotes();
+  try {
+    await _patchNote(id, patch);
+    uiModule.showToast(note.pinned ? 'Pinned' : 'Unpinned');
+  } catch {
+    note.pinned = prevPinned;
+    note.sort_order = prevSortOrder;
+    _renderNotes();
+    uiModule.showError('Failed to pin');
+  }
+}
+
+async function _mobileSwipeLeftAction(noteId, card) {
+  const note = _notes.find(n => n.id === noteId);
+  if (!note) return;
+
+  if (_hasItems(note) && Array.isArray(note.items) && note.items.length > 0) {
+    if (_isNoteFullyDone(note)) {
+      _archiveNoteWithAnimation(noteId, card, { confetti: true });
+      return;
+    }
+    const step = _nextGoalStep(note);
+    if (!step) {
+      _archiveNoteWithAnimation(noteId, card, { confetti: true });
+      return;
+    }
+    note.items[step.idx].done = true;
+    const nowAllDone = note.items.every(it => it.done);
+    try {
+      await _patchNote(noteId, { items: note.items });
+      if (nowAllDone) {
+        if (card) {
+          const r = card.getBoundingClientRect();
+          spawnConfetti(r.left + r.width / 2, r.top + r.height / 2, 80);
+        }
+        _archiveNoteWithAnimation(noteId, card);
+      } else {
+        _renderNotes();
+        uiModule.showToast('Item completed');
+      }
+    } catch {
+      note.items[step.idx].done = false;
+      uiModule.showError('Failed to update');
+    }
+    return;
+  }
+  _archiveNoteWithAnimation(noteId, card, { confetti: true });
+}
+
+function _openNoteMobileQuickMenu(card, note) {
+  document.querySelectorAll('.note-mobile-quick-menu, .note-mobile-quick-menu-backdrop').forEach(d => d.remove());
+  const id = note.id;
+  const pinLabel = note.pinned ? 'Unpin' : 'Pin';
+  const backdrop = document.createElement('div');
+  backdrop.className = 'note-mobile-quick-menu-backdrop';
+  const sheet = document.createElement('div');
+  sheet.className = 'note-mobile-quick-menu';
+  sheet.innerHTML = `
+    <div class="note-mobile-quick-menu-grabber" aria-hidden="true"></div>
+    <button type="button" class="nmqm-item" data-act="copy">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span>Copy</span>
+    </button>
+    <button type="button" class="nmqm-item" data-act="create-doc">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span>Create doc</span>
+    </button>
+    <button type="button" class="nmqm-item" data-act="pin">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="${note.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17z"/></svg>
+      <span>${pinLabel}</span>
+    </button>
+    <button type="button" class="nmqm-item" data-act="archive">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      <span>Archive</span>
+    </button>`;
+  document.body.appendChild(backdrop);
+  document.body.appendChild(sheet);
+  const close = () => {
+    sheet.remove();
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  backdrop.addEventListener('click', close);
+  document.addEventListener('keydown', onKey, true);
+  sheet.querySelector('[data-act="copy"]').addEventListener('click', () => { close(); _copyNote(id, card); });
+  sheet.querySelector('[data-act="create-doc"]').addEventListener('click', () => { close(); _createDocFromNote(null, note); });
+  sheet.querySelector('[data-act="pin"]').addEventListener('click', () => { close(); _toggleNotePin(id); });
+  sheet.querySelector('[data-act="archive"]').addEventListener('click', () => {
+    close();
+    _archiveNoteWithAnimation(id, card);
+  });
+}
+
+function _bindMobileCardGestures(card) {
+  if (card.dataset.mobileGesturesBound === '1') return;
+  card.dataset.mobileGesturesBound = '1';
+  const { card: gestureCard, surface } = _ensureNoteSwipeUnderlays(card);
+
+  const HOLD_DRAG_MS = 450;
+  const HOLD_MENU_MS = 600;
   const CANCEL_PX = 8;
-  const HOLD_MS = 450;
+  const DRAG_START_PX = 12;
+  const SWIPE_THRESHOLD = 70;
+  const VERT_CANCEL = 30;
+  const SWIPE_LOCK_PX = 12;
+
+  let startX = 0, startY = 0, dx = 0, dy = 0;
+  let armed = false;
+  let dragReady = false;
+  let swiping = false;
+  let menuOpened = false;
+  let dragTimer = null;
+  let menuTimer = null;
+  let onTextTarget = false;
+
+  const clearTimers = () => {
+    if (dragTimer) { clearTimeout(dragTimer); dragTimer = null; }
+    if (menuTimer) { clearTimeout(menuTimer); menuTimer = null; }
+  };
+
+  const resetGesture = () => {
+    armed = false;
+    dragReady = false;
+    swiping = false;
+    menuOpened = false;
+    clearTimers();
+  };
 
   card.addEventListener('touchstart', (e) => {
-    // Don't fight scroll on touchpoints over real interactive children
-    // (in mobile-mode they're CSS-hidden anyway, but be defensive).
     if (e.target.closest('button, input, a, .note-form')) return;
     if (e.touches.length !== 1) return;
+    if (_dragState) return;
+
     armed = true;
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    // Capture the touch object so the timer callback can pass it to
-    // _enterDragMode → _beginGrab. The finger is still held down, so
-    // the drag starts the instant the timer fires.
-    const heldTouch = { clientX: startX, clientY: startY };
-    pressTimer = setTimeout(() => {
-      if (!armed) return;
-      try { navigator.vibrate?.(15); } catch {}
-      _enterDragMode(card, heldTouch);
-    }, HOLD_MS);
-  }, { passive: true });
-  card.addEventListener('touchmove', (e) => {
-    if (!armed) return;
+    swiping = false;
+    dragReady = false;
+    menuOpened = false;
     const t = e.touches[0];
-    if (Math.abs(t.clientX - startX) > CANCEL_PX || Math.abs(t.clientY - startY) > CANCEL_PX) {
+    startX = t.clientX;
+    startY = t.clientY;
+    dx = 0;
+    dy = 0;
+    onTextTarget = !!e.target.closest('.note-content-preview, .note-card-title');
+    surface.style.transition = 'none';
+
+    if (_notesDragReorderEnabled()) {
+      dragTimer = setTimeout(() => {
+        if (!armed || swiping) return;
+        if (Math.abs(dx) > CANCEL_PX || Math.abs(dy) > CANCEL_PX) return;
+        dragReady = true;
+        try { navigator.vibrate?.(15); } catch {}
+        _enterDragMode(gestureCard, null);
+      }, HOLD_DRAG_MS);
+    }
+
+    menuTimer = setTimeout(() => {
+      if (!armed || swiping) return;
+      if (Math.abs(dx) > CANCEL_PX || Math.abs(dy) > CANCEL_PX) return;
+      const sel = window.getSelection?.();
+      if (sel?.toString?.()?.length > 0) return;
+      if (onTextTarget) return;
+      menuOpened = true;
       armed = false;
-      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      clearTimers();
+      _exitDragMode();
+      const note = _notes.find(n => n.id === gestureCard.dataset.noteId);
+      if (!note) return;
+      gestureCard._suppressNextClick = true;
+      setTimeout(() => { gestureCard._suppressNextClick = false; }, 400);
+      try { navigator.vibrate?.(12); } catch {}
+      _openNoteMobileQuickMenu(gestureCard, note);
+    }, HOLD_MENU_MS);
+  }, { passive: true });
+
+  card.addEventListener('touchmove', (e) => {
+    if (!armed && !dragReady && !swiping) return;
+    const t = e.touches[0];
+    dx = t.clientX - startX;
+    dy = t.clientY - startY;
+
+    if (!swiping && Math.abs(dy) > VERT_CANCEL && Math.abs(dy) > Math.abs(dx)) {
+      resetGesture();
+      _exitDragMode();
+      _resetNoteSwipeSurfaceStyles(surface);
+      gestureCard.classList.remove('note-swipe-reveal-left', 'note-swipe-reveal-right');
+      return;
+    }
+
+    if (!dragReady && !swiping && Math.abs(dx) > SWIPE_LOCK_PX && Math.abs(dx) > Math.abs(dy)) {
+      swiping = true;
+      armed = false;
+      clearTimers();
+      _exitDragMode();
+    }
+
+    if (swiping) {
+      const clamped = Math.max(-120, Math.min(120, dx));
+      surface.style.transform = `translateX(${clamped}px)`;
+      gestureCard.classList.toggle('note-swipe-reveal-left', clamped < -20);
+      gestureCard.classList.toggle('note-swipe-reveal-right', clamped > 20);
+      return;
+    }
+
+    if (!dragReady && (Math.abs(dx) > CANCEL_PX || Math.abs(dy) > CANCEL_PX)) {
+      clearTimers();
+      armed = false;
+      return;
+    }
+
+    if (dragReady && !swiping && !menuOpened && !_dragState) {
+      if (Math.hypot(dx, dy) > DRAG_START_PX) {
+        _resetNoteSwipeSurfaceStyles(surface);
+        _beginGrab(gestureCard, t);
+      }
     }
   }, { passive: true });
-  const cancel = () => {
-    armed = false;
-    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+
+  const onEnd = () => {
+    if (swiping) {
+      swiping = false;
+      surface.style.transition = 'transform 0.2s ease, opacity 0.2s ease';
+      const noteId = gestureCard.dataset.noteId;
+      const note = _notes.find(n => n.id === noteId);
+      if (dx <= -SWIPE_THRESHOLD) {
+        gestureCard._suppressNextClick = true;
+        setTimeout(() => { gestureCard._suppressNextClick = false; }, 400);
+        surface.style.transform = 'translateX(-120%)';
+        surface.style.opacity = '0';
+        setTimeout(() => _mobileSwipeLeftAction(noteId, gestureCard), 200);
+      } else if (dx >= SWIPE_THRESHOLD && note) {
+        gestureCard._suppressNextClick = true;
+        setTimeout(() => { gestureCard._suppressNextClick = false; }, 400);
+        _resetNoteSwipeSurfaceStyles(surface);
+        gestureCard.classList.remove('note-swipe-reveal-left', 'note-swipe-reveal-right');
+        _openNoteHandoffMenu(null, note, gestureCard, !!note?.id, { fromTouch: true });
+      } else {
+        _resetNoteSwipeSurfaceStyles(surface);
+        gestureCard.classList.remove('note-swipe-reveal-left', 'note-swipe-reveal-right');
+      }
+      resetGesture();
+      return;
+    }
+
+    if (menuOpened) {
+      resetGesture();
+      return;
+    }
+
+    const sel = window.getSelection?.();
+    if (sel?.toString?.()?.length > 0) {
+      gestureCard._suppressNextClick = true;
+      setTimeout(() => { gestureCard._suppressNextClick = false; }, 400);
+    }
+
+    if (dragReady && !_dragState) {
+      _exitDragMode();
+    }
+    resetGesture();
+    surface.style.transition = '';
   };
-  card.addEventListener('touchend', cancel, { passive: true });
-  card.addEventListener('touchcancel', cancel, { passive: true });
+
+  card.addEventListener('touchend', onEnd, { passive: true });
+  card.addEventListener('touchcancel', onEnd, { passive: true });
 }
 
 // Lift-and-placeholder drag implementation. The dragged card detaches
@@ -4714,9 +5882,8 @@ function _enterDragMode(initialCard, initialTouch) {
     document.addEventListener('touchcancel', _onDocTouchEnd, { passive: true });
     _docDragHandlersBound = true;
   }
-  // Auto-grab the card the user long-pressed — they're already holding
-  // their finger on it, so begin the drag straight away. Releasing
-  // (touchend) commits the reorder AND exits drag mode in one motion.
+  // Auto-grab only when an explicit touch is passed (legacy tablet path).
+  // Mobile 450ms hold defers grab until the finger moves.
   if (initialCard && initialTouch) {
     _beginGrab(initialCard, initialTouch);
   }
@@ -4745,9 +5912,10 @@ function _setupDragForCard(card) {
 }
 
 function _beginGrab(card, touch) {
+  card = _unwrapLegacySwipeWrap(card);
+  _resetNoteSwipeSurfaceStyles(_noteSwipeSurface(card));
   const rect = card.getBoundingClientRect();
   const prevStyle = card.getAttribute('style') || '';
-  // Placeholder fills the card's old slot so the grid layout doesn't reflow.
   const placeholder = document.createElement('div');
   placeholder.className = 'note-card-placeholder';
   placeholder.style.width = rect.width + 'px';
@@ -4757,7 +5925,6 @@ function _beginGrab(card, touch) {
   const grid = card.parentNode;
   grid.insertBefore(placeholder, card);
 
-  // Detach the card visually — fixed-position, anchored to the finger.
   card.classList.add('note-card-dragging');
   card.style.position = 'fixed';
   card.style.left = rect.left + 'px';
@@ -4766,11 +5933,13 @@ function _beginGrab(card, touch) {
   card.style.height = rect.height + 'px';
   card.style.margin = '0';
   card.style.zIndex = '10001';
-  // pointer-events:none so elementFromPoint sees the card BENEATH the finger
   card.style.pointerEvents = 'none';
 
   _dragState = {
-    card, placeholder, grid, prevStyle,
+    card,
+    placeholder,
+    grid,
+    prevStyle,
     grabOffsetX: touch.clientX - rect.left,
     grabOffsetY: touch.clientY - rect.top,
   };
@@ -4820,9 +5989,6 @@ function _onDocTouchEnd() {
   if (!_dragState) return;
   const { card, placeholder, grid, prevStyle } = _dragState;
   _dragState = null;
-  // Animate the card from its current fixed position to where the
-  // placeholder sits, then re-parent and clear inline styles. Drag
-  // mode auto-exits once the snap finishes — release = done.
   const phRect = placeholder.getBoundingClientRect();
   card.style.transition = 'left 0.2s ease, top 0.2s ease';
   card.style.left = phRect.left + 'px';
@@ -4831,11 +5997,9 @@ function _onDocTouchEnd() {
     placeholder.parentNode.insertBefore(card, placeholder);
     placeholder.remove();
     card.classList.remove('note-card-dragging');
-    // Restore the card's pre-drag inline styles. Mobile masonry stores
-    // grid-row-end inline, and custom backgrounds use inline style too; wiping
-    // cssText made dropped cards collapse into neighboring notes in grid view.
     if (prevStyle) card.setAttribute('style', prevStyle);
     else card.removeAttribute('style');
+    _resetNoteSwipeSurfaceStyles(_noteSwipeSurface(card));
     _applyMasonry(grid);
     _commitNoteReorder();
     // One drag, one exit — release ends the rearrange session entirely.

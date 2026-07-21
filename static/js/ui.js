@@ -302,9 +302,9 @@ export function showToast(msg, durationOrOpts) {
   }
   _wireToastSwipe(toastEl);
   toastEl.textContent = '';
-  toastEl.classList.remove('error');
+  toastEl.classList.remove('error', 'toast--handoff', 'toast--multiline');
 
-  let duration = 1200, actionLabel = null, onAction = null, actionHint = null, actionIcon = null, leadingIcon = null;
+  let duration = 1200, actionLabel = null, onAction = null, actionHint = null, actionIcon = null, leadingIcon = null, toastClass = null;
   if (typeof durationOrOpts === 'object' && durationOrOpts) {
     duration = durationOrOpts.duration || 5000;
     actionLabel = durationOrOpts.action;
@@ -312,9 +312,12 @@ export function showToast(msg, durationOrOpts) {
     actionHint = durationOrOpts.actionHint || null;
     actionIcon = durationOrOpts.actionIcon || null;
     leadingIcon = durationOrOpts.leadingIcon || null;
+    toastClass = durationOrOpts.toastClass || null;
   } else if (typeof durationOrOpts === 'number') {
     duration = durationOrOpts;
   }
+  if (toastClass) toastEl.classList.add(toastClass);
+  if (String(msg || '').includes('\n')) toastEl.classList.add('toast--multiline');
 
   const textSpan = document.createElement('span');
   if (leadingIcon === 'check') {
@@ -330,6 +333,19 @@ export function showToast(msg, durationOrOpts) {
     toastEl.appendChild(icon);
   }
   textSpan.textContent = msg;
+  if (toastEl.classList.contains('toast--multiline')) {
+    textSpan.style.whiteSpace = 'pre-wrap';
+    textSpan.style.lineHeight = '1.35';
+    textSpan.style.fontFamily = toastEl.classList.contains('toast--handoff')
+      ? 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+      : '';
+    textSpan.style.fontSize = toastEl.classList.contains('toast--handoff') ? '11px' : '';
+  } else {
+    textSpan.style.whiteSpace = '';
+    textSpan.style.lineHeight = '';
+    textSpan.style.fontFamily = '';
+    textSpan.style.fontSize = '';
+  }
   toastEl.appendChild(textSpan);
 
   if (actionLabel && onAction) {

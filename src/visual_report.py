@@ -380,6 +380,203 @@ body::after {{
   pointer-events: none;
 }}
 .toolbar .toast.show {{ opacity: 1; }}
+/* Floating listen dock — stays on screen while scrolling; not a blocking overlay */
+.listen-modal-backdrop {{
+  position: fixed;
+  inset: auto;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 120;
+  background: transparent;
+  display: block;
+  padding: 0;
+  pointer-events: none;
+  max-width: calc(100vw - 1.5rem);
+}}
+.listen-modal-backdrop.hidden {{ display: none; }}
+/* Keep page content clear of the floating dock while open */
+body.listen-dock-open {{
+  padding-bottom: min(52vh, 460px);
+}}
+.listen-modal {{
+  pointer-events: auto;
+  width: min(380px, calc(100vw - 2rem));
+  max-height: min(60vh, 480px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem 0.9rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md, 0 12px 40px rgba(0,0,0,0.22));
+  font-size: 0.78rem;
+  color: var(--text);
+}}
+.listen-modal-head {{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}}
+.listen-modal-title {{
+  font-weight: 650;
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
+}}
+.listen-modal-sub {{
+  margin-top: 0.15rem;
+  opacity: 0.7;
+  font-size: 0.72rem;
+}}
+.listen-modal-close {{
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0.25rem 0.45rem;
+  opacity: 0.7;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+}}
+.listen-modal-close:hover {{ opacity: 1; }}
+.listen-time-row {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.75rem;
+}}
+.listen-scrub {{
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #ddd);
+  overflow: hidden;
+}}
+.listen-scrub > span {{
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--accent, #6366f1);
+  transition: width 0.2s linear;
+}}
+.listen-transport {{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}}
+.listen-transport button {{
+  min-width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg, #fff);
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  touch-action: manipulation;
+}}
+.listen-transport button:hover:not(:disabled) {{
+  border-color: var(--accent, #6366f1);
+}}
+.listen-transport button:disabled {{
+  opacity: 0.4;
+  cursor: not-allowed;
+}}
+.listen-transport button.primary {{
+  background: var(--accent, #6366f1);
+  border-color: var(--accent, #6366f1);
+  color: #fff;
+  min-width: 3rem;
+  height: 3rem;
+}}
+.listen-segments {{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  max-height: 12rem;
+  border-top: 1px solid var(--border, #e5e5e5);
+  padding-top: 0.45rem;
+  -webkit-overflow-scrolling: touch;
+}}
+.listen-segments li {{
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.5rem;
+  padding: 0.5rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+}}
+.listen-segments li:hover {{ background: var(--bg-muted, rgba(0,0,0,0.04)); }}
+.listen-segments li.active {{
+  background: color-mix(in srgb, var(--accent, #6366f1) 14%, transparent);
+}}
+.listen-seg-label {{
+  font-weight: 600;
+  font-size: 0.74rem;
+}}
+.listen-seg-meta {{
+  opacity: 0.65;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, Consolas, monospace;
+}}
+.listen-seg-preview {{
+  grid-column: 1 / -1;
+  opacity: 0.7;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}}
+/* Portrait / narrow phones: full-width bottom dock */
+@media (max-width: 640px), ((orientation: portrait) and (max-width: 920px)) {{
+  .listen-modal-backdrop {{
+    left: 0.65rem;
+    right: 0.65rem;
+    bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }}
+  .listen-modal {{
+    width: 100%;
+    max-height: min(52vh, 420px);
+    border-radius: 16px 16px 12px 12px;
+    padding: 0.9rem 0.85rem calc(0.85rem + env(safe-area-inset-bottom, 0px));
+    font-size: 0.82rem;
+  }}
+  .listen-modal-title {{ font-size: 0.95rem; }}
+  .listen-modal-sub {{ font-size: 0.75rem; }}
+  .listen-transport {{ gap: 0.75rem; }}
+  .listen-transport button {{
+    min-width: 3rem;
+    height: 3rem;
+  }}
+  .listen-transport button.primary {{
+    min-width: 3.4rem;
+    height: 3.4rem;
+  }}
+  .listen-segments {{ max-height: 9.5rem; }}
+  .listen-segments li {{ padding: 0.55rem 0.5rem; }}
+  .toolbar {{
+    top: max(0.5rem, env(safe-area-inset-top, 0px));
+    right: 0.5rem;
+  }}
+}}
+.toolbar button.loading {{ opacity: 0.65; pointer-events: none; }}
+.toolbar button.playing {{ border-color: var(--accent, #6366f1); }}
 .dropdown {{ position: relative; }}
 .dropdown-menu {{
   display: none;
@@ -447,34 +644,65 @@ body::after {{
   margin-bottom: 1.4rem;
   font-family: var(--font-body);
 }}
-.hero h1 {{
+.hero-rq {{
   position: relative;
-  font-family: var(--font-display);
-  font-size: clamp(2rem, 4.5vw, 3rem);
-  font-weight: 600;
-  font-variation-settings: 'opsz' 120, 'SOFT' 50;
-  line-height: 1.15;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.55;
   max-width: 720px;
-  margin: 0 auto;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  margin: 1.25rem auto 0;
+  padding: 0 0.5rem;
+  color: var(--text-muted, color-mix(in srgb, var(--text) 72%, transparent));
+  word-break: break-word;
+  text-align: left;
+}}
+.hero-rq-label {{
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.9;
+  margin-right: 0.35rem;
 }}
 
 /* ── Hero image ───────────────────────────────────── */
 .hero-image {{
-  max-width: var(--max-w);
-  margin: -2rem auto 0;
+  max-width: min(1020px, calc(100% - 2rem));
+  margin: 0.75rem auto 0;
   position: relative;
   z-index: 1;
-  padding: 0 2rem;
+  padding: 0;
+}}
+.hero-image-placeholder {{
+  padding: 0;
+}}
+.hero-placeholder {{
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  min-height: 280px;
+  max-height: 440px;
+  border-radius: var(--radius);
+  /* Split-complementary gradient: blue, orange, red-orange */
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 50%),
+    linear-gradient(135deg, #1d3557 0%, #f4a261 50%, #e76f51 100%);
+  box-shadow: var(--shadow-sm);
 }}
 .hero-image img {{
   width: 100%;
-  max-height: 360px;
+  aspect-ratio: 21 / 9;
+  min-height: 280px;
+  max-height: 440px;
   object-fit: cover;
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   display: block;
+}}
+@media (max-width: 640px) {{
+  .hero-placeholder,
+  .hero-image img {{
+    aspect-ratio: 16 / 9;
+    min-height: 200px;
+    max-height: 320px;
+  }}
 }}
 
 /* ── Section images ───────────────────────────────── */
@@ -510,7 +738,7 @@ body::after {{
   z-index: 2;
   padding: 0;
 }}
-.hero-image .img-hide-btn {{ top: 14px; right: 2.5rem; }}
+.hero-image .img-hide-btn {{ top: 14px; right: 14px; }}
 /* Reroll sits just to the left of the hide button. */
 .img-reroll-btn {{
   position: absolute;
@@ -527,7 +755,7 @@ body::after {{
   z-index: 2;
   padding: 0;
 }}
-.hero-image .img-reroll-btn {{ top: 14px; right: calc(2.5rem + 36px); }}
+.hero-image .img-reroll-btn {{ top: 14px; right: calc(14px + 36px); }}
 .section-image:hover .img-hide-btn,
 .section-image:hover .img-reroll-btn,
 .hero-image:hover .img-hide-btn,
@@ -811,7 +1039,7 @@ body::after {{
 
 /* ── Print ─────────────────────────────────────────── */
 @media print {{
-  .toc-sidebar, .toolbar {{ display: none !important; }}
+  .toc-sidebar, .toolbar, .listen-modal-backdrop {{ display: none !important; }}
   .layout {{ grid-template-columns: 1fr; }}
   .hero {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
 }}
@@ -820,9 +1048,13 @@ body::after {{
 </head>
 <body class="{body_class}">
 
-<!-- Toolbar: Export + Restore hidden images -->
+<!-- Toolbar: Listen + Export + Restore hidden images -->
 <div class="toolbar">
   {restore_btn_html}
+  <button id="btn-listen" type="button" title="Listen to audio brief">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+    Listen
+  </button>
   <div class="dropdown">
     <button id="btn-export" title="Export">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -830,17 +1062,46 @@ body::after {{
     </button>
     <div class="dropdown-menu" id="export-menu">
       <button id="btn-pdf">Save as PDF</button>
+      <button id="btn-md">Download Markdown</button>
       <button id="btn-html">Download HTML</button>
     </div>
+  </div>
+</div>
+<div id="listen-modal-backdrop" class="listen-modal-backdrop hidden" role="dialog" aria-modal="false" aria-labelledby="listen-modal-title">
+  <div class="listen-modal" id="listen-modal">
+    <div class="listen-modal-head">
+      <div>
+        <div class="listen-modal-title" id="listen-modal-title">Audio brief</div>
+        <div class="listen-modal-sub" id="listen-modal-sub">Preparing…</div>
+      </div>
+      <button type="button" class="listen-modal-close" id="listen-modal-close" title="Close player" aria-label="Close player">&times;</button>
+    </div>
+    <div class="listen-time-row">
+      <span id="listen-elapsed">0:00</span>
+      <span id="listen-status-label">Idle</span>
+      <span id="listen-total">0:00</span>
+    </div>
+    <div class="listen-scrub" aria-hidden="true"><span id="listen-scrub-fill"></span></div>
+    <div class="listen-transport" role="group" aria-label="Playback controls">
+      <button type="button" id="listen-btn-stop" title="Stop" aria-label="Stop" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+      </button>
+      <button type="button" id="listen-btn-play" class="primary" title="Play" aria-label="Play" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button type="button" id="listen-btn-pause" title="Pause" aria-label="Pause" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+      </button>
+    </div>
+    <ul class="listen-segments" id="listen-segments" aria-label="Segments by duration"></ul>
   </div>
 </div>
 
 <div class="hero">
   <div class="hero-label">Odysseus &mdash; Deep Research Report</div>
-  <h1>{question_html}</h1>
+  {hero_image_html}
+  <p class="hero-rq"><span class="hero-rq-label">RQ:</span> {rq_html}</p>
 </div>
-
-{hero_image_html}
 
 <div class="stats-bar">
   {stats_html}
@@ -878,6 +1139,11 @@ body::after {{
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     var menu = document.getElementById('export-menu');
     if (menu && menu.classList.contains('open')) {{ menu.classList.remove('open'); return; }}
+    var listenBackdrop = document.getElementById('listen-modal-backdrop');
+    if (listenBackdrop && !listenBackdrop.classList.contains('hidden')) {{
+      if (typeof __listenCloseModal === 'function') __listenCloseModal();
+      return;
+    }}
     try {{ window.close(); }} catch (err) {{}}
     // window.close() is a no-op when the tab wasn't script-opened; in that
     // case fall back to navigation so the key isn't ignored.
@@ -899,6 +1165,17 @@ body::after {{
     window.print();
   }});
 
+  // Download Markdown
+  var exportMarkdown = {export_markdown_js};
+  document.getElementById('btn-md').addEventListener('click', function() {{
+    exportMenu.classList.remove('open');
+    var blob = new Blob([exportMarkdown], {{ type: 'text/markdown' }});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = document.title.replace(/[^a-z0-9]+/gi, '-').substring(0, 60) + '.md';
+    a.click();
+  }});
+
   // Download HTML
   document.getElementById('btn-html').addEventListener('click', function() {{
     exportMenu.classList.remove('open');
@@ -909,13 +1186,592 @@ body::after {{
     a.click();
   }});
 
+  // ── Audio brief listen (transport modal) ───────────────────────────
+  // State machine mirrors synth-wav-studio playback handoff:
+  // IDLE → PLAYING ↔ PAUSED → STOPPED / IDLE
+  var __sessionId = {session_id_js};
+  var listenBtn = document.getElementById('btn-listen');
+  var listenBackdrop = document.getElementById('listen-modal-backdrop');
+  var listenModal = document.getElementById('listen-modal');
+  var listenSub = document.getElementById('listen-modal-sub');
+  var listenElapsedEl = document.getElementById('listen-elapsed');
+  var listenTotalEl = document.getElementById('listen-total');
+  var listenStatusEl = document.getElementById('listen-status-label');
+  var listenScrubFill = document.getElementById('listen-scrub-fill');
+  var listenSegList = document.getElementById('listen-segments');
+  var listenBtnPlay = document.getElementById('listen-btn-play');
+  var listenBtnPause = document.getElementById('listen-btn-pause');
+  var listenBtnStop = document.getElementById('listen-btn-stop');
+  var listenBtnClose = document.getElementById('listen-modal-close');
+  var listenIconDefault = listenBtn ? listenBtn.innerHTML : '';
+  var listenIconLoad = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg> Preparing…';
+  var LS = {{ IDLE: 'IDLE', PLAYING: 'PLAYING', PAUSED: 'PAUSED', STOPPED: 'STOPPED' }};
+  var __listen = {{
+    state: LS.IDLE,
+    mode: null,
+    segments: [],
+    segIdx: 0,
+    totalSec: 0,
+    elapsedSec: 0,
+    tickTimer: null,
+    audio: null,
+    objectUrl: null,
+    prepared: false
+  }};
+
+  function __listenToast(msg) {{
+    if (!listenBtn) return;
+    var t = listenBtn.querySelector('.toast');
+    if (!t) {{
+      t = document.createElement('span');
+      t.className = 'toast';
+      listenBtn.appendChild(t);
+    }}
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function() {{ t.classList.remove('show'); }}, 3200);
+  }}
+
+  function __fmtTime(sec) {{
+    sec = Math.max(0, Math.round(sec || 0));
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }}
+
+  function __estimateSec(text) {{
+    var words = String(text || '').trim().split(/\\s+/).filter(Boolean).length;
+    return Math.max(2, words / 2.5);
+  }}
+
+  function __parseScriptSegments(script) {{
+    var lines = String(script || '').split(/\\n+/);
+    var segs = [];
+    var cur = null;
+    for (var i = 0; i < lines.length; i++) {{
+      var line = lines[i].trim();
+      if (!line) continue;
+      var m = line.match(/^(HOST|ANALYST)\\s*:\\s*(.*)$/i);
+      if (m) {{
+        if (cur) segs.push(cur);
+        cur = {{ label: m[1].toUpperCase() === 'HOST' ? 'Host' : 'Analyst', text: m[2], startSec: 0, durationSec: 0 }};
+      }} else if (cur) {{
+        cur.text += ' ' + line;
+      }} else {{
+        cur = {{ label: 'Brief', text: line, startSec: 0, durationSec: 0 }};
+      }}
+    }}
+    if (cur) segs.push(cur);
+    if (!segs.length && String(script || '').trim()) {{
+      var words = String(script).trim().split(/\\s+/);
+      var chunkSize = Math.max(40, Math.ceil(words.length / 4));
+      for (var c = 0, n = 1; c < words.length; c += chunkSize, n++) {{
+        segs.push({{
+          label: 'Part ' + n,
+          text: words.slice(c, c + chunkSize).join(' '),
+          startSec: 0,
+          durationSec: 0
+        }});
+      }}
+    }}
+    var t = 0;
+    segs.forEach(function(s) {{
+      s.durationSec = __estimateSec(s.text);
+      s.startSec = t;
+      t += s.durationSec;
+    }});
+    return segs;
+  }}
+
+  function __setListenState(next) {{
+    __listen.state = next;
+    if (listenStatusEl) listenStatusEl.textContent = next.charAt(0) + next.slice(1).toLowerCase();
+    var playing = next === LS.PLAYING;
+    var paused = next === LS.PAUSED;
+    if (listenBtnPlay) listenBtnPlay.disabled = !__listen.prepared || playing;
+    if (listenBtnPause) listenBtnPause.disabled = !playing;
+    if (listenBtnStop) listenBtnStop.disabled = !(playing || paused);
+    if (listenBtn) {{
+      listenBtn.classList.toggle('playing', playing || paused);
+      if (!listenBtn.classList.contains('loading')) {{
+        listenBtn.innerHTML = listenIconDefault;
+      }}
+    }}
+  }}
+
+  function __updateListenClock() {{
+    if (listenElapsedEl) listenElapsedEl.textContent = __fmtTime(__listen.elapsedSec);
+    if (listenTotalEl) listenTotalEl.textContent = __fmtTime(__listen.totalSec);
+    var pct = __listen.totalSec > 0 ? Math.min(100, (__listen.elapsedSec / __listen.totalSec) * 100) : 0;
+    if (listenScrubFill) listenScrubFill.style.width = pct + '%';
+    if (listenSegList) {{
+      var items = listenSegList.querySelectorAll('li');
+      for (var i = 0; i < items.length; i++) {{
+        items[i].classList.toggle('active', i === __listen.segIdx);
+      }}
+    }}
+  }}
+
+  function __renderSegments() {{
+    if (!listenSegList) return;
+    listenSegList.innerHTML = '';
+    __listen.segments.forEach(function(seg, idx) {{
+      var li = document.createElement('li');
+      li.setAttribute('role', 'button');
+      li.tabIndex = 0;
+      li.dataset.idx = String(idx);
+      li.innerHTML =
+        '<span class="listen-seg-label">' + seg.label + '</span>' +
+        '<span class="listen-seg-meta">' + __fmtTime(seg.startSec) + ' · ' + __fmtTime(seg.durationSec) + '</span>' +
+        '<span class="listen-seg-preview"></span>';
+      li.querySelector('.listen-seg-preview').textContent = seg.text || ('Audio part ' + (idx + 1));
+      li.addEventListener('click', function() {{ __listenJumpTo(idx); }});
+      li.addEventListener('keydown', function(e) {{
+        if (e.key === 'Enter' || e.key === ' ') {{ e.preventDefault(); __listenJumpTo(idx); }}
+      }});
+      listenSegList.appendChild(li);
+    }});
+    __updateListenClock();
+  }}
+
+  function __clearListenTick() {{
+    if (__listen.tickTimer) {{ clearInterval(__listen.tickTimer); __listen.tickTimer = null; }}
+  }}
+
+  function __startListenTick() {{
+    __clearListenTick();
+    __listen.tickTimer = setInterval(function() {{
+      if (__listen.state !== LS.PLAYING) return;
+      if (__listen.mode === 'chunks' && __listen.audio && !isNaN(__listen.audio.currentTime)) {{
+        var base = (__listen.segments[__listen.segIdx] && __listen.segments[__listen.segIdx].startSec) || 0;
+        __listen.elapsedSec = base + __listen.audio.currentTime;
+      }} else {{
+        __listen.elapsedSec = Math.min(__listen.totalSec, __listen.elapsedSec + 0.25);
+        var seg = __listen.segments[__listen.segIdx];
+        if (seg && __listen.elapsedSec >= seg.startSec + seg.durationSec && __listen.segIdx < __listen.segments.length - 1) {{
+          // keep segIdx in sync for TTS estimate clock
+        }}
+      }}
+      __updateListenClock();
+    }}, 250);
+  }}
+
+  function __revokeAudio() {{
+    if (__listen.audio) {{
+      try {{ __listen.audio.pause(); }} catch (e) {{}}
+      __listen.audio = null;
+    }}
+    if (__listen.objectUrl) {{
+      try {{ URL.revokeObjectURL(__listen.objectUrl); }} catch (e2) {{}}
+      __listen.objectUrl = null;
+    }}
+  }}
+
+  function __hardStopMedia() {{
+    __clearListenTick();
+    __revokeAudio();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+  }}
+
+  function __listenCloseModal() {{
+    __hardStopMedia();
+    __listen.elapsedSec = 0;
+    __listen.segIdx = 0;
+    __setListenState(LS.IDLE);
+    __updateListenClock();
+    if (listenBackdrop) listenBackdrop.classList.add('hidden');
+    document.body.classList.remove('listen-dock-open');
+    if (listenBtn) {{
+      listenBtn.classList.remove('loading', 'playing');
+      listenBtn.innerHTML = listenIconDefault;
+    }}
+  }}
+
+  function __openListenModal() {{
+    if (listenBackdrop) listenBackdrop.classList.remove('hidden');
+    document.body.classList.add('listen-dock-open');
+  }}
+
+  function __fetchBriefStatus() {{
+    if (!__sessionId) return Promise.reject(new Error('No session'));
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/status', {{
+      credentials: 'same-origin'
+    }}).then(function(r) {{ return r.ok ? r.json() : r.json().then(function(j) {{ throw new Error(j.detail || 'status failed'); }}); }});
+  }}
+
+  function __fetchTranscript() {{
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/transcript', {{
+      credentials: 'same-origin'
+    }}).then(function(r) {{ return r.ok ? r.json() : Promise.reject(new Error('transcript failed')); }});
+  }}
+
+  function __waitForBriefReady(maxMs) {{
+    var started = Date.now();
+    return new Promise(function(resolve, reject) {{
+      function tick() {{
+        __fetchBriefStatus().then(function(st) {{
+          if (st.status === 'ready' || st.status === 'skipped') {{ resolve(st); return; }}
+          if (st.status === 'failed') {{
+            __fetchTranscript().then(function(t) {{
+              if ((t.script || '').trim()) {{
+                resolve(Object.assign({{}}, st, {{ status: 'skipped' }}));
+                return;
+              }}
+              reject(new Error(st.error || 'Audio brief failed'));
+            }}).catch(reject);
+            return;
+          }}
+          if (Date.now() - started > maxMs) {{ reject(new Error('Timed out waiting for audio brief')); return; }}
+          setTimeout(tick, 2000);
+        }}).catch(reject);
+      }}
+      tick();
+    }});
+  }}
+
+  function __speakSegment(idx) {{
+    return new Promise(function(resolve, reject) {{
+      if (!window.speechSynthesis) {{ reject(new Error('Browser speech not available')); return; }}
+      if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
+      var seg = __listen.segments[idx];
+      if (!seg) {{ resolve(); return; }}
+      __listen.segIdx = idx;
+      __listen.elapsedSec = seg.startSec;
+      __updateListenClock();
+      var u = new SpeechSynthesisUtterance(seg.text);
+      u.onend = function() {{ resolve(); }};
+      u.onerror = function(e) {{
+        if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
+        reject(new Error(e.error || 'speech error'));
+      }};
+      window.speechSynthesis.speak(u);
+    }});
+  }}
+
+  function __playTtsFrom(idx) {{
+    __listen.mode = 'tts';
+    __setListenState(LS.PLAYING);
+    __startListenTick();
+    var chain = Promise.resolve();
+    for (var i = idx; i < __listen.segments.length; i++) {{
+      (function(segIndex) {{
+        chain = chain.then(function() {{
+          if (__listen.state !== LS.PLAYING) return;
+          return __speakSegment(segIndex);
+        }});
+      }})(i);
+    }}
+    return chain.then(function() {{
+      if (__listen.state === LS.PLAYING) {{
+        __listen.elapsedSec = __listen.totalSec;
+        __updateListenClock();
+        __setListenState(LS.STOPPED);
+        __clearListenTick();
+      }}
+    }});
+  }}
+
+  function __playChunk(index) {{
+    return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/chunk/' + index, {{
+      credentials: 'same-origin'
+    }}).then(function(r) {{
+      if (!r.ok) throw new Error('Chunk ' + index + ' unavailable');
+      return r.blob();
+    }}).then(function(blob) {{
+      if (__listen.state !== LS.PLAYING) return;
+      return new Promise(function(resolve, reject) {{
+        __revokeAudio();
+        var url = URL.createObjectURL(blob);
+        var audio = new Audio(url);
+        __listen.objectUrl = url;
+        __listen.audio = audio;
+        __listen.segIdx = index;
+        __updateListenClock();
+        audio.onloadedmetadata = function() {{
+          if (__listen.segments[index] && isFinite(audio.duration) && audio.duration > 0) {{
+            var oldDur = __listen.segments[index].durationSec;
+            __listen.segments[index].durationSec = audio.duration;
+            __listen.totalSec = __listen.totalSec - oldDur + audio.duration;
+            var t = 0;
+            __listen.segments.forEach(function(s) {{ s.startSec = t; t += s.durationSec; }});
+            __renderSegments();
+          }}
+        }};
+        audio.ontimeupdate = function() {{
+          var base = (__listen.segments[index] && __listen.segments[index].startSec) || 0;
+          __listen.elapsedSec = base + (audio.currentTime || 0);
+          __updateListenClock();
+        }};
+        audio.onended = function() {{ resolve(); }};
+        audio.onerror = function() {{ reject(new Error('Playback error')); }};
+        audio.play().catch(reject);
+      }});
+    }});
+  }}
+
+  function __playChunksFrom(idx) {{
+    __listen.mode = 'chunks';
+    __setListenState(LS.PLAYING);
+    __startListenTick();
+    var chain = Promise.resolve();
+    for (var i = idx; i < __listen.segments.length; i++) {{
+      (function(segIndex) {{
+        chain = chain.then(function() {{
+          if (__listen.state !== LS.PLAYING) return;
+          return __playChunk(segIndex);
+        }});
+      }})(i);
+    }}
+    return chain.then(function() {{
+      if (__listen.state === LS.PLAYING) {{
+        __listen.elapsedSec = __listen.totalSec;
+        __updateListenClock();
+        __setListenState(LS.STOPPED);
+        __clearListenTick();
+      }}
+    }});
+  }}
+
+  function __listenPlay() {{
+    if (!__listen.prepared) return;
+    if (__listen.state === LS.PAUSED) {{
+      if (__listen.mode === 'tts' && window.speechSynthesis) {{
+        window.speechSynthesis.resume();
+        __setListenState(LS.PLAYING);
+        __startListenTick();
+        return;
+      }}
+      if (__listen.mode === 'chunks' && __listen.audio) {{
+        __listen.audio.play().then(function() {{
+          __setListenState(LS.PLAYING);
+          __startListenTick();
+        }}).catch(function(err) {{ __listenToast(err.message || 'Resume failed'); }});
+        return;
+      }}
+    }}
+    var startIdx = (__listen.state === LS.STOPPED) ? 0 : __listen.segIdx;
+    if (__listen.state === LS.STOPPED) {{
+      __listen.elapsedSec = 0;
+      __listen.segIdx = 0;
+      startIdx = 0;
+    }}
+    var p = __listen.mode === 'chunks' ? __playChunksFrom(startIdx) : __playTtsFrom(startIdx);
+    p.catch(function(err) {{
+      console.warn('Listen play failed', err);
+      __listenToast(err.message || 'Playback failed');
+      __setListenState(LS.STOPPED);
+      __hardStopMedia();
+    }});
+  }}
+
+  function __listenPause() {{
+    if (__listen.state !== LS.PLAYING) return;
+    if (__listen.mode === 'tts' && window.speechSynthesis) {{
+      window.speechSynthesis.pause();
+    }} else if (__listen.audio) {{
+      try {{ __listen.audio.pause(); }} catch (e) {{}}
+    }}
+    __clearListenTick();
+    __setListenState(LS.PAUSED);
+  }}
+
+  function __listenStopTransport() {{
+    __hardStopMedia();
+    __listen.elapsedSec = 0;
+    __listen.segIdx = 0;
+    __setListenState(LS.STOPPED);
+    __updateListenClock();
+  }}
+
+  function __listenJumpTo(idx) {{
+    if (!__listen.prepared || idx < 0 || idx >= __listen.segments.length) return;
+    __hardStopMedia();
+    __listen.segIdx = idx;
+    __listen.elapsedSec = __listen.segments[idx].startSec;
+    __updateListenClock();
+    __setListenState(LS.STOPPED);
+    __listenPlay();
+  }}
+
+  function __prepareFromTranscript(script, subLabel) {{
+    __listen.segments = __parseScriptSegments(script);
+    __listen.totalSec = __listen.segments.reduce(function(sum, s) {{ return sum + s.durationSec; }}, 0);
+    __listen.segIdx = 0;
+    __listen.elapsedSec = 0;
+    __listen.mode = 'tts';
+    __listen.prepared = true;
+    if (listenSub) listenSub.textContent = (subLabel || 'Browser voice') + ' · ' + __listen.segments.length + ' segments · ~' + __fmtTime(__listen.totalSec);
+    __renderSegments();
+    __setListenState(LS.STOPPED);
+  }}
+
+  function __prepareFromChunks(count) {{
+    var segs = [];
+    var est = 45;
+    for (var i = 0; i < count; i++) {{
+      segs.push({{
+        label: 'Part ' + (i + 1),
+        text: 'Server audio chunk ' + (i + 1) + ' of ' + count,
+        startSec: i * est,
+        durationSec: est,
+        chunkIndex: i
+      }});
+    }}
+    __listen.segments = segs;
+    __listen.totalSec = count * est;
+    __listen.segIdx = 0;
+    __listen.elapsedSec = 0;
+    __listen.mode = 'chunks';
+    __listen.prepared = true;
+    if (listenSub) listenSub.textContent = 'Server audio · ' + count + ' parts · ~' + __fmtTime(__listen.totalSec) + ' (refines on play)';
+    __renderSegments();
+    __setListenState(LS.STOPPED);
+  }}
+
+  function __openAndPrepare() {{
+    if (!__sessionId || !listenBtn) {{
+      __listenToast('Audio unavailable for saved HTML');
+      return;
+    }}
+    __openListenModal();
+    listenBtn.classList.add('loading');
+    listenBtn.innerHTML = listenIconLoad;
+    if (listenSub) listenSub.textContent = 'Loading audio brief…';
+    __fetchBriefStatus().then(function(st) {{
+      if (st.status === 'generating' || st.status === 'pending') {{
+        if (listenSub) listenSub.textContent = 'Generating audio brief…';
+        return __waitForBriefReady(180000);
+      }}
+      return st;
+    }}).then(function(st) {{
+      listenBtn.classList.remove('loading');
+      listenBtn.innerHTML = listenIconDefault;
+      if (st.status === 'skipped') {{
+        return __fetchTranscript().then(function(t) {{
+          var script = (t.script || '').trim();
+          if (!script) throw new Error(st.error || 'No transcript');
+          __prepareFromTranscript(script, 'Browser voice');
+        }});
+      }}
+      if (st.status === 'failed') {{
+        return __fetchTranscript().then(function(t) {{
+          var script = (t.script || '').trim();
+          if (!script) throw new Error(st.error || 'Audio brief failed');
+          __prepareFromTranscript(script, 'Browser voice');
+        }});
+      }}
+      if (st.status === 'ready' && st.chunk_count) {{
+        __prepareFromChunks(st.chunk_count);
+        return __fetchTranscript().then(function(t) {{
+          var script = (t.script || '').trim();
+          if (script) {{
+            var labeled = __parseScriptSegments(script);
+            if (labeled.length) {{
+              if (listenSub) listenSub.textContent = 'Server audio · ' + st.chunk_count + ' parts · transcript available';
+            }}
+          }}
+        }}).catch(function() {{ /* transcript optional for ready audio */ }});
+      }}
+      throw new Error(st.error || 'Audio brief not ready');
+    }}).catch(function(err) {{
+      console.warn('Listen prepare failed', err);
+      listenBtn.classList.remove('loading');
+      listenBtn.innerHTML = listenIconDefault;
+      __listenToast(err.message || 'Listen failed');
+      if (listenSub) listenSub.textContent = err.message || 'Failed to load';
+    }});
+  }}
+
+  if (listenBtn) {{
+    listenBtn.addEventListener('click', function(e) {{
+      e.stopPropagation();
+      var wasOpen = !!(listenBackdrop && !listenBackdrop.classList.contains('hidden'));
+      // Floating dock: do not toggle-close from toolbar (close via X / Esc only)
+      if (wasOpen) {{
+        if (!__listen.prepared) __openAndPrepare();
+        return;
+      }}
+      __openAndPrepare();
+    }});
+  }}
+  if (listenBtnPlay) listenBtnPlay.addEventListener('click', function(e) {{ e.stopPropagation(); __listenPlay(); }});
+  if (listenBtnPause) listenBtnPause.addEventListener('click', function(e) {{ e.stopPropagation(); __listenPause(); }});
+  if (listenBtnStop) listenBtnStop.addEventListener('click', function(e) {{ e.stopPropagation(); __listenStopTransport(); }});
+  if (listenBtnClose) listenBtnClose.addEventListener('click', function(e) {{ e.stopPropagation(); __listenCloseModal(); }});
+  // No outside-click dismiss — dock floats while scrolling; close only via X / Esc
+  if (listenModal) listenModal.addEventListener('click', function(e) {{ e.stopPropagation(); }});
+
   // Per-image hide — fades the image out, then POSTs to the backend so
   // future renders of this report skip the URL. Falls back to a silent
   // no-op if there's no session_id (e.g. the report was opened from a
   // saved-HTML download where the backend isn't reachable).
-  var __sessionId = {session_id_js};
   // Unused scraped images — the reroll pool. Each is used at most once.
   var __spareImages = {spare_images_js};
+  var __heroImageStatus = {hero_image_status_js};
+  var __heroImageIsAi = {hero_image_is_ai_js} === 1;
+
+  // When hero generation is still running, poll and reload once ready.
+  if (__sessionId && __heroImageStatus === 'pending' && !__heroImageIsAi) {{
+    (function __pollHeroImage() {{
+      var started = Date.now();
+      function tick() {{
+        if (Date.now() - started > 180000) return;
+        fetch('/api/research/' + encodeURIComponent(__sessionId) + '/hero-image/status', {{
+          credentials: 'same-origin'
+        }}).then(function(r) {{ return r.ok ? r.json() : null; }})
+          .then(function(st) {{
+            if (!st) {{ setTimeout(tick, 3000); return; }}
+            if (st.status === 'done' && st.url) {{ window.location.reload(); return; }}
+            if (st.status === 'error' || st.status === 'skipped') return;
+            setTimeout(tick, 3000);
+          }}).catch(function() {{ setTimeout(tick, 5000); }});
+      }}
+      setTimeout(tick, 3000);
+    }})();
+  }}
+
+  function __regenerateHeroImage(btn) {{
+    if (!__sessionId || !btn) return;
+    btn.dataset._busy = '1';
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    fetch('/api/research/' + encodeURIComponent(__sessionId) + '/regenerate-hero', {{
+      method: 'POST',
+      credentials: 'same-origin',
+    }}).then(function(r) {{
+      if (!r.ok) throw new Error('Regenerate failed');
+      return r.json();
+    }}).then(function() {{
+      var started = Date.now();
+      function poll() {{
+        if (Date.now() - started > 180000) {{
+          btn.classList.remove('spinning');
+          btn.disabled = false;
+          delete btn.dataset._busy;
+          return;
+        }}
+        fetch('/api/research/' + encodeURIComponent(__sessionId) + '/hero-image/status', {{
+          credentials: 'same-origin'
+        }}).then(function(r) {{ return r.ok ? r.json() : null; }})
+          .then(function(st) {{
+            if (st && st.status === 'done' && st.url) {{ window.location.reload(); return; }}
+            if (st && (st.status === 'error' || st.status === 'skipped')) {{
+              btn.classList.remove('spinning');
+              btn.disabled = false;
+              delete btn.dataset._busy;
+              return;
+            }}
+            setTimeout(poll, 3000);
+          }}).catch(function() {{ setTimeout(poll, 5000); }});
+      }}
+      setTimeout(poll, 2000);
+    }}).catch(function(err) {{
+      console.warn('regenerate-hero failed', err);
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+      delete btn.dataset._busy;
+    }});
+  }}
 
   // Persist a rejected URL so future renders skip it.
   function __persistHide(url) {{
@@ -947,11 +1803,16 @@ body::after {{
     }});
   }});
 
-  // Reroll — swap the current image for the next unused scraped one, and
-  // persist-hide the rejected URL so it won't resurface on reload.
+  // Reroll — AI hero images regenerate via the backend; OG heroes swap
+  // from the spare scraped pool.
   document.querySelectorAll('.img-reroll-btn').forEach(function(btn) {{
     btn.addEventListener('click', function(e) {{
       e.preventDefault(); e.stopPropagation();
+      var wrap = btn.closest('[data-img-url], .hero-image-ai');
+      if (wrap && wrap.dataset.heroAi === '1') {{
+        __regenerateHeroImage(btn);
+        return;
+      }}
       // Per-button busy flag — a rapid double-click would otherwise both
       // shift the spare pool, but only the second probe's image would land,
       // silently consuming the first one. Bail until finish() clears it.
@@ -1710,6 +2571,67 @@ def _is_icon_or_logo_url(url: str) -> bool:
     return bool(_ICON_LOGO_RE.search(url or ""))
 
 
+_GRADIENT_HERO_HTML = (
+    '<div class="hero-image hero-image-placeholder" aria-hidden="true">'
+    '<div class="hero-placeholder"></div>'
+    '</div>'
+)
+
+
+def _build_hero_image_html(url: str, *, is_ai: bool = False) -> str:
+    """Render hero illustration block with overlay controls."""
+    hero_url = html.escape(url)
+    ai_attr = ' data-hero-ai="1"' if is_ai else ""
+    ai_class = " hero-image-ai" if is_ai else ""
+    return (
+        f'<div class="hero-image{ai_class}" data-img-url="{hero_url}"{ai_attr}>'
+        f'<img src="{hero_url}" alt="" loading="lazy" '
+        f'onerror="this.parentElement.classList.add(\'hero-image-placeholder\');'
+        f'this.remove();">'
+        f'{_IMG_OVERLAY_BTNS}'
+        f'</div>'
+    )
+
+
+def _build_export_markdown(
+    question: str,
+    title: str,
+    report_markdown: str,
+    sources: List[Dict],
+    stats: Dict,
+    timestamp: str,
+) -> str:
+    """Assemble a portable markdown document for client-side download."""
+    lines = [f"# {title}", ""]
+    if question:
+        lines.append(f"> **Research question:** {question}")
+        lines.append("")
+
+    stat_parts = []
+    for key in ["Duration", "Rounds", "Queries", "URLs", "Model", "Search"]:
+        val = stats.get(key)
+        if val is not None:
+            stat_parts.append(f"{key}: {val}")
+    if stat_parts:
+        lines.append(f"*{' · '.join(stat_parts)}*")
+        lines.append("")
+
+    lines.append(f"*Generated by Odysseus Deep Research · {timestamp}*")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(report_markdown.strip())
+
+    if sources:
+        lines.extend(["", "## Sources", ""])
+        for i, s in enumerate(sources, 1):
+            url = s.get("url", "")
+            src_title = s.get("title", "") or url
+            lines.append(f"{i}. [{src_title}]({url})")
+
+    return "\n".join(lines)
+
+
 def generate_visual_report(
     question: str,
     report_markdown: str,
@@ -1718,6 +2640,8 @@ def generate_visual_report(
     category: Optional[str] = None,
     session_id: Optional[str] = None,
     hidden_images: Optional[List[str]] = None,
+    hero_image_url: Optional[str] = None,
+    hero_image_status: Optional[str] = None,
 ) -> str:
     sources = sources or []
     stats = stats or {}
@@ -1762,18 +2686,13 @@ def generate_visual_report(
             _seen_images.add(img)
             all_images.append(img)
 
-    # Hero image = first available. data-img-url drives the per-image hide
-    # button rendered by the script at the bottom of the page.
-    hero_image_html = ""
-    if all_images:
-        hero_url = html.escape(all_images[0])
-        hero_image_html = (
-            f'<div class="hero-image" data-img-url="{hero_url}">'
-            f'<img src="{hero_url}" alt="" loading="lazy" '
-            f'onerror="this.parentElement.style.display=\'none\'">'
-            f'{_IMG_OVERLAY_BTNS}'
-            f'</div>'
-        )
+    # Hero image: show AI-generated art when ready; otherwise use the
+    # complementary gradient placeholder until image gen is configured.
+    ai_hero = bool(hero_image_url)
+    if hero_image_url:
+        hero_image_html = _build_hero_image_html(hero_image_url, is_ai=True)
+    else:
+        hero_image_html = _GRADIENT_HERO_HTML
 
     # Product quick-links bar
     if category == "product" and headings:
@@ -1785,10 +2704,8 @@ def generate_visual_report(
             )
             report_html = f'<div class="quick-links-bar">{pills}</div>\n' + report_html
 
-    # Inject remaining images between sections. Whatever isn't placed (hero
-    # took [0], sections took the next `consumed`) becomes the spare pool the
-    # reroll button draws from to swap out an irrelevant image in-page.
-    section_pool = all_images[1:]
+    # Hero uses gradient or AI — all scraped OGs remain for section figures.
+    section_pool = list(all_images)
     report_html, _consumed = _inject_images(report_html, section_pool)
     spare_images = section_pool[_consumed:]
 
@@ -1846,8 +2763,11 @@ def generate_visual_report(
     # Build description for OG/meta tags (first 160 chars of plain text)
     desc_text = re.sub(r'[#*_\[\]()]', '', report_markdown)[:160].strip()
     og_image_meta = ""
-    if all_images:
-        og_image_meta = f'<meta property="og:image" content="{html.escape(all_images[0])}">'
+    og_candidate = hero_image_url if hero_image_url and hero_image_url.startswith("https://") else ""
+    if not og_candidate and all_images:
+        og_candidate = all_images[0]
+    if og_candidate:
+        og_image_meta = f'<meta property="og:image" content="{html.escape(og_candidate)}">'
 
     chat_cta_html = ""
     if session_id:
@@ -1883,11 +2803,20 @@ def generate_visual_report(
             '</button>'
         )
 
+    export_markdown = _build_export_markdown(
+        question=question,
+        title=title_text,
+        report_markdown=report_markdown,
+        sources=sources,
+        stats=stats,
+        timestamp=timestamp,
+    )
+
     return _TEMPLATE.format(
         title=html.escape(title_text),
         description=html.escape(desc_text),
         og_image_meta=og_image_meta,
-        question_html=html.escape(synthesized),
+        rq_html=html.escape(question),
         hero_image_html=hero_image_html,
         stats_html=stats_html,
         toc_html=toc_html,
@@ -1900,6 +2829,9 @@ def generate_visual_report(
         body_class=f"category-{html.escape(str(category))}" if category else "",
         session_id_js=json_dumps_str(session_id or ""),
         spare_images_js=_json_for_script(spare_images),
+        hero_image_status_js=json_dumps_str(hero_image_status or ""),
+        hero_image_is_ai_js="1" if ai_hero else "0",
+        export_markdown_js=json_dumps_str(export_markdown),
     )
 
 

@@ -70,7 +70,9 @@ def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
     matches a sensitive filename — regardless of what root it sits under.
     """
-    parts = resolved.split(os.sep)
+    # Normalize separators so POSIX-style paths (e.g. /home/user/.ssh/...)
+    # are checked correctly on Windows too.
+    parts = [p for p in resolved.replace("\\", "/").split("/") if p]
     filenames: set[str] = {parts[-1]} if parts else set()
 
     # Check if any path component is a sensitive directory.
@@ -84,6 +86,25 @@ def _is_sensitive_path(resolved: str) -> bool:
             return True
 
     return False
+
+
+# Docker bind-mount default; agents and settings often hardcode this even on
+# native installs where DATA_DIR lives elsewhere (e.g. <repo>/data).
+_DOCKER_DATA_PREFIX = "/app/data"
+
+
+def _normalize_data_path(path: str) -> str:
+    """Map ``/app/data/...`` paths to the configured DATA_DIR."""
+    from src.constants import DATA_DIR
+
+    norm = path.replace("\\", "/")
+    if norm == _DOCKER_DATA_PREFIX:
+        return DATA_DIR
+    prefix = _DOCKER_DATA_PREFIX + "/"
+    if norm.startswith(prefix):
+        suffix = norm[len(prefix):]
+        return os.path.join(DATA_DIR, *suffix.split("/")) if suffix else DATA_DIR
+    return path
 
 
 def _tool_path_roots() -> list[str]:
@@ -111,12 +132,16 @@ def _tool_path_roots() -> list[str]:
     if tmpdir:
         roots.append(tmpdir)
 
+    # Platform temp dir (e.g. %TEMP% on Windows, /tmp on Linux).
+    import tempfile
+    roots.append(tempfile.gettempdir())
+
     # Opt-in extra roots from settings.
     try:
         from src.settings import get_setting
         extra = get_setting("tool_path_extra_roots")
         if isinstance(extra, list):
-            roots.extend(str(r) for r in extra if r)
+            roots.extend(_normalize_data_path(str(r)) for r in extra if r)
     except Exception:
         pass
 
@@ -149,7 +174,12 @@ def _resolve_tool_path(raw_path: str) -> str:
     """
     if raw_path is None or not str(raw_path).strip():
         raise ValueError("path is required")
+    from src.constants import DATA_DIR
     expanded = os.path.expanduser(str(raw_path).strip())
+    expanded = _normalize_data_path(expanded)
+    # Anchor relative paths to DATA_DIR (agent workdir), not process CWD.
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(DATA_DIR, expanded)
     resolved = os.path.realpath(expanded)
 
     if _is_sensitive_path(resolved):
@@ -183,8 +213,8 @@ def _resolve_tool_path_in_workspace(workspace: str, raw_path: str) -> str:
     """
     if raw_path is None or not str(raw_path).strip():
         raise ValueError("path is required")
-    base = os.path.realpath(workspace)
-    expanded = os.path.expanduser(str(raw_path).strip())
+    base = os.path.realpath(_normalize_data_path(workspace))
+    expanded = _normalize_data_path(os.path.expanduser(str(raw_path).strip()))
     candidate = expanded if os.path.isabs(expanded) else os.path.join(base, expanded)
     resolved = os.path.realpath(candidate)
     if _is_sensitive_path(resolved):
@@ -450,10 +480,13 @@ async def execute_tool_block(
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
+        do_edit_image, do_trigger_research, do_manage_research, do_transcribe_video,
+        do_screen_look, do_screen_recall, do_spec_trace, do_desktop_act, do_browser_act,
+        do_operator_research,
+        do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
-        do_app_api,
+        do_app_api, do_process_job_application,
     )
 
     tool = block.tool_type
@@ -724,6 +757,9 @@ async def execute_tool_block(
     elif tool == "app_api":
         desc = "app_api"
         result = await do_app_api(content, owner=owner)
+    elif tool == "process_job_application":
+        desc = "process_job_application"
+        result = await do_process_job_application(content, owner=owner)
     elif tool == "list_serve_presets":
         desc = "list_serve_presets"
         result = await do_list_serve_presets(content, owner=owner)
@@ -745,6 +781,32 @@ async def execute_tool_block(
     elif tool == "trigger_research":
         desc = "trigger_research"
         result = await do_trigger_research(content, owner=owner)
+    elif tool == "transcribe_video":
+        first_line = content.split("\n")[0].strip()[:80]
+        desc = f"transcribe_video: {first_line}"
+        result = await do_transcribe_video(content, session_id=session_id, owner=owner)
+    elif tool == "screen_look":
+        desc = "screen_look"
+        result = await do_screen_look(content)
+    elif tool == "screen_recall":
+        first_line = content.split("\n")[0].strip()[:80]
+        desc = f"screen_recall: {first_line}"
+        result = await do_screen_recall(content)
+    elif tool == "spec_trace":
+        desc = "spec_trace"
+        result = await do_spec_trace(content)
+    elif tool == "desktop_act":
+        first_line = content.split("\n")[0].strip()[:80]
+        desc = f"desktop_act: {first_line}"
+        result = await do_desktop_act(content, session_id=session_id)
+    elif tool == "browser_act":
+        first_line = content.split("\n")[0].strip()[:80]
+        desc = f"browser_act: {first_line}"
+        result = await do_browser_act(content, session_id=session_id)
+    elif tool == "operator_research":
+        first_line = content.split("\n")[0].strip()[:80]
+        desc = f"operator_research: {first_line}"
+        result = await do_operator_research(content)
     elif tool == "manage_research":
         desc = "manage_research"
         result = await do_manage_research(content, owner=owner)

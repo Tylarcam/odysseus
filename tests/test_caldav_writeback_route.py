@@ -76,6 +76,7 @@ async def test_create_on_caldav_calendar_pushes_to_remote(calls):
     res = await create_event(_req(), EventCreate(
         summary="Dentist", dtstart="2026-06-10T14:00:00Z", calendar_href=cal_id))
     assert res["ok"] is True
+    assert res.get("writeback", {}).get("ok") is True
     assert len(calls) == 1
     assert calls[0]["source"] == "caldav" and calls[0]["cal_id"] == cal_id
     assert calls[0]["delete"] is False
@@ -87,7 +88,22 @@ async def test_create_on_local_calendar_does_not_push(calls):
     res = await create_event(_req(), EventCreate(
         summary="Local", dtstart="2026-06-10T14:00:00Z", calendar_href=cal_id))
     assert res["ok"] is True
+    assert res.get("writeback", {}).get("skipped") == "not a caldav calendar"
     assert calls == []
+
+
+async def test_update_on_caldav_calendar_pushes_to_remote(calls):
+    create_event = _endpoint("POST", "/events")
+    update_event = _endpoint("PUT", "/events/{uid}")
+    cal_id = _make_cal("caldav")
+    created = await create_event(_req(), EventCreate(
+        summary="Temp", dtstart="2026-06-10T14:00:00Z", calendar_href=cal_id))
+    uid = created["uid"]
+    calls.clear()
+    res = await update_event(_req(), uid, croutes.EventUpdate(summary="Moved"))
+    assert res["ok"] is True
+    assert res.get("writeback", {}).get("ok") is True
+    assert len(calls) == 1 and calls[0]["delete"] is False and calls[0]["uid"] == uid
 
 
 async def test_delete_on_caldav_calendar_pushes_delete(calls):
@@ -100,4 +116,19 @@ async def test_delete_on_caldav_calendar_pushes_delete(calls):
     calls.clear()
     rd = await delete_event(_req(), uid)
     assert rd["ok"] is True
+    assert rd.get("writeback", {}).get("ok") is True
     assert len(calls) == 1 and calls[0]["delete"] is True and calls[0]["uid"] == uid
+
+
+async def test_ensure_default_calendar_prefers_caldav():
+    owner = "default-pref-test"
+    db = _TS()
+    try:
+        db.add(CalendarCal(id="loc-pref", owner=owner, name="Personal", source="local"))
+        db.add(CalendarCal(id="caldav-pref", owner=owner, name="Stanford", source="caldav"))
+        db.commit()
+        chosen = croutes._ensure_default_calendar(db, owner)
+        assert chosen.source == "caldav"
+        assert chosen.id == "caldav-pref"
+    finally:
+        db.close()

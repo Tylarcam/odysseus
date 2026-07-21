@@ -1,7 +1,8 @@
 # src/tts_service.py
-"""Multi-provider TTS service — dispatches to local Kokoro, OpenAI-compatible API, or browser."""
+"""Multi-provider TTS service — dispatches to local Kokoro, OpenAI-compatible API, Voice.ai, or browser."""
 
 import io
+import os
 import wave
 import logging
 import hashlib
@@ -12,6 +13,9 @@ from typing import Optional, Dict, Any
 from src.constants import TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
+
+VOICEAI_TTS_URL = "https://dev.voice.ai/api/v1/tts/speech"
+VOICEAI_DEFAULT_MODEL = "voiceai-tts-v1-latest"
 
 
 def _safe_speed(value, default: float = 1.0) -> float:
@@ -34,6 +38,7 @@ class TTSService:
       "disabled"        — no TTS
       "browser"         — client-side Web Speech API (no server synthesis)
       "local"           — Kokoro-82M on GPU
+      "voiceai"         — Voice.ai hosted TTS (VOICEAI_API_KEY)
       "endpoint:<id>"   — OpenAI-compatible /audio/speech via ModelEndpoint
     """
 
@@ -41,6 +46,7 @@ class TTSService:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._kokoro = None  # lazy-init
+        self.last_error: Optional[str] = None
 
     # ── Settings ──
 
@@ -55,6 +61,14 @@ class TTSService:
             "tts_speed": saved.get("tts_speed", "1"),
         }
 
+    @staticmethod
+    def _voiceai_api_key() -> str:
+        return (os.environ.get("VOICEAI_API_KEY") or "").strip()
+
+    @staticmethod
+    def _voiceai_default_voice() -> str:
+        return (os.environ.get("VOICEAI_VOICE_ID") or "").strip()
+
     @property
     def available(self) -> bool:
         settings = self._load_settings()
@@ -68,6 +82,8 @@ class TTSService:
         if provider == "local":
             kokoro = self._get_kokoro()
             return kokoro is not None and kokoro.available
+        if provider == "voiceai":
+            return bool(self._voiceai_api_key())
         if provider.startswith("endpoint:"):
             return True  # assume reachable; errors surface at synthesis time
         return False
@@ -141,9 +157,67 @@ class TTSService:
             logger.error(f"API TTS synthesis failed: {e}")
             return None
 
+    def _synthesize_voiceai(self, text: str, model: str, voice: str) -> Optional[bytes]:
+        """POST Voice.ai hosted TTS — same contract as Clicky's Cloudflare worker."""
+        api_key = self._voiceai_api_key()
+        if not api_key:
+            logger.warning("Voice.ai TTS unavailable: VOICEAI_API_KEY not set")
+            return None
+
+        voice_id = (voice or "").strip() or self._voiceai_default_voice() or None
+        # Drop OpenAI-style defaults left over from another provider.
+        if voice_id and voice_id.lower() in {
+            "alloy", "ash", "ballad", "coral", "echo", "fable",
+            "nova", "onyx", "sage", "shimmer", "verse", "af_heart",
+        }:
+            voice_id = self._voiceai_default_voice() or None
+
+        tts_model = (model or "").strip()
+        if not tts_model or tts_model in ("tts-1", "tts-1-hd", "gpt-4o-mini-tts"):
+            tts_model = VOICEAI_DEFAULT_MODEL
+
+        payload: Dict[str, Any] = {
+            "text": text,
+            "model": tts_model,
+            "language": "en",
+            "audio_format": "mp3",
+        }
+        if voice_id:
+            payload["voice_id"] = voice_id
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            r = httpx.post(VOICEAI_TTS_URL, json=payload, headers=headers, timeout=60)
+            r.raise_for_status()
+            if not r.content:
+                self.last_error = "Voice.ai returned an empty response"
+                logger.error(self.last_error)
+                return None
+            self.last_error = None
+            logger.info(f"Voice.ai TTS: {len(r.content)} bytes (model={tts_model})")
+            return r.content
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code == 402:
+                self.last_error = "Voice.ai billing required (402 Payment Required)"
+            elif code in (401, 403):
+                self.last_error = f"Voice.ai auth failed ({code})"
+            else:
+                self.last_error = f"Voice.ai HTTP {code}"
+            logger.error(f"Voice.ai TTS synthesis failed: {self.last_error}")
+            return None
+        except Exception as e:
+            self.last_error = str(e)
+            logger.error(f"Voice.ai TTS synthesis failed: {e}")
+            return None
+
     # ── Public interface ──
 
     def synthesize(self, text: str, use_cache: bool = True) -> Optional[bytes]:
+        self.last_error = None
         settings = self._load_settings()
         if settings.get("tts_enabled") is False:
             return None
@@ -174,6 +248,8 @@ class TTSService:
             else:
                 logger.warning("Kokoro TTS not available")
                 return None
+        elif provider == "voiceai":
+            audio_data = self._synthesize_voiceai(text, model, voice)
         elif provider.startswith("endpoint:"):
             endpoint_id = provider.split(":", 1)[1]
             audio_data = self._synthesize_api(text, endpoint_id, model, voice, speed)
@@ -222,6 +298,17 @@ class TTSService:
             stats["model"] = "Kokoro-82M (GPU)" if (kokoro and kokoro.available) else "Kokoro (not loaded)"
         elif provider == "browser":
             stats["model"] = "Browser (Web Speech API)"
+        elif provider == "voiceai":
+            has_key = bool(self._voiceai_api_key())
+            stats["model"] = settings["tts_model"] or VOICEAI_DEFAULT_MODEL
+            stats["voice"] = settings["tts_voice"] or self._voiceai_default_voice() or ""
+            if not has_key:
+                stats["available"] = False
+                stats["ready"] = False
+                stats["reason"] = "missing_api_key"
+                stats["detail"] = "Set VOICEAI_API_KEY in the environment"
+            else:
+                stats["reason"] = "ready"
         elif provider.startswith("endpoint:"):
             stats["endpoint_id"] = provider.split(":", 1)[1]
 

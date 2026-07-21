@@ -396,7 +396,7 @@ function _fillEndpointSelect(selectEl, endpoints, selected, keepBlank) {
   }
 }
 
-function _fillModelSelect(selectEl, models, selected, keepBlank) {
+function _fillModelSelect(selectEl, models, selected, keepBlank, emptyHint) {
   if (!selectEl) return;
   const previous = selected !== undefined ? selected : selectEl.value;
   const blankText = keepBlank && selectEl.options[0] && selectEl.options[0].value === ''
@@ -409,7 +409,16 @@ function _fillModelSelect(selectEl, models, selected, keepBlank) {
     blank.textContent = blankText;
     selectEl.appendChild(blank);
   }
-  sortModelIds(models).forEach(function(m) {
+  const list = Array.isArray(models) ? models : [];
+  if (!list.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = emptyHint || '(No models enabled — open Admin → Endpoints)';
+    empty.disabled = true;
+    selectEl.appendChild(empty);
+    return;
+  }
+  sortModelIds(list).forEach(function(m) {
     const opt = document.createElement('option');
     opt.value = m;
     opt.textContent = String(m).split('/').pop();
@@ -463,15 +472,21 @@ function _bindFallbackWidget(opts) {
   function fillModels(selectEl, epId, selected) {
     while (selectEl.options.length) selectEl.remove(0);
     var ep = (endpointsRef() || []).find(function(e) { return e.id === epId; });
-    if (ep && ep.models) {
-      sortModelIds(ep.models).forEach(function(m) {
-        if (!modelsFilter(m, ep)) return;
-        var o = document.createElement('option');
-        o.value = m;
-        o.textContent = m.split('/').pop();
-        selectEl.appendChild(o);
-      });
+    var visible = (ep && ep.models) ? ep.models.filter(function(m) { return modelsFilter(m, ep); }) : [];
+    if (!visible.length) {
+      var empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '(No models enabled — open Admin → Endpoints)';
+      empty.disabled = true;
+      selectEl.appendChild(empty);
+      return;
     }
+    sortModelIds(visible).forEach(function(m) {
+      var o = document.createElement('option');
+      o.value = m;
+      o.textContent = m.split('/').pop();
+      selectEl.appendChild(o);
+    });
     if (selected) selectEl.value = selected;
   }
 
@@ -1018,7 +1033,8 @@ async function initTtsSettings() {
 
   function updateVisibility() {
     var prov = provSel.value;
-    modelRow.style.display = prov.startsWith('endpoint:') ? 'flex' : 'none';
+    var showModel = prov.startsWith('endpoint:') || prov === 'voiceai' || prov === 'local';
+    modelRow.style.display = showModel ? 'flex' : 'none';
     voiceRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     speedRow.style.display = prov === 'disabled' ? 'none' : 'flex';
     if (isEndpoint()) {
@@ -1027,6 +1043,13 @@ async function initTtsSettings() {
     } else {
       modelSelect.style.display = 'none'; modelInput.style.display = '';
       voiceSelect.style.display = 'none'; voiceInput.style.display = prov === 'disabled' ? 'none' : '';
+      if (prov === 'voiceai') {
+        modelInput.placeholder = 'voiceai-tts-v1-latest';
+        voiceInput.placeholder = 'voice UUID (or VOICEAI_VOICE_ID)';
+      } else if (prov === 'local') {
+        modelInput.placeholder = 'model name';
+        voiceInput.placeholder = 'af_heart';
+      }
     }
   }
 
@@ -1067,6 +1090,7 @@ async function initTtsSettings() {
         body: JSON.stringify({ tts_enabled: ttsEnabledToggle ? ttsEnabledToggle.checked : true, tts_provider: provSel.value, tts_model: getModel() || 'tts-1', tts_voice: getVoice() || 'alloy', tts_speed: speedSelect.value || '1' }) });
       ttsMsg.textContent = 'Saved'; ttsMsg.style.color = 'var(--fg)'; setTimeout(() => { ttsMsg.textContent = ''; }, 2000);
       if (window.aiTTSManager) window.aiTTSManager.checkAvailability();
+      if (window.refreshTtsControls) window.refreshTtsControls();
     } catch (e) { ttsMsg.textContent = 'Failed to save'; ttsMsg.style.color = 'var(--red)'; }
   }
 
@@ -1078,6 +1102,11 @@ async function initTtsSettings() {
   provSel.addEventListener('change', function() {
     var prov = provSel.value;
     if (prov === 'local') voiceInput.value = 'af_heart';
+    else if (prov === 'voiceai') {
+      voiceInput.value = '';
+      voiceInput.placeholder = 'voice UUID (or VOICEAI_VOICE_ID)';
+      modelInput.value = 'voiceai-tts-v1-latest';
+    }
     else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
     updateVisibility();
@@ -1166,6 +1195,108 @@ async function initTtsSettings() {
   }
 }
 
+/* ── Voice Chat (Realtime) ── */
+async function initVoiceChatSettings() {
+  var enabledToggle = el('set-voiceChatEnabledToggle');
+  var realtimeToggle = el('set-voiceRealtimeToggle');
+  var modelInput = el('set-voiceModelInput');
+  var voiceSelect = el('set-voiceVoiceSelect');
+  var turnSelect = el('set-voiceTurnDetection');
+  var silenceInput = el('set-voiceSilenceInput');
+  var vadSelect = el('set-voiceVadThreshold');
+  var transcriptionInput = el('set-voiceTranscriptionInput');
+  var toolsToggle = el('set-voiceToolsToggle');
+  var instructionsInput = el('set-voiceInstructionsInput');
+  var statusLine = el('set-voiceStatusLine');
+  var configWrap = el('set-voiceConfigWrap');
+  var msg = el('set-voiceSettingsMsg');
+  if (!enabledToggle) return;
+
+  function syncDisabled() {
+    var off = !enabledToggle.checked;
+    var card = enabledToggle.closest('.admin-card');
+    if (card) card.style.opacity = off ? '0.45' : '';
+    if (configWrap) configWrap.style.pointerEvents = off ? 'none' : '';
+  }
+
+  async function refreshStatus() {
+    if (!statusLine) return;
+    try {
+      var res = await fetch('/api/voice/stats', { credentials: 'same-origin' });
+      var stats = await res.json();
+      if (stats.available) {
+        statusLine.textContent = 'Realtime available — ' + (stats.model || '')
+          + (stats.tools_enabled ? ' · tools on' : '')
+          + (stats.active_sessions ? ' · ' + stats.active_sessions + ' active session(s)' : '');
+        statusLine.style.color = '';
+      } else if (!stats.voice_chat_enabled) {
+        statusLine.textContent = 'Voice chat is turned off.';
+      } else {
+        statusLine.textContent = 'Realtime unavailable — set OPENAI_API_KEY on the server. Push-to-talk still works with the STT/TTS providers below.';
+      }
+    } catch (_) {
+      statusLine.textContent = '';
+    }
+  }
+
+  try {
+    var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await settingsRes.json();
+    enabledToggle.checked = settings.voice_chat_enabled !== false;
+    if (realtimeToggle) realtimeToggle.checked = settings.voice_realtime_enabled !== false;
+    if (modelInput) modelInput.value = settings.voice_realtime_model || '';
+    if (voiceSelect) voiceSelect.value = settings.voice_realtime_voice || '';
+    if (turnSelect) turnSelect.value = settings.voice_realtime_turn_detection || 'server_vad';
+    if (silenceInput) silenceInput.value = settings.voice_realtime_silence_ms || '';
+    if (vadSelect) {
+      var th = String(settings.voice_realtime_vad_threshold || '0.5');
+      if (['0.3', '0.5', '0.7'].includes(th)) vadSelect.value = th;
+    }
+    if (transcriptionInput) transcriptionInput.value = settings.voice_realtime_transcription_model || '';
+    if (toolsToggle) toolsToggle.checked = settings.voice_tools_enabled !== false;
+    if (instructionsInput) instructionsInput.value = settings.voice_realtime_instructions || '';
+  } catch (e) { console.warn('Failed to load voice chat settings', e); }
+
+  syncDisabled();
+  refreshStatus();
+
+  async function saveVoice() {
+    try {
+      var silence = parseInt(silenceInput && silenceInput.value, 10);
+      await fetch('/api/auth/settings', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          voice_chat_enabled: enabledToggle.checked,
+          voice_realtime_enabled: realtimeToggle ? realtimeToggle.checked : true,
+          voice_realtime_model: modelInput ? modelInput.value.trim() : '',
+          voice_realtime_voice: voiceSelect ? voiceSelect.value : '',
+          voice_realtime_turn_detection: turnSelect ? turnSelect.value : 'server_vad',
+          voice_realtime_silence_ms: Number.isFinite(silence) ? silence : 500,
+          voice_realtime_vad_threshold: vadSelect ? parseFloat(vadSelect.value) || 0.5 : 0.5,
+          voice_realtime_transcription_model: transcriptionInput ? transcriptionInput.value.trim() : '',
+          voice_tools_enabled: toolsToggle ? toolsToggle.checked : true,
+          voice_realtime_instructions: instructionsInput ? instructionsInput.value.trim() : '',
+        }),
+      });
+      if (msg) { msg.textContent = 'Saved — takes effect on the next voice session'; msg.style.color = 'var(--fg)'; setTimeout(function() { msg.textContent = ''; }, 3000); }
+      refreshStatus();
+      if (window.voiceChatModule?.refreshRealtimeState) window.voiceChatModule.refreshRealtimeState();
+      if (window._updateSendBtnIcon) window._updateSendBtnIcon();
+    } catch (e) {
+      if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
+    }
+  }
+
+  enabledToggle.addEventListener('change', function() { syncDisabled(); saveVoice(); });
+  [realtimeToggle, voiceSelect, turnSelect, vadSelect, toolsToggle].forEach(function(elm) {
+    if (elm) elm.addEventListener('change', saveVoice);
+  });
+  [modelInput, silenceInput, transcriptionInput, instructionsInput].forEach(function(elm) {
+    if (elm) elm.addEventListener('change', saveVoice);
+  });
+}
+
 /* ── Speech to Text ── */
 async function initSttSettings() {
   var provSel = el('set-sttProviderSelect');
@@ -1175,9 +1306,10 @@ async function initSttSettings() {
   var langRow = el('set-sttLangRow');
   var langInput = el('set-sttLangInput');
   var sttMsg = el('set-sttSettingsMsg');
+  var sttStatusMsg = el('set-sttStatusMsg');
   var sttEnabledToggle = el('set-sttEnabledToggle');
   var sttConfigWrap = el('set-sttConfigWrap');
-  // STT was removed from AI Defaults — bail if the UI isn't present.
+  // STT UI — bail if the settings card isn't present.
   if (!provSel) return;
 
   function isEndpoint() { return provSel.value.startsWith('endpoint:'); }
@@ -1209,6 +1341,59 @@ async function initSttSettings() {
     return provSel.value;
   }
 
+  function renderSttStatus(stats) {
+    if (!sttStatusMsg) return;
+    sttStatusMsg.textContent = '';
+    sttStatusMsg.style.color = '';
+    if (!stats || !stats.enabled || stats.provider === 'disabled') {
+      sttStatusMsg.textContent = 'STT is off — enable the toggle above for mic transcription.';
+      sttStatusMsg.style.color = 'color-mix(in srgb, var(--fg) 45%, transparent)';
+      return;
+    }
+    if (stats.provider === 'browser') {
+      sttStatusMsg.textContent = 'Browser STT — recognition runs in Chrome/Edge, not on the server.';
+      sttStatusMsg.style.color = 'color-mix(in srgb, var(--fg) 55%, transparent)';
+      return;
+    }
+    if (stats.provider === 'local') {
+      if (stats.available && stats.model_loaded) {
+        sttStatusMsg.textContent = 'Local Whisper ready — model loaded on server.';
+        sttStatusMsg.style.color = 'var(--green, #3d9a5c)';
+        return;
+      }
+      var reason = stats.reason || stats.local_status || '';
+      if (reason === 'missing_package') {
+        sttStatusMsg.textContent = 'Local Whisper not installed on server. Rebuild with INSTALL_STT=true or switch to Browser STT.';
+      } else if (reason === 'load_failed') {
+        var detail = stats.local_detail ? ' (' + stats.local_detail + ')' : '';
+        sttStatusMsg.textContent = 'Local Whisper failed to load' + detail + '. Try a smaller model or switch to Browser STT.';
+      } else {
+        sttStatusMsg.textContent = 'Local Whisper unavailable on server. Check logs or switch to Browser STT.';
+      }
+      sttStatusMsg.style.color = 'var(--red)';
+      return;
+    }
+    if (stats.available) {
+      sttStatusMsg.textContent = 'STT endpoint configured — server will POST audio for transcription.';
+      sttStatusMsg.style.color = 'color-mix(in srgb, var(--fg) 55%, transparent)';
+      return;
+    }
+    sttStatusMsg.textContent = 'STT configured but unavailable. Check Settings > Audio & Voice.';
+    sttStatusMsg.style.color = 'var(--red)';
+  }
+
+  async function refreshSttStats() {
+    if (!sttStatusMsg) return;
+    try {
+      var res = await fetch('/api/stt/stats', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('stats ' + res.status);
+      renderSttStatus(await res.json());
+    } catch (e) {
+      sttStatusMsg.textContent = 'Could not check STT readiness.';
+      sttStatusMsg.style.color = 'var(--red)';
+    }
+  }
+
   // Add API endpoints that might support STT
   try {
     var epRes = await fetch('/api/model-endpoints', { credentials: 'same-origin' });
@@ -1226,11 +1411,12 @@ async function initSttSettings() {
     if (settings.stt_provider) provSel.value = settings.stt_provider;
     if (settings.stt_model) { modelSelect.value = settings.stt_model; modelInput.value = settings.stt_model; }
     if (settings.stt_language) langInput.value = settings.stt_language;
-    if (sttEnabledToggle) sttEnabledToggle.checked = settings.stt_enabled !== false;
+    if (sttEnabledToggle) sttEnabledToggle.checked = settings.stt_enabled === true;
   } catch (e) { console.warn('Failed to load STT settings', e); }
 
   syncSttDisabled();
   updateVisibility();
+  await refreshSttStats();
 
   async function saveSTT() {
     try {
@@ -1239,13 +1425,19 @@ async function initSttSettings() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stt_enabled: enabled, stt_provider: provSel.value, stt_model: getModel() || 'base', stt_language: langInput.value.trim() }) });
       sttMsg.textContent = 'Saved'; sttMsg.style.color = 'var(--fg)'; setTimeout(() => { sttMsg.textContent = ''; }, 2000);
-      // Notify voiceRecorder of effective provider and update send button icon
-      if (window.voiceRecorderModule) window.voiceRecorderModule._sttProvider = effectiveProvider();
+      await refreshSttStats();
+      if (window.voiceRecorderModule?.refreshSttProvider) {
+        await window.voiceRecorderModule.refreshSttProvider();
+      }
+      if (window.voiceChatModule?.refreshSttState) {
+        await window.voiceChatModule.refreshSttState();
+      }
+      document.dispatchEvent(new CustomEvent('odysseus:stt-settings-changed'));
       if (window._updateSendBtnIcon) window._updateSendBtnIcon();
     } catch (e) { sttMsg.textContent = 'Failed to save'; sttMsg.style.color = 'var(--red)'; }
   }
 
-  provSel.addEventListener('change', function() { updateVisibility(); saveSTT(); });
+  provSel.addEventListener('change', function() { updateVisibility(); saveSTT(); refreshSttStats(); });
   modelSelect.addEventListener('change', saveSTT);
   modelInput.addEventListener('change', saveSTT);
   langInput.addEventListener('change', saveSTT);
@@ -1262,17 +1454,21 @@ var _searchProviderHints = {
   brave: 'Get your API key from brave.com/search/api',
   google_pse: 'Requires a Google API key and a Programmable Search Engine ID (CX). Create one at programmablesearchengine.google.com',
   tavily: 'AI-optimized search. 1,000 free credits/month at tavily.com',
+  firecrawl: 'Web search + content extraction. Get an API key at firecrawl.dev',
+  tinyfish: 'Fast free Search API (~sub-second, LLM-ready snippets). Best for agent/voice lookups and research discovery. Key at agent.tinyfish.ai/api-keys',
   serper: 'Google results via API. 2,500 free queries at serper.dev',
   disabled: 'Web search and deep research tools will be unavailable.',
 };
-var _searchNeedsKey = { brave: 1, google_pse: 1, tavily: 1, serper: 1 };
+var _searchNeedsKey = { brave: 1, google_pse: 1, tavily: 1, firecrawl: 1, tinyfish: 1, serper: 1 };
 var _searchLabels = {
   searxng: 'SearXNG', duckduckgo: 'DuckDuckGo', brave: 'Brave Search',
-  google_pse: 'Google PSE', tavily: 'Tavily', serper: 'Serper', disabled: 'Disabled',
+  google_pse: 'Google PSE', tavily: 'Tavily', firecrawl: 'Firecrawl',
+  tinyfish: 'TinyFish', serper: 'Serper', disabled: 'Disabled',
 };
 var _searchKeyFields = {
   brave: 'brave_api_key', google_pse: 'google_pse_key',
-  tavily: 'tavily_api_key', serper: 'serper_api_key',
+  tavily: 'tavily_api_key', firecrawl: 'firecrawl_api_key',
+  tinyfish: 'tinyfish_api_key', serper: 'serper_api_key',
 };
 
 async function initSearchSettings() {
@@ -1305,6 +1501,8 @@ async function initSearchSettings() {
     if (prov === 'brave') keyInput.placeholder = 'Brave API key';
     else if (prov === 'google_pse') keyInput.placeholder = 'Google API key';
     else if (prov === 'tavily') keyInput.placeholder = 'Tavily API key';
+    else if (prov === 'firecrawl') keyInput.placeholder = 'Firecrawl API key';
+    else if (prov === 'tinyfish') keyInput.placeholder = 'TinyFish API key';
     else if (prov === 'serper') keyInput.placeholder = 'Serper API key';
     else keyInput.placeholder = 'API key';
     loadKeyForProvider(prov);
@@ -1594,6 +1792,8 @@ var _SEARCH_PROVIDER_LOGOS = {
   brave:     '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 4l-1.5 1L15 3l-3 .5L9 3 6.5 5 5 4 3 7l1.5 2L4 12l3 5 4 3 1 1 1-1 4-3 3-5-.5-3L21 7l-2-3zM12 17l-2.5-2 .5-3-2-1.5 2-1.5L11 7l3-1 3 1-.5 2 2 1.5-2 1.5.5 3L14.5 17 12 17z"/></svg>',
   google_pse:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.35 11.1H12v3.2h5.35c-.5 2.4-2.55 4-5.35 4-3.25 0-5.9-2.65-5.9-5.9s2.65-5.9 5.9-5.9c1.55 0 2.95.55 4.05 1.55l2.4-2.4C16.85 4.05 14.55 3 12 3 7 3 3 7 3 12s4 9 9 9c5.2 0 8.65-3.65 8.65-8.8 0-.4-.05-.7-.3-1.1z"/></svg>',
   tavily:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 8.5l4 2.5v6l6 3.5 6-3.5v-6l4-2.5L12 2zm-4 9.5L12 14l4-2.5V16l-4 2.5L8 16v-4.5z"/></svg>',
+  firecrawl: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-2 0-4 1.2-5 3.2L4 8.5V14l3 1.8V20l5 2.5 5-2.5v-4.2l3-1.8V8.5L17 5.2C16 3.2 14 2 12 2zm0 2c1.2 0 2.2.7 2.8 1.8L17 8.2v4.3l-2.5 1.5L12 15.5 9.5 14 7 12.5V8.2l2.2-2.4C9.8 4.7 10.8 4 12 4z"/></svg>',
+  tinyfish:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 4a6 6 0 0 1 6 6c0 3-3 6-6 9-3-3-6-6-6-9a6 6 0 0 1 6-6Z"/><circle cx="12" cy="10" r="2" fill="currentColor" stroke="none"/></svg>',
   serper:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11 4a7 7 0 1 0 4.2 12.6l4.5 4.5 1.4-1.4-4.5-4.5A7 7 0 0 0 11 4zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm-1 2v2H8v2h2v2h2v-2h2V10h-2V8h-2z"/></svg>',
   disabled:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
 };
@@ -1606,6 +1806,10 @@ async function initResearchSettings() {
   var extractTimeoutInput = el('set-researchExtractTimeout');
   var extractConcurrencyInput = el('set-researchExtractConcurrency');
   var runTimeoutInput = el('set-researchRunTimeout');
+  var engineSel = el('set-researchEngine');
+  var perplexityKeyInput = el('set-perplexityApiKey');
+  var perplexityPresetInput = el('set-perplexityPreset');
+  var perplexityBudgetInput = el('set-perplexityBudget');
   var msg = el('set-researchMsg');
   var endpoints = [];
 
@@ -1630,6 +1834,12 @@ async function initResearchSettings() {
     if (settings.research_extraction_concurrency) extractConcurrencyInput.value = settings.research_extraction_concurrency;
     if (settings.research_run_timeout_seconds !== undefined && settings.research_run_timeout_seconds !== null) {
       runTimeoutInput.value = settings.research_run_timeout_seconds;
+    }
+    if (engineSel && settings.research_engine) engineSel.value = settings.research_engine;
+    if (perplexityKeyInput && settings.perplexity_api_key) perplexityKeyInput.value = settings.perplexity_api_key;
+    if (perplexityPresetInput && settings.perplexity_research_preset) perplexityPresetInput.value = settings.perplexity_research_preset;
+    if (perplexityBudgetInput && settings.perplexity_daily_budget_usd !== undefined && settings.perplexity_daily_budget_usd !== null) {
+      perplexityBudgetInput.value = settings.perplexity_daily_budget_usd;
     }
   } catch (e) { console.warn('Failed to load research settings', e); }
 
@@ -1683,6 +1893,15 @@ async function initResearchSettings() {
         payload.research_run_timeout_seconds = rt;
       }
     }
+    if (engineSel) payload.research_engine = engineSel.value || 'iterative';
+    if (perplexityKeyInput) payload.perplexity_api_key = perplexityKeyInput.value.trim();
+    if (perplexityPresetInput && perplexityPresetInput.value.trim()) {
+      payload.perplexity_research_preset = perplexityPresetInput.value.trim();
+    }
+    if (perplexityBudgetInput && perplexityBudgetInput.value !== '') {
+      var pb = parseFloat(perplexityBudgetInput.value);
+      if (!isNaN(pb) && pb >= 0) payload.perplexity_daily_budget_usd = pb;
+    }
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -1702,6 +1921,10 @@ async function initResearchSettings() {
   extractTimeoutInput.addEventListener('change', saveResearch);
   extractConcurrencyInput.addEventListener('change', saveResearch);
   runTimeoutInput.addEventListener('change', saveResearch);
+  if (engineSel) engineSel.addEventListener('change', saveResearch);
+  if (perplexityKeyInput) perplexityKeyInput.addEventListener('change', saveResearch);
+  if (perplexityPresetInput) perplexityPresetInput.addEventListener('change', saveResearch);
+  if (perplexityBudgetInput) perplexityBudgetInput.addEventListener('change', saveResearch);
 
   _registerAiEndpointRefresh(function(nextEndpoints) {
     endpoints = nextEndpoints;
@@ -2390,6 +2613,7 @@ function initAll() {
   initVisionSettings();
   initTtsSettings();
   initSttSettings();
+  initVoiceChatSettings();
   initSearchSettings();
   initResearchSettings();
   initResearchSearchSettings();
@@ -2867,7 +3091,9 @@ async function initEmailAccountsSettings() {
   }
 
   function renderRow(a) {
-    const imap = a.imap_host ? `${a.imap_host}:${a.imap_port}` : '<no IMAP>';
+    const imap = a.provider === 'gmail_gog'
+      ? 'gog CLI (OAuth)'
+      : (a.imap_host ? `${a.imap_host}:${a.imap_port}` : '<no IMAP>');
     const badge = a.is_default
       ? '<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;border-radius:3px;background:color-mix(in srgb, var(--accent,#50fa7b) 15%, transparent);color:var(--accent,#50fa7b)">Default</span>'
       : (a.enabled ? '' : '<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;border-radius:3px;opacity:0.4">Disabled</span>');
@@ -2925,13 +3151,14 @@ async function initEmailAccountsSettings() {
     // IMAP and SMTP. Dovecot is IMAP-only here; the host is intentionally
     // blank because it may live on another machine (DNS, LAN, Tailscale).
     const PROVIDERS = {
-      gmail:    { label: 'Gmail',                  imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',            port: 465 } },
-      migadu:   { label: 'Migadu',                 imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',           port: 465 } },
-      icloud:   { label: 'iCloud',                 imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',          port: 587 } },
-      outlook:  { label: 'Outlook / Office 365',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com',        port: 587 } },
-      fastmail: { label: 'Fastmail',               imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',         port: 465 } },
-      yahoo:    { label: 'Yahoo',                  imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com',       port: 465 } },
-      dovecot:  { label: 'Dovecot IMAP (no SMTP)',  imap: { host: '',                        port: 31143, starttls: false }, smtp: { host: '',                          port: 465 } },
+      gmail:     { label: 'Gmail',                  imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',            port: 465 } },
+      gmail_gog: { label: 'Gmail (gog CLI)',        gog: true, emailEx: 'you@gmail.com' },
+      migadu:    { label: 'Migadu',                 imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',           port: 465 } },
+      icloud:    { label: 'iCloud',                 imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',          port: 587 } },
+      outlook:   { label: 'Outlook / Office 365',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com',        port: 587 } },
+      fastmail:  { label: 'Fastmail',               imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',         port: 465 } },
+      yahoo:     { label: 'Yahoo',                  imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com',       port: 465 } },
+      dovecot:   { label: 'Dovecot IMAP (no SMTP)', imap: { host: '',                        port: 31143, starttls: false }, smtp: { host: '',                          port: 465 } },
     };
     const _providerOptions = Object.entries(PROVIDERS)
       .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`)
@@ -2944,6 +3171,7 @@ async function initEmailAccountsSettings() {
         <div id="eaf-provider-note" style="display:none;font-size:11px;line-height:1.5;padding:8px 10px;margin:2px 0 4px;border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);border-left:3px solid var(--accent, var(--red));border-radius:4px;background:color-mix(in srgb, var(--fg) 4%, transparent);"></div>
         <div class="settings-row"><label class="settings-label">Name${_hint('Optional label for this account (e.g. “Work” or “Personal”). Leave blank to use the email address.')}</label><input id="eaf-name" class="settings-input" placeholder="(optional — leave blank to use email)" value="${esc(a.name || '')}"></div>
         <div class="settings-row"><label class="settings-label">Email${_hint('Your email address. Used as the From: header on outgoing mail and as the display label when Name is blank.')}</label><input id="eaf-from" class="settings-input" placeholder="you@example.com" value="${esc(a.from_address || '')}"></div>
+        <div class="eaf-imap-smtp-sections">
         <div style="font-size:11px;font-weight:600;opacity:0.6;margin:6px 0 2px">IMAP (Receiving)</div>
         <div class="settings-row"><label class="settings-label">Host${_hint('Your IMAP server, e.g. imap.gmail.com, imap.migadu.com, a LAN host, or a Tailscale IP for Dovecot.')}</label><input id="eaf-imap-host" class="settings-input" value="${esc(a.imap_host || '')}"></div>
         <div class="settings-row"><label class="settings-label">Port${_hint('993 for IMAPS (most providers), 143 for plain or STARTTLS. Local servers often use a custom port like 31143.')}</label><input id="eaf-imap-port" class="settings-input" type="number" value="${esc(a.imap_port || 993)}" style="max-width:100px"></div>
@@ -2957,6 +3185,7 @@ async function initEmailAccountsSettings() {
         <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (this is right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch"><input type="checkbox" id="eaf-smtp-same" ${(!isEdit || (a.smtp_user && a.imap_user && a.smtp_user === a.imap_user)) ? 'checked' : ''}><span class="admin-slider"></span></label></div>
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="eaf-smtp-user" class="settings-input" value="${esc(a.smtp_user || '')}"></div>
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password. Outlook / Office 365 generally requires OAuth and will not work with a normal password here.')}</label><input id="eaf-smtp-pass" class="settings-input" type="password" placeholder="${isEdit && a.has_smtp_password ? '(unchanged)' : ''}"></div>
+        </div>
         <div class="settings-row" style="margin-top:10px;align-items:center;">
           <button class="admin-btn-add" id="eaf-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
@@ -2972,6 +3201,10 @@ async function initEmailAccountsSettings() {
     `;
 
     const eafProviderNotes = {
+      gmail_gog: {
+        title: 'Gmail via gog CLI (OAuth)',
+        body: 'Uses gogcli with your existing Google OAuth session — no App Password needed. Install gogcli, run `gog auth login`, then enter your Gmail address above. Set GOG_PATH if gog.exe is not on the default path.',
+      },
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
         body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
@@ -2991,11 +3224,21 @@ async function initEmailAccountsSettings() {
       eafNoteEl.innerHTML = `<div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div><div style="opacity:0.8;">${esc(n.body)}</div>`;
     };
 
+    const _syncEafGogMode = () => {
+      const isGog = el('eaf-provider').value === 'gmail_gog';
+      formEl.querySelectorAll('.eaf-imap-smtp-sections').forEach((s) => {
+        s.style.display = isGog ? 'none' : '';
+      });
+    };
     // Provider preset → autofill host/port/STARTTLS for both halves.
     el('eaf-provider').addEventListener('change', (e) => {
       _renderEafProviderNote(e.target.value);
+      _syncEafGogMode();
       const p = PROVIDERS[e.target.value];
-      if (!p) return;
+      if (!p || p.gog) {
+        if (p?.emailEx) el('eaf-from').placeholder = p.emailEx;
+        return;
+      }
       el('eaf-imap-host').value = p.imap.host;
       el('eaf-imap-port').value = p.imap.port;
       el('eaf-imap-starttls').checked = !!p.imap.starttls;
@@ -3004,6 +3247,11 @@ async function initEmailAccountsSettings() {
       el('eaf-smtp-security').value = p.smtp.security || ((parseInt(p.smtp.port || 465) === 587) ? 'starttls' : 'ssl');
     });
     el('eaf-smtp-security').value = _smtpSecurity(a);
+    if (isEdit && a.provider === 'gmail_gog') {
+      el('eaf-provider').value = 'gmail_gog';
+      _renderEafProviderNote('gmail_gog');
+    }
+    _syncEafGogMode();
 
     // "Same as IMAP" toggle — hide the SMTP creds rows when on. The save
     // handler copies the IMAP user/password into SMTP at submit time.
@@ -3018,6 +3266,7 @@ async function initEmailAccountsSettings() {
 
     el('eaf-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
     el('eaf-save').addEventListener('click', async () => {
+      const isGog = el('eaf-provider').value === 'gmail_gog';
       const body = {
         name: el('eaf-name').value.trim(),
         from_address: el('eaf-from').value.trim(),
@@ -3030,13 +3279,16 @@ async function initEmailAccountsSettings() {
         smtp_security: el('eaf-smtp-security').value,
         smtp_user: el('eaf-smtp-user').value.trim(),
       };
-      if (el('eaf-imap-pass').value) body.imap_password = el('eaf-imap-pass').value;
-      if (el('eaf-smtp-pass').value) body.smtp_password = el('eaf-smtp-pass').value;
+      if (isGog) {
+        body.provider = 'gmail_gog';
+        body.imap_user = body.from_address;
+      } else if (el('eaf-imap-pass').value) body.imap_password = el('eaf-imap-pass').value;
+      if (!isGog && el('eaf-smtp-pass').value) body.smtp_password = el('eaf-smtp-pass').value;
       // "Same as IMAP" toggle — copy IMAP username/password into SMTP at
       // save time, so the hidden SMTP-creds rows don't matter. We only
       // mirror the password if the user actually typed an IMAP one
       // (otherwise SMTP keeps whatever it already had on the server).
-      if (el('eaf-smtp-same').checked) {
+      if (!isGog && el('eaf-smtp-same').checked) {
         body.smtp_user = body.imap_user;
         if (body.imap_password) body.smtp_password = body.imap_password;
       }
@@ -4248,13 +4500,14 @@ async function initUnifiedIntegrations() {
     // Dovecot is IMAP-only here; the host is intentionally blank because
     // it may be remote (DNS, LAN, Tailscale), not localhost.
     const PROVIDERS = {
-      gmail:    { label: 'Gmail',                   emailEx: 'you@gmail.com',     imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',     port: 465 } },
-      migadu:   { label: 'Migadu',                  emailEx: 'you@yourdomain.com', imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',    port: 465 } },
-      icloud:   { label: 'iCloud',                  emailEx: 'you@icloud.com',    imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',   port: 587 } },
-      outlook:  { label: 'Outlook / Office 365',    emailEx: 'you@outlook.com',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com', port: 587 } },
-      fastmail: { label: 'Fastmail',                emailEx: 'you@fastmail.com',  imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',  port: 465 } },
-      yahoo:    { label: 'Yahoo',                   emailEx: 'you@yahoo.com',     imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com', port: 465 } },
-      dovecot:  { label: 'Dovecot IMAP (no SMTP)',  emailEx: 'you@example.com',   imap: { host: '',                         port: 31143, starttls: false }, smtp: { host: '',                   port: 465 } },
+      gmail:     { label: 'Gmail',                   emailEx: 'you@gmail.com',     imap: { host: 'imap.gmail.com',           port: 993, starttls: false }, smtp: { host: 'smtp.gmail.com',     port: 465 } },
+      gmail_gog: { label: 'Gmail (gog CLI)',         gog: true, emailEx: 'you@gmail.com' },
+      migadu:    { label: 'Migadu',                  emailEx: 'you@yourdomain.com', imap: { host: 'imap.migadu.com',          port: 993, starttls: false }, smtp: { host: 'smtp.migadu.com',    port: 465 } },
+      icloud:    { label: 'iCloud',                  emailEx: 'you@icloud.com',    imap: { host: 'imap.mail.me.com',         port: 993, starttls: false }, smtp: { host: 'smtp.mail.me.com',   port: 587 } },
+      outlook:   { label: 'Outlook / Office 365',    emailEx: 'you@outlook.com',   imap: { host: 'outlook.office365.com',    port: 993, starttls: false }, smtp: { host: 'smtp.office365.com', port: 587 } },
+      fastmail:  { label: 'Fastmail',                emailEx: 'you@fastmail.com',  imap: { host: 'imap.fastmail.com',        port: 993, starttls: false }, smtp: { host: 'smtp.fastmail.com',  port: 465 } },
+      yahoo:     { label: 'Yahoo',                   emailEx: 'you@yahoo.com',     imap: { host: 'imap.mail.yahoo.com',      port: 993, starttls: false }, smtp: { host: 'smtp.mail.yahoo.com', port: 465 } },
+      dovecot:   { label: 'Dovecot IMAP (no SMTP)',  emailEx: 'you@example.com',   imap: { host: '',                         port: 31143, starttls: false }, smtp: { host: '',                   port: 465 } },
     };
     const _providerOptions = Object.entries(PROVIDERS)
       .map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
@@ -4266,6 +4519,7 @@ async function initUnifiedIntegrations() {
     const PROV_LOGO = {
       '':       _customLogo,
       gmail:    _letterLogo('G', '#ea4335'),
+      gmail_gog: _letterLogo('G', '#ea4335'),
       migadu:   _letterLogo('M', '#3aa39d'),
       icloud:   _letterLogo('i', '#3693f3'),
       outlook:  _letterLogo('O', '#0078d4'),
@@ -4294,6 +4548,7 @@ async function initUnifiedIntegrations() {
           <div id="uf-email-provider-note" style="display:none;font-size:11px;line-height:1.5;padding:8px 10px;margin:2px 0 4px;border:1px solid color-mix(in srgb, var(--fg) 15%, transparent);border-left:3px solid var(--accent, var(--red));border-radius:4px;background:color-mix(in srgb, var(--fg) 4%, transparent);"></div>
           <div class="settings-row"><label class="settings-label">Name${_hint('Optional label for this account (e.g. “Work” or “Personal”). Leave blank to use the email address.')}</label><input id="uf-email-name" class="settings-input" placeholder="(optional — leave blank to use email)"></div>
           <div class="settings-row"><label class="settings-label">Email${_hint('Your email address. Used as the From: header on outgoing mail and as the display label when Name is blank.')}</label><input id="uf-email-from" class="settings-input" placeholder="you@example.com"></div>
+          <div class="uf-imap-smtp-sections">
           <div style="font-size:11px;font-weight:600;opacity:0.6;margin:4px 0 2px;display:flex;align-items:center;gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent, var(--red));flex-shrink:0;" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>IMAP (Receiving)</div>
           <div class="settings-row"><label class="settings-label">Host${_hint('Your IMAP server, e.g. imap.gmail.com, imap.migadu.com, a LAN host, or a Tailscale IP for Dovecot.')}</label><input id="uf-imap-host" class="settings-input" placeholder="imap.example.com"></div>
           <div class="settings-row"><label class="settings-label">Port${_hint('993 for IMAPS (most providers), 143 for plain or STARTTLS. Local servers often use a custom port like 31143.')}</label><input id="uf-imap-port" class="settings-input" type="number" placeholder="993" style="max-width:100px"></div>
@@ -4307,6 +4562,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Same as IMAP${_hint('Use the IMAP username and password for SMTP too (right for almost every provider). Turn off to enter separate SMTP credentials.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-smtp-same" checked><span class="admin-slider"></span></label></div>
           <div class="settings-row uf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="uf-smtp-user" class="settings-input"></div>
           <div class="settings-row uf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password. Outlook / Office 365 generally requires OAuth and will not work with this password form.')}</label><input id="uf-smtp-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
+          </div>
           <div class="settings-row" style="margin-top:4px"><label class="settings-label">Default${_hint('Use this account whenever no specific account is chosen.')}</label><label class="admin-switch" style="margin-left:0"><input type="checkbox" id="uf-email-default"><span class="admin-slider"></span></label><span style="font-size:10px;opacity:0.5;margin-left:6px">Used when nothing else is selected</span></div>
           <div class="settings-row" style="margin-top:10px;align-items:center;">
             <button class="admin-btn-add" id="uf-email-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
@@ -4336,6 +4592,10 @@ async function initUnifiedIntegrations() {
     // button opens the right page in a new tab and copies the URL for
     // mobile / cross-device flows.
     const PROVIDER_NOTES = {
+      gmail_gog: {
+        title: 'Gmail via gog CLI (OAuth)',
+        body: 'Uses gogcli with your existing Google OAuth session — no App Password needed. Install gogcli, run `gog auth login`, then enter your Gmail address above. Set GOG_PATH if gog.exe is not on the default path.',
+      },
       gmail: {
         title: 'Gmail needs an App Password',
         body: 'Your regular Google password won\'t work for IMAP. Generate a 16-character App Password (requires 2-Step Verification enabled) and paste it as the Password.',
@@ -4408,9 +4668,7 @@ async function initUnifiedIntegrations() {
       const n = PROVIDER_NOTES[key];
       if (!n) { noteEl.style.display = 'none'; noteEl.innerHTML = ''; return; }
       noteEl.style.display = '';
-      noteEl.innerHTML = `
-        <div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div>
-        <div style="opacity:0.8;margin-bottom:6px;">${esc(n.body)}</div>
+      const actionHtml = n.url ? `
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" class="admin-btn-sm" style="background:var(--red);border-color:var(--red);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
@@ -4420,7 +4678,11 @@ async function initUnifiedIntegrations() {
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copy link
           </button>
-        </div>`;
+        </div>` : '';
+      noteEl.innerHTML = `
+        <div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div>
+        <div style="opacity:0.8;margin-bottom:6px;">${esc(n.body)}</div>
+        ${actionHtml}`;
     };
 
     // Custom dropdown wire-up — the native <select> stays in the DOM as the
@@ -4473,14 +4735,25 @@ async function initUnifiedIntegrations() {
       _setFromKey(sel.value || '');
     })();
 
+    const _syncUfGogMode = () => {
+      const isGog = el('uf-email-provider').value === 'gmail_gog';
+      formEl.querySelectorAll('.uf-imap-smtp-sections').forEach((s) => {
+        s.style.display = isGog ? 'none' : '';
+      });
+    };
     // Provider preset → autofill IMAP + SMTP host/port + STARTTLS, set the
     // helper note, and update the Email/Username placeholders to a
     // provider-specific example so users see the right format at a glance.
     el('uf-email-provider').addEventListener('change', (e) => {
       const key = e.target.value;
       _renderProviderNote(key);
+      _syncUfGogMode();
       const p = PROVIDERS[key];
       if (!p) return;
+      if (p.gog) {
+        if (p.emailEx) el('uf-email-from').placeholder = p.emailEx;
+        return;
+      }
       el('uf-imap-host').value = p.imap.host;
       el('uf-imap-port').value = p.imap.port;
       el('uf-imap-starttls').checked = !!p.imap.starttls;
@@ -4504,6 +4777,15 @@ async function initUnifiedIntegrations() {
     el('uf-smtp-same').addEventListener('change', _syncSmtpSame);
     _syncSmtpSame();
     if (existing) {
+      if (existing.provider === 'gmail_gog') {
+        el('uf-email-provider').value = 'gmail_gog';
+        const trigger = el('uf-email-provider-trigger');
+        if (trigger) {
+          trigger.querySelector('.ufp-label').textContent = 'Gmail (gog CLI)';
+          trigger.querySelector('.ufp-icon').innerHTML = PROV_LOGO.gmail_gog;
+        }
+        _renderProviderNote('gmail_gog');
+      }
       el('uf-email-name').value = existing.name || '';
       el('uf-email-from').value = existing.from_address || '';
       el('uf-imap-host').value = existing.imap_host || '';
@@ -4526,6 +4808,7 @@ async function initUnifiedIntegrations() {
       el('uf-smtp-port').value = 465;
       el('uf-smtp-security').value = 'ssl';
     }
+    _syncUfGogMode();
     el('uf-email-cancel').addEventListener('click', () => { formEl.style.display = 'none'; });
 
     // Reset the Test button to neutral when the user edits any field
@@ -4551,6 +4834,7 @@ async function initUnifiedIntegrations() {
     // Collect the current form values + apply the "Same as IMAP" mirror —
     // shared by both Save and Test so they agree on what's being sent.
     const _collectBody = () => {
+      const isGog = el('uf-email-provider').value === 'gmail_gog';
       const body = {
         name: el('uf-email-name').value.trim(),
         from_address: el('uf-email-from').value.trim(),
@@ -4564,6 +4848,11 @@ async function initUnifiedIntegrations() {
         smtp_user: el('uf-smtp-user').value.trim(),
         is_default: el('uf-email-default').checked,
       };
+      if (isGog) {
+        body.provider = 'gmail_gog';
+        body.imap_user = body.from_address;
+        return body;
+      }
       if (el('uf-imap-pass').value) body.imap_password = el('uf-imap-pass').value;
       if (el('uf-smtp-pass').value) body.smtp_password = el('uf-smtp-pass').value;
       if (el('uf-smtp-same').checked) {

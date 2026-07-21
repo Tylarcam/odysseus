@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import patch
 
-from src.mcp_manager import _format_mcp_connection_error, McpManager
+from src.mcp_manager import _format_mcp_connection_error, _unwrap_mcp_exception, McpManager
 
 
 def test_playwright_mcp_connection_error_includes_install_hint():
@@ -27,6 +27,30 @@ def test_generic_mcp_connection_error_preserves_original_error():
     )
 
     assert msg == "boom"
+
+
+def test_docker_mcp_gateway_connect_error_includes_start_hint():
+    class FakeGroup(Exception):
+        def __init__(self, exc):
+            super().__init__("unhandled errors in a TaskGroup (1 sub-exception)")
+            self.exceptions = (exc,)
+
+    msg = _format_mcp_connection_error(
+        "Docker MCP",
+        transport="sse",
+        url="http://host.docker.internal:8811/sse",
+        error=FakeGroup(ConnectionError("All connection attempts failed")),
+    )
+
+    assert "All connection attempts failed" in msg
+    assert "start-docker-mcp-gateway.ps1" in msg
+    assert "host.docker.internal:8811/sse" in msg
+
+
+def test_unwrap_mcp_exception_flattens_single_exception_group():
+    inner = RuntimeError("leaf")
+    outer = ExceptionGroup("group", [inner])
+    assert _unwrap_mcp_exception(outer) is inner
 
 
 def test_http_transport_routes_to_start_http_connect():

@@ -30,7 +30,45 @@ def _usage() -> int:
     return 2
 
 
+def _dotenv_candidates() -> list[str]:
+    candidates = [
+        r"C:\Users\tylar\code\odysseus\.env",
+        os.path.expanduser("~/code/odysseus/.env"),
+    ]
+    odysseus_home = os.environ.get("ODYSSEUS_HOME", "").strip()
+    if odysseus_home:
+        candidates.insert(0, os.path.join(odysseus_home, ".env"))
+    seen: set[str] = set()
+    out: list[str] = []
+    for path in candidates:
+        norm = os.path.normpath(path)
+        if norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+def _try_load_dotenv(path: str) -> None:
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            if not key.startswith("ODYSSEUS_"):
+                continue
+            val = val.strip().strip('"').strip("'")
+            if val and not os.environ.get(key):
+                os.environ[key] = val
+
+
 def _config() -> tuple[str, str] | None:
+    if not os.environ.get("ODYSSEUS_URL") or not os.environ.get("ODYSSEUS_API_TOKEN"):
+        for path in _dotenv_candidates():
+            _try_load_dotenv(path)
     base_url = os.environ.get("ODYSSEUS_URL", "").strip().rstrip("/")
     token = os.environ.get("ODYSSEUS_API_TOKEN", "").strip()
     missing = []

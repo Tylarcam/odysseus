@@ -650,6 +650,7 @@ def _get_email_config(account_id: str | None = None, owner: str = "") -> dict:
                 cfg = {
                     "account_id": row.id,
                     "account_name": row.name,
+                    "provider": getattr(row, "provider", None) or "imap",
                     "smtp_host": row.smtp_host or "",
                     "smtp_port": int(row.smtp_port or 465),
                     "smtp_security": _smtp_security_mode({"smtp_security": getattr(row, "smtp_security", ""), "smtp_port": row.smtp_port}),

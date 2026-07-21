@@ -777,6 +777,7 @@ body.bg-pattern-sparkles {
        in from the right edge so it doesn't look glued to the border. */
     #tool-theme-btn.rail-minimized::after,
     #tool-tasks-btn.rail-minimized::after,
+    #tool-agent-bin-btn.rail-minimized::after,
     #tool-notes-btn.rail-minimized::after,
     #tool-library-btn.rail-minimized::after,
     #tool-gallery-btn.rail-minimized::after,
@@ -1927,6 +1928,213 @@ body.bg-pattern-sparkles {
       font-weight: 500;
       letter-spacing: 0.3px;
     }
+    /* Home dashboard — jump back in on welcome screen */
+    .home-dashboard {
+      pointer-events: auto;
+      margin-top: 24px;
+      width: min(96vw, 1120px);
+      text-align: left;
+      max-height: none;
+      display: flex;
+      flex-direction: column;
+    }
+    .home-dashboard-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 0 4px;
+    }
+    .home-dashboard-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      opacity: 0.7;
+    }
+    .home-dashboard-refresh {
+      pointer-events: auto;
+      border: none;
+      background: none;
+      color: var(--fg);
+      opacity: 0.45;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+    .home-dashboard-refresh:hover {
+      opacity: 0.85;
+      background: color-mix(in srgb, var(--fg) 6%, transparent);
+    }
+    .home-dashboard-loading {
+      font-size: 0.82rem;
+      opacity: 0.5;
+      text-align: center;
+      padding: 12px 0;
+    }
+    .home-dashboard-empty {
+      font-size: 0.8rem;
+      line-height: 1.5;
+      opacity: 0.45;
+      padding: 8px 4px 0;
+      max-width: 36rem;
+    }
+    .home-dashboard-cards {
+      display: flex;
+      flex-direction: row;
+      align-items: stretch;
+      gap: 12px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 2px 4px 8px;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      flex: 0 0 auto;
+      min-height: 182px;
+    }
+    #home-dashboard .home-dashboard-chat-card,
+    .home-dashboard-chat-card,
+    .home-dashboard-card {
+      flex: 0 0 280px;
+      width: 280px;
+      min-width: 280px;
+      max-width: 280px;
+      height: 182px;
+      min-height: 182px;
+      max-height: 182px;
+      box-sizing: border-box;
+      scroll-snap-align: start;
+      border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--panel) 75%, transparent);
+      padding: 14px 16px !important;
+      margin: 0;
+      cursor: pointer;
+      text-align: left;
+      color: inherit;
+      font: inherit;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      appearance: none;
+      -webkit-appearance: none;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    #home-dashboard .home-dashboard-chat-card:hover,
+    .home-dashboard-chat-card:hover {
+      border-color: color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+    }
+    .home-dashboard-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex: 0 0 22px;
+      min-height: 22px;
+      max-height: 22px;
+    }
+    .home-dashboard-card-name {
+      font-size: 0.92rem;
+      font-weight: 600;
+      color: var(--fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      min-width: 0;
+    }
+    .home-dashboard-card-when {
+      font-size: 0.68rem;
+      opacity: 0.4;
+      white-space: nowrap;
+      flex: 0 0 3.2em;
+      text-align: right;
+    }
+    .home-dashboard-card-preview {
+      margin: 0;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      opacity: 0.62;
+      display: -webkit-box;
+      -webkit-line-clamp: 5;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .home-dashboard-card-preview.is-empty {
+      opacity: 0.38;
+      font-style: italic;
+    }
+    .home-dashboard-card-previews {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .home-dashboard-card-empty {
+      font-size: 0.75rem;
+      opacity: 0.4;
+    }
+    .home-dashboard-preview {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      border: none;
+      background: none;
+      color: var(--fg);
+      cursor: pointer;
+      text-align: left;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font: inherit;
+      font-size: 0.8rem;
+    }
+    .home-dashboard-preview:hover {
+      background: color-mix(in srgb, var(--fg) 5%, transparent);
+    }
+    .home-dashboard-preview-kind {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      opacity: 0.4;
+      flex-shrink: 0;
+      min-width: 2.2em;
+    }
+    .home-dashboard-preview-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.88;
+    }
+    @media (max-width: 768px) {
+      .home-dashboard {
+        margin-top: 16px;
+        width: 96vw;
+      }
+      .home-dashboard-cards {
+        min-height: 160px;
+      }
+      #home-dashboard .home-dashboard-chat-card,
+      .home-dashboard-chat-card,
+      .home-dashboard-card {
+        flex: 0 0 240px;
+        width: 240px;
+        min-width: 240px;
+        max-width: 240px;
+        height: 160px;
+        min-height: 160px;
+        max-height: 160px;
+      }
+      #welcome-screen { top: 34%; }
+    }
     /* When welcome is active, push input bar up toward center */
     .chat-container .chat-input-bar {
       transition: margin 0.3s ease, max-width 0.3s ease;
@@ -1938,6 +2146,16 @@ body.bg-pattern-sparkles {
       max-width: 800px;
       width: 100%;
     }
+    /* Jump Back In recents: lift welcome block and leave room for voice + input */
+    .chat-container.welcome-active.welcome-has-recents #welcome-screen {
+      top: 24%;
+    }
+    .chat-container.welcome-active.welcome-has-recents .chat-input-bar {
+      margin-bottom: 10vh;
+    }
+    .chat-container.welcome-active.welcome-has-recents .voice-visualizer {
+      margin-bottom: 2px;
+    }
     @media (max-width:768px) {
       #welcome-screen .welcome-name { font-size:1.8rem; }
       #welcome-screen .welcome-sub { font-size:0.8rem; }
@@ -1945,6 +2163,12 @@ body.bg-pattern-sparkles {
         margin-bottom:0;
         margin-left:0;
         margin-right:0;
+      }
+      .chat-container.welcome-active.welcome-has-recents #welcome-screen {
+        top: 26%;
+      }
+      .chat-container.welcome-active.welcome-has-recents .chat-input-bar {
+        margin-bottom: 8vh;
       }
     }
     .msg {
@@ -2616,9 +2840,139 @@ body.bg-pattern-sparkles {
       border: none !important;
       animation: pulse-recording 1.5s infinite;
     }
+    .send-btn.voice-chat-mode.mic-mode {
+      background: color-mix(in srgb, var(--accent-primary, #7c9cff) 45%, var(--panel, #2a2a2a));
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary, #7c9cff) 35%, transparent);
+    }
+    .send-btn.voice-chat-mode.mic-mode:hover {
+      background: color-mix(in srgb, var(--accent-primary, #7c9cff) 60%, var(--panel, #2a2a2a));
+    }
+    .send-btn.voice-realtime-mode {
+      box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 50%, transparent);
+    }
+    .send-btn.voice-listening {
+      animation: pulse-listening 2s ease-in-out infinite;
+    }
+    @keyframes pulse-listening {
+      0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 50%, transparent); }
+      50% { box-shadow: 0 0 0 4px color-mix(in srgb, #22c55e 35%, transparent); }
+    }
+    .msg.voice-pending .body { opacity: 0.55; font-style: italic; }
+    .msg.voice-streaming .body { opacity: 0.92; }
     @keyframes pulse-recording {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.7; }
+    }
+    /* Mic button — single voice control */
+    #mic-btn-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    #mic-btn {
+      color: var(--fg);
+    }
+    #mic-btn.active {
+      color: var(--accent-primary, #7c9cff);
+      opacity: 1;
+    }
+    @keyframes _vc-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    #mic-btn.active svg {
+      animation: _vc-pulse 2s ease-in-out infinite;
+    }
+    #mic-btn.recording {
+      color: #ef4444;
+      animation: pulse-recording 1.5s infinite;
+    }
+    #mic-dropdown-caret {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 10px;
+      height: 20px;
+      padding: 0;
+      margin-left: -3px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--fg-muted, #888);
+      opacity: 0.55;
+      border-radius: 3px;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    #mic-dropdown-caret:hover {
+      opacity: 1;
+    }
+    /* Voice mode popover — above model picker (z-index 250) in chat-input-top */
+    .voice-mode-popover {
+      position: absolute;
+      bottom: calc(100% + 10px);
+      right: 0;
+      left: auto;
+      background: var(--panel, #1e1e1e);
+      border: 1px solid var(--border, #333);
+      border-radius: 10px;
+      padding: 10px 14px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      z-index: 300;
+      white-space: nowrap;
+      min-width: 180px;
+    }
+    .voice-mode-pill-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .voice-mode-pill-label {
+      font-size: 13px;
+      color: var(--fg);
+    }
+    /* Pill toggle */
+    .pill-toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .pill-toggle input[type="checkbox"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .pill-track {
+      display: block;
+      width: 34px;
+      height: 18px;
+      background: var(--border, #444);
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background 0.2s;
+      position: relative;
+    }
+    .pill-toggle input:checked + .pill-track {
+      background: var(--accent-primary, #7c9cff);
+    }
+    .pill-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+    .pill-toggle input:checked + .pill-track .pill-thumb {
+      transform: translateX(16px);
     }
     /* Mode toggle — Agent / Chat */
     .mode-toggle {
@@ -3181,6 +3535,340 @@ body.bg-pattern-sparkles {
       min-height: 32px;
       padding: 2px;
     }
+
+    /* Voice visualizer — waveform above chat input */
+    :root {
+      --voice-viz-idle: rgba(140, 140, 150, 0.42);
+      --voice-viz-listen: var(--color-recording, #ff3b30);
+      --voice-viz-speak: var(--accent-primary, #7c9cff);
+      --voice-viz-think: #f5a623;
+    }
+    .voice-visualizer {
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto 6px;
+      height: 28px;
+      opacity: 0.72;
+      transition: height 0.2s ease, opacity 0.2s ease;
+      pointer-events: none;
+    }
+    .voice-visualizer canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .voice-visualizer.is-active {
+      height: 36px;
+      opacity: 1;
+    }
+    .voice-visualizer.is-listening canvas {
+      filter: drop-shadow(0 0 6px color-mix(in srgb, var(--voice-viz-listen) 35%, transparent));
+    }
+    .voice-visualizer.is-speaking canvas {
+      filter: drop-shadow(0 0 6px color-mix(in srgb, var(--voice-viz-speak) 35%, transparent));
+    }
+    .voice-visualizer.is-thinking canvas {
+      filter: drop-shadow(0 0 6px color-mix(in srgb, var(--voice-viz-think) 35%, transparent));
+    }
+
+    /* Voice status pill — listening / thinking / speaking */
+    .voice-status-bar {
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1.2;
+      color: var(--fg-muted, #aeb4bd);
+      background: color-mix(in srgb, var(--panel, #1e1e1e) 88%, transparent);
+      border: 1px solid color-mix(in srgb, var(--border, #333) 80%, transparent);
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
+      pointer-events: none;
+    }
+    .voice-status-bar.is-visible,
+    .voice-status-bar--enter {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .voice-status-bar--exit {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    .voice-status-bar__dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--voice-viz-idle);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+    .voice-status-bar[data-state="listening"] .voice-status-bar__dot {
+      background: var(--voice-viz-listen);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--voice-viz-listen) 50%, transparent);
+      animation: voice-dot-pulse 1.2s ease-in-out infinite;
+    }
+    .voice-status-bar[data-state="thinking"] .voice-status-bar__dot {
+      background: var(--voice-viz-think);
+      animation: voice-dot-pulse 0.9s ease-in-out infinite;
+    }
+    .voice-status-bar[data-state="speaking"] .voice-status-bar__dot {
+      background: var(--voice-viz-speak);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--voice-viz-speak) 45%, transparent);
+    }
+    .voice-status-bar[data-state="connecting"] .voice-status-bar__dot,
+    .voice-status-bar[data-state="reconnecting"] .voice-status-bar__dot {
+      background: var(--accent-primary, #7c9cff);
+      animation: voice-dot-pulse 0.7s ease-in-out infinite;
+    }
+    .voice-status-bar__label {
+      font-weight: 600;
+      color: var(--fg, #e8eaed);
+      letter-spacing: 0.02em;
+    }
+    .voice-status-bar__state {
+      margin-left: auto;
+      font-variant-numeric: tabular-nums;
+      color: var(--fg-muted, #aeb4bd);
+    }
+    @keyframes voice-dot-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.25); opacity: 0.75; }
+    }
+    body.voice-mode-active .voice-visualizer {
+      opacity: 0.92;
+    }
+    body.voice-mode-active.voice-state-listening .chat-input-bar,
+    body.voice-mode-active.voice-state-speaking .chat-input-bar {
+      box-shadow: 0 -2px 0 color-mix(in srgb, var(--accent-primary, #7c9cff) 18%, transparent);
+    }
+
+    /* Voice debug panel — dev-only (?voice_debug=1) */
+    .voice-debug-panel {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 13000;
+      width: min(380px, calc(100vw - 24px));
+      max-height: min(420px, 45vh);
+      display: flex;
+      flex-direction: column;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.35;
+      color: #c8d0dc;
+      background: rgba(12, 14, 18, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(8px);
+      overflow: hidden;
+    }
+    .voice-debug-panel.is-collapsed .voice-debug-panel__body {
+      display: none;
+    }
+    .voice-debug-panel__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      user-select: none;
+    }
+    .voice-debug-panel__title {
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      font-size: 10px;
+      color: #9aa8bc;
+    }
+    .voice-debug-panel__toggle {
+      all: unset;
+      cursor: pointer;
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 4px;
+      color: #b8c4d4;
+    }
+    .voice-debug-panel__toggle:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .voice-debug-panel__body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding: 6px 8px 8px;
+      gap: 6px;
+    }
+    .voice-debug-panel__meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .voice-debug-panel__turn {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #8fa0b8;
+      flex: 1;
+      min-width: 0;
+    }
+    .voice-debug-panel__diag {
+      flex-shrink: 0;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.03em;
+    }
+    .voice-debug-panel__diag--ok { background: rgba(52, 199, 89, 0.2); color: #6ee08a; }
+    .voice-debug-panel__diag--warn { background: rgba(255, 159, 10, 0.2); color: #ffb84d; }
+    .voice-debug-panel__diag--fail { background: rgba(255, 59, 48, 0.22); color: #ff7b72; }
+    .voice-debug-panel__diag--idle { background: rgba(142, 142, 147, 0.18); color: #aeb4bd; }
+    .voice-debug-panel__latencies {
+      display: grid;
+      gap: 2px;
+      padding: 4px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .voice-debug-panel__latency-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .voice-debug-panel__latency-label {
+      color: #7f8fa3;
+    }
+    .voice-debug-panel__latency-value {
+      color: #dbe4f0;
+      font-variant-numeric: tabular-nums;
+    }
+    .voice-debug-panel__events {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      min-height: 0;
+      flex: 1;
+    }
+    .voice-debug-panel__event {
+      padding: 1px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #b0bccf;
+    }
+    .voice-debug-panel__event--fail {
+      color: #ff7b72;
+    }
+
+    /* TTS quick-controls popover */
+    .tts-controls-popover {
+      position: fixed;
+      z-index: 12050;
+      width: min(300px, calc(100vw - 16px));
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--input-border, var(--border));
+      background: var(--panel, #1e1e1e);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tts-controls-popover.hidden { display: none; }
+    .tts-controls-header {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      opacity: 0.65;
+      margin-bottom: 2px;
+    }
+    .tts-controls-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .tts-controls-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .tts-controls-row > label {
+      width: 58px;
+      flex-shrink: 0;
+      opacity: 0.75;
+    }
+    .tts-controls-row .settings-select {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      padding: 4px 6px;
+    }
+    .tts-controls-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-top: 4px;
+    }
+    .tts-controls-link {
+      background: none;
+      border: none;
+      color: var(--accent-primary, #7c9cff);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 4px 0;
+      margin-left: auto;
+    }
+    .tts-controls-msg {
+      min-height: 14px;
+      font-size: 11px;
+      opacity: 0.6;
+    }
+    .tts-controls-output-wrap {
+      display: flex;
+      flex: 1;
+      gap: 6px;
+      min-width: 0;
+    }
+    .tts-controls-output-wrap .settings-select {
+      flex: 1;
+      min-width: 0;
+    }
+    .tts-controls-output-wrap .admin-btn-sm {
+      flex-shrink: 0;
+      padding: 4px 8px;
+      font-size: 11px;
+    }
+    .tts-controls-hint {
+      margin: 0;
+      font-size: 10px;
+      line-height: 1.35;
+      opacity: 0.55;
+    }
+    #tts-controls-btn.active {
+      color: var(--accent-primary, #7c9cff);
+      background: color-mix(in srgb, var(--accent-primary, #7c9cff) 14%, transparent);
+    }
+
     .attachment-placeholder {
       display: flex;
       align-items: center;
@@ -3376,6 +4064,15 @@ body.bg-pattern-sparkles {
 
     .msg-actions {
       display:inline-flex; align-items:center; gap:4px;
+      flex-wrap: wrap;
+    }
+    .ai-tts-button.msg-tts-play-btn {
+      color: var(--accent-primary, #7c9cff);
+      opacity: 1;
+    }
+    .ai-tts-button.msg-tts-skip-btn:not(.hidden):not(:disabled) {
+      color: var(--accent-primary, #7c9cff);
+      opacity: 1;
     }
     .footer-copy-btn {
       background:none; border:none;
@@ -3716,6 +4413,52 @@ body.bg-pattern-sparkles {
       border-color: var(--accent-primary, var(--red));
       background: color-mix(in srgb, var(--accent-primary, var(--red)) 12%, var(--bg));
     }
+    /* Doclib sparkle — improve sentence. Hidden until the block is editing. */
+    pre .improve-sentence {
+      position:absolute; right:114px; top:6px;
+      background:var(--bg); color:var(--fg);
+      border:1px solid var(--border); border-radius:6px;
+      width:28px; height:28px; padding:0; cursor:pointer;
+      opacity:0; transition: opacity .15s, color .15s, border-color .15s, transform .15s;
+      display:none; align-items:center; justify-content:center;
+      pointer-events:none;
+    }
+    pre .improve-sentence.bottom { top:auto; bottom:6px; }
+    pre.editing .improve-sentence {
+      display:flex;
+      opacity:0.85;
+      pointer-events:auto;
+      color: var(--accent-primary, var(--red));
+      border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 55%, var(--border));
+    }
+    pre.editing .improve-sentence:hover {
+      opacity:1;
+      background: color-mix(in srgb, var(--accent-primary, var(--red)) 12%, var(--bg));
+    }
+    pre.editing .improve-sentence.busy {
+      opacity:0.55;
+      cursor:wait;
+      animation: code-copy-pulse 0.9s ease-in-out infinite;
+    }
+    /* Save-to-note button — positioned left of edit button */
+    pre .save-to-note {
+      position:absolute; right:78px; top:6px;
+      background:var(--bg); color:var(--fg);
+      border:1px solid var(--border); border-radius:6px;
+      width:28px; height:28px; padding:0; cursor:pointer;
+      opacity:0; transition: opacity .15s, color .15s, border-color .15s;
+      display:flex; align-items:center; justify-content:center;
+    }
+    pre .save-to-note.bottom { top:auto; bottom:6px; }
+    pre:hover .save-to-note { opacity:0.7; }
+    pre .save-to-note:hover { opacity:1; color:var(--hl-string, #98c379); border-color:var(--hl-string, #98c379); }
+    pre .save-to-note.saved {
+      opacity: 1;
+      color: var(--color-save-green, #4caf50);
+      border-color: var(--color-save-green, #4caf50);
+      background: color-mix(in srgb, var(--color-save-green, #4caf50) 18%, var(--bg));
+      animation: code-copy-pulse 0.36s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
     pre .use-code {
       position:absolute; right:42px; top:6px;
       background:var(--bg); color:var(--fg);
@@ -3748,7 +4491,9 @@ body.bg-pattern-sparkles {
        they stop covering the text on touch screens. Tap again to bring back. */
     pre.buttons-hidden .copy-code,
     pre.buttons-hidden .edit-code,
-    pre.buttons-hidden .run-code { opacity:0 !important; pointer-events:none !important; }
+    pre.buttons-hidden .save-to-note,
+    pre.buttons-hidden .run-code,
+    pre.buttons-hidden .improve-sentence { opacity:0 !important; pointer-events:none !important; }
 
     /* Editing state — subtle border on the code block */
     /* Editing state: was a 1px subtle outline that was almost invisible on
@@ -3772,9 +4517,9 @@ body.bg-pattern-sparkles {
       pointer-events: none;
     }
 
-    /* Run code button — positioned left of edit button */
+    /* Run code button — positioned left of save-to-note button */
     pre .run-code {
-      position:absolute; right:78px; top:6px;
+      position:absolute; right:114px; top:6px;
       background:var(--bg); color:var(--fg);
       border:1px solid var(--border); border-radius:6px;
       width:28px; height:28px; padding:0; cursor:pointer;
@@ -3789,9 +4534,10 @@ body.bg-pattern-sparkles {
        double the height of a 1-line bash. Copy is text ("Copy" → "✓ Copied"),
        Run and Edit keep their icons but at smaller sizes. Edit swaps to
        a "Save" text label when its .active state is on. */
-    pre.pre-compact { padding-right: 200px; min-height: 0; }
+    pre.pre-compact { padding-right: 250px; min-height: 0; }
     pre.pre-compact .copy-code,
     pre.pre-compact .edit-code,
+    pre.pre-compact .save-to-note,
     pre.pre-compact .run-code {
       height: 20px;
       padding: 0;
@@ -3820,12 +4566,22 @@ body.bg-pattern-sparkles {
     pre.pre-compact .edit-code svg { width: 12px; height: 12px; }
     pre.pre-compact .edit-code::after { content: 'Edit'; }
     pre.pre-compact .edit-code.active::after { content: 'Save'; }
+    /* Note: icon + "Note" label */
+    pre.pre-compact .save-to-note {
+      width: auto;
+      padding: 0 8px 0 6px;
+      gap: 3px;
+      right: 122px;
+    }
+    pre.pre-compact .save-to-note svg { width: 12px; height: 12px; }
+    pre.pre-compact .save-to-note::after { content: 'Note'; }
+    pre.pre-compact .save-to-note.saved::after { content: '✓ Saved'; }
     /* Run: icon + "Run" label */
     pre.pre-compact .run-code {
       width: auto;
       padding: 0 8px 0 6px;
       gap: 3px;
-      right: 126px;
+      right: 180px;
     }
     pre.pre-compact .run-code svg { width: 12px; height: 12px; }
     pre.pre-compact .run-code::after { content: 'Run'; }
@@ -3833,12 +4589,14 @@ body.bg-pattern-sparkles {
        viewport, the existing JS toggles .bottom to flip them down). */
     pre.pre-compact .copy-code.bottom,
     pre.pre-compact .edit-code.bottom,
+    pre.pre-compact .save-to-note.bottom,
     pre.pre-compact .run-code.bottom { top: auto; bottom: 3px; }
 
     /* Touch devices: no hover, so always show copy/run/edit buttons */
     @media (hover: none) {
       pre .copy-code { opacity:0.7; }
       pre .edit-code { opacity:0.7; }
+      pre .save-to-note { opacity:0.7; }
       pre .run-code { opacity:0.7; }
     }
 
@@ -3915,6 +4673,13 @@ body.bg-pattern-sparkles {
       box-sizing: border-box;
     }
     .toast.show { opacity:1; transform: translateX(0); }
+    .toast.toast--handoff {
+      max-width: min(520px, calc(100vw - 32px));
+      align-items: flex-start;
+    }
+    .toast.toast--multiline {
+      white-space: pre-wrap;
+    }
     .toast .toast-checkmark {
       display: inline-flex;
       align-items: center;
@@ -3962,6 +4727,10 @@ body.bg-pattern-sparkles {
     }
     body:has(.notes-pane.modal-right-docked) .toast.show { transform: translateX(0); }
     body:has(.notes-pane.modal-right-docked) .toast.exiting { transform: translateX(120%); }
+    /* Notes fullscreen edit sits at z-index 10500 — lift toast above it. */
+    body:has(.note-fullscreen-overlay.open) .toast {
+      z-index: 10650;
+    }
     @media (max-width: 768px) {
       .toast {
         top: 12px;
@@ -4062,7 +4831,7 @@ body.bg-pattern-sparkles {
       .box { max-height:none; }
       .chat-container { padding:10px; flex:1; margin-top:0; padding-top:42px; min-height:0; }
       .scroll-nav-btn { width:44px; height:44px; font-size:14px; margin-bottom:0; }
-      .send-btn { width:48px; height:48px !important; border-radius:12px; }
+      .send-btn { width:48px; height:48px !important; border-radius:12px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
       .send-btn svg { width:22px; height:22px; }
       #compare-toggle-btn { display:none !important; }
       .section[draggable] { -webkit-user-drag:none; }
@@ -4246,6 +5015,38 @@ body.bg-pattern-sparkles {
         min-width: 44px;
         min-height: 44px;
       }
+      /* TTS play on messages — always visible, finger-sized */
+      .ai-tts-button,
+      .ai-tts-button.msg-tts-play-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 10px !important;
+        opacity: 1 !important;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .ai-tts-button svg {
+        width: 18px;
+        height: 18px;
+      }
+      .msg-footer .msg-actions {
+        min-height: 44px;
+        align-items: center;
+      }
+      /* Speech popover — full-width preview on phones */
+      .tts-controls-popover {
+        left: 8px !important;
+        right: 8px;
+        width: auto;
+        max-width: none;
+      }
+      .tts-controls-actions .admin-btn-sm {
+        min-height: 44px;
+        padding: 10px 16px;
+        font-size: 13px;
+      }
+      #tts-ctrl-preview {
+        flex: 1;
+      }
       /* Tool indicators — icon only on mobile (hide text, keep x) */
       .tool-indicator > span {
         display: none !important;
@@ -4299,6 +5100,7 @@ body.bg-pattern-sparkles {
       /* Code block buttons — slightly bigger touch targets */
       pre .copy-code,
       pre .edit-code,
+      pre .save-to-note,
       pre .run-code {
         width: 44px;
         height: 44px;
@@ -4320,8 +5122,11 @@ body.bg-pattern-sparkles {
       pre .edit-code {
         right: 58px;
       }
-      pre .run-code {
+      pre .save-to-note {
         right: 110px;
+      }
+      pre .run-code {
+        right: 162px;
       }
       /* Dropdowns — bigger touch targets on mobile */
       .dropdown-item-compact {
@@ -4347,21 +5152,36 @@ body.bg-pattern-sparkles {
       .chat-input-bar {
         padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
       }
-      /* Mode toggle — larger touch targets */
+      /* Agent/Chat must stay visible on phones — override the narrow
+         chatbar container query that hides it for split-pane desktop. */
+      .chat-input-right .mode-toggle {
+        display: flex !important;
+      }
+      .chat-input-right {
+        gap: 4px;
+      }
+      /* Composer icons: keep finger-sized mic/send; left tools are usually
+         parked in + overflow so they can be slightly tighter. */
+      .chat-input-left > .input-icon-btn {
+        padding: 8px;
+        min-width: 40px;
+        min-height: 40px;
+      }
+      /* Mode toggle — compact but still tappable beside mic/send */
       .mode-toggle {
-        height: 34px;
-        border-radius: 12px;
+        height: 32px;
+        border-radius: 10px;
       }
       .mode-toggle::before {
-        border-radius: 11px;
+        border-radius: 9px;
       }
       .mode-toggle-btn {
-        padding: 0 14px;
-        font-size: 12px;
-        min-height: 34px;
+        padding: 0 10px;
+        font-size: 11px;
+        min-height: 32px;
       }
-      #mode-agent-btn { border-radius: 12px 0 0 12px; }
-      #mode-chat-btn { border-radius: 0 12px 12px 0; }
+      #mode-agent-btn { border-radius: 10px 0 0 10px; }
+      #mode-chat-btn { border-radius: 0 10px 10px 0; }
       /* Diff mode — stack toolbar, bigger buttons */
       .diff-toolbar {
         padding: 8px 12px;
@@ -4922,6 +5742,7 @@ body.bg-pattern-sparkles {
       #calendar-modal,
       #gallery-modal,
       #tasks-modal,
+      #agent-bin-modal,
       #memory-modal,
       #doclib-modal,
       #compare-model-overlay,
@@ -4954,6 +5775,7 @@ body.bg-pattern-sparkles {
     }
     .memory-modal-content,
     .tasks-modal-content,
+    .agent-bin-content,
     .preset-modal-content,
     #cookbook-modal .modal-content,
     #theme-popup,
@@ -11995,10 +12817,12 @@ textarea.memory-add-input {
      it's unaffected). Slightly narrower type picker buys a little more room. */
   #doc-actions-footer #doc-undo-btn span,
   #doc-actions-footer #doc-footer-close-btn span,
+  #doc-actions-footer #doc-footer-save-btn span,
   #doc-email-actions #doc-email-discard-btn span { display: none; }
   #doc-actions-footer #doc-undo-btn,
   #doc-actions-footer #doc-footer-close-btn,
   #doc-email-actions #doc-email-discard-btn { gap: 0; padding: 0 9px; }
+  #doc-actions-footer #doc-footer-save-btn { gap: 0; padding: 0 11px; }
   #doc-actions-footer #doc-footer-copy-btn { gap: 0; padding: 0 13px; font-size: 0; }
   /* In reply mode the button carries a "Reply" label that should stay visible
      (the icon-only treatment above is only for the plain Copy action). */
@@ -13654,6 +14478,9 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   gap: 8px;
 }
 .admin-user-name { font-size: 13px; font-weight: 500; }
+.adm-ep-name-row { display: inline-flex; align-items: center; gap: 6px; }
+.adm-ep-provider-logo { opacity: 0.85; flex-shrink: 0; }
+.adm-ep-provider-logo svg { width: 14px; height: 14px; display: block; }
 /* Privilege panel */
 .admin-priv-panel {
   max-height: 600px;
@@ -14972,6 +15799,113 @@ body.right-dock-active .chat-container,
 body.right-dock-active:not(.email-doc-split-active) .doc-editor-pane {
   margin-right: var(--right-dock-w, 0px);
 }
+
+/* ── Split chat (secondary session pane) ── */
+#split-chat-modal .split-chat-modal-content {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 42vw);
+  min-width: 320px;
+  max-width: 92vw;
+  height: min(92vh, 900px);
+  max-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+}
+#split-chat-modal.modal-right-docked .split-chat-modal-content,
+#split-chat-modal.modal-left-docked .split-chat-modal-content {
+  width: var(--right-dock-w, 420px);
+  min-width: 280px;
+  max-width: none;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
+}
+.split-chat-header {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  gap: 6px;
+}
+.split-chat-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.split-chat-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.split-chat-focus-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  opacity: 0.75;
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: inherit;
+}
+.split-chat-focus-btn:hover { opacity: 1; border-color: var(--accent, var(--red)); color: var(--accent, var(--red)); }
+.split-chat-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+}
+.split-chat-history {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+  padding-top: 8px;
+  --chat-max: 100%;
+}
+.split-chat-empty {
+  padding: 24px 16px;
+  text-align: center;
+  opacity: 0.45;
+  font-size: 0.85rem;
+}
+.split-chat-input-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+}
+.split-chat-input-bar textarea {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.split-chat-input-bar .split-chat-send-btn {
+  flex-shrink: 0;
+}
+body.split-chat-active #split-chat-modal:not(.hidden) {
+  display: flex;
+}
+@media (max-width: 768px) {
+  #split-chat-modal { display: none !important; }
+}
+
 .modal.modal-right-docked {
   align-items: stretch;
   justify-content: flex-end;
@@ -15733,6 +16667,25 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   min-width: 58px;
   padding: 0 8px;
   box-sizing: border-box;
+}
+/* Audio brief "Listen" — progress line above the expanded action bar,
+   plus button states while generating / playing. */
+.doclib-listen-progress {
+  display: none;
+  font-size: 10px;
+  color: var(--fg-muted);
+  padding: 4px 0 0;
+  opacity: 0.8;
+}
+.doclib-card-expanded .doclib-listen-progress {
+  display: block;
+}
+.doclib-listen-progress:empty {
+  display: none !important;
+}
+.doclib-listen-btn.doclib-listen-playing {
+  border-color: var(--accent, var(--red));
+  color: var(--accent, var(--red));
 }
 @media (max-width: 768px) {
   .doclib-btn-hint { display: none !important; }
@@ -29438,13 +30391,16 @@ body.doc-find-active mark.doc-find-mark.current {
   border-top: 1px solid var(--border); background: var(--bg); flex-shrink: 0;
   align-items: center;
 }
-/* Documents footer — X + Undo stay on the LEFT, Copy/Export group pushed
+/* Documents footer — Undo stays on the LEFT, Save + Copy/Export pushed
    to the RIGHT. Email composer keeps its original flex-end layout. */
 #doc-actions-footer {
   justify-content: flex-start;
 }
-#doc-actions-footer .email-send-split {
+#doc-actions-footer #doc-footer-save-btn {
   margin-left: auto;
+}
+#doc-actions-footer .email-send-split {
+  margin-left: 0;
 }
 /* WYSIWYG email body — what the recipient sees, edited in place. */
 .doc-email-richbody {
@@ -29746,6 +30702,25 @@ body.doc-find-active mark.doc-find-mark.current {
 /* Notes panel — body-level flex sibling of chat-container */
 body.notes-view .chat-container { flex: 1; min-width: 0; }
 
+/* ── CMD Center — canvas page mode (not overlay) ── */
+#cmd-center-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+body.cmd-center-view #cmd-center-pane {
+  display: flex;
+}
+body.cmd-center-view .chat-container {
+  display: none;
+}
+
 /* Mobile: notes panel takes over full screen */
 @media (max-width: 768px) {
   body.notes-view .notes-pane {
@@ -29807,6 +30782,52 @@ body.notes-view .chat-container { flex: 1; min-width: 0; }
   }
   body.notes-view .mobile-new-chat-btn,
   body.notes-view .hamburger-btn {
+    display: none !important;
+  }
+
+  /* CMD Center — full-screen bottom sheet on mobile */
+  body.cmd-center-view #cmd-center-pane {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    flex: none !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    z-index: 170;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    animation: sheet-enter 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    transform-origin: bottom center;
+  }
+  body.cmd-center-view .cmd-mobile-grabber {
+    display: block;
+    flex-shrink: 0;
+    height: 18px;
+    position: relative;
+    background: #050705;
+    touch-action: none;
+    cursor: grab;
+  }
+  body.cmd-center-view .cmd-mobile-grabber::before {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    background: #a6e22e;
+    opacity: 0.25;
+    border-radius: 2px;
+  }
+  body.cmd-center-view .mobile-new-chat-btn,
+  body.cmd-center-view .hamburger-btn {
     display: none !important;
   }
 
@@ -29873,8 +30894,8 @@ body.notes-view .chat-container { flex: 1; min-width: 0; }
 }
 /* ── Mobile notes UX ────────────────────────────────────
    Tiles become read-only previews on touch ≤768px wide.
-   Tap opens a fullscreen overlay where editing happens; long-press
-   toggles drag-to-reorder. Wired up in static/js/notes.js. */
+   Tap opens a fullscreen overlay; swipe L/R for actions;
+   600ms hold opens quick menu; 450ms hold + drag reorders. */
 body.notes-mobile-mode .note-card-corner,
 body.notes-mobile-mode .note-card-corner-edit,
 body.notes-mobile-mode .note-card-corner-archive,
@@ -29927,9 +30948,182 @@ body.notes-mobile-mode .note-card {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
+  overflow: hidden;
+  touch-action: pan-y;
 }
 body.notes-mobile-mode .note-card:active {
   transform: scale(0.985);
+}
+/* Allow native text selection on preview text */
+body.notes-mobile-mode .note-content-preview,
+body.notes-mobile-mode .note-card-title {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* Swipe underlays live inside .note-card so the card remains a direct
+   grid item and looks identical to pre-gesture layout at rest. */
+body.notes-mobile-mode .note-card > .note-card-swipe-surface {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+}
+body.notes-mobile-mode .note-card > .note-swipe-underlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+}
+body.notes-mobile-mode .note-card > .note-swipe-underlay-left {
+  justify-content: flex-end;
+  color: var(--green, #50fa7b);
+  background: color-mix(in srgb, var(--green, #50fa7b) 14%, transparent);
+}
+body.notes-mobile-mode .note-card > .note-swipe-underlay-right {
+  justify-content: flex-start;
+  color: var(--accent, var(--red));
+  background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
+}
+body.notes-mobile-mode .note-card.note-swipe-reveal-left > .note-swipe-underlay-left,
+body.notes-mobile-mode .note-card.note-swipe-reveal-right > .note-swipe-underlay-right {
+  opacity: 1;
+}
+
+/* Pinned badge — always visible on mobile, larger and higher contrast */
+body.notes-mobile-mode .note-card-pinned .note-card-pin {
+  display: flex !important;
+  width: 24px;
+  height: 24px;
+  top: 4px;
+  right: 4px;
+  opacity: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  z-index: 3;
+}
+body.notes-mobile-mode .note-card-pinned .note-card-pin svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Quick-options bottom sheet (600ms hold) */
+.note-mobile-quick-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10990;
+  background: rgba(0, 0, 0, 0.35);
+  animation: ncm-pop 0.15s ease-out both;
+}
+.note-mobile-quick-menu {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 11000;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  padding: 8px 12px max(16px, env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+  animation: note-quick-sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes note-quick-sheet-in {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.note-mobile-quick-menu-grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 22%, transparent);
+  margin: 4px auto 12px;
+}
+.note-mobile-quick-menu .nmqm-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 48px;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 15px;
+  text-align: left;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.note-mobile-quick-menu .nmqm-item:active {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+/* Mobile swipe-right handoff — radial icon fan at 12 / 9 / 3 */
+.note-handoff-fan-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10990;
+  background: rgba(0, 0, 0, 0.28);
+  animation: ncm-pop 0.15s ease-out both;
+}
+.note-handoff-fan {
+  position: fixed;
+  inset: 0;
+  z-index: 11000;
+  pointer-events: none;
+}
+.note-handoff-fan-btn {
+  position: fixed;
+  width: 56px;
+  height: 56px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  font-family: inherit;
+  animation: note-handoff-fan-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+  -webkit-tap-highlight-color: transparent;
+}
+.note-handoff-fan-btn:active {
+  transform: scale(0.94);
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 45%, var(--border));
+}
+.note-handoff-fan-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes note-handoff-fan-in {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 /* Drag-to-reorder mode — desaturate the grid and sweep a subtle
@@ -29994,16 +31188,15 @@ body.notes-drag-mode .note-card.note-card-dragging {
   transition: box-shadow 0.18s ease;
 }
 body.notes-drag-mode .note-card.note-card-dragging::after { display: none; }
-body.notes-drag-mode .note-card .note-card-pin {
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
+/* Pin visible in drag mode for tap-to-pin while rearranging */
+body.notes-mobile-mode.notes-drag-mode .note-card-pin {
+  display: flex !important;
+  opacity: 0.75;
+  pointer-events: auto !important;
+  visibility: visible !important;
 }
-body.notes-drag-mode .note-card-pinned .note-card-pin,
-body.notes-drag-mode .note-card-pin.active,
-body.notes-drag-mode .note-card-pin svg {
-  visibility: hidden !important;
-  opacity: 0 !important;
+body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
+  opacity: 1;
 }
 /* Placeholder — same footprint as the lifted card, dotted outline so
    the drop target is visible while the card follows the finger. */
@@ -30892,9 +32085,8 @@ body.notes-drag-mode .note-card-pin svg {
     border-color: color-mix(in srgb, var(--fg) 18%, transparent);
   }
 }
-/* Pin button on mobile — only reveal once the user has long-pressed to
-   enter rearrange (drag) mode. Outside drag mode the card stays clean. */
-body.notes-mobile-mode.notes-drag-mode .note-card-pin {
+/* Pin button on mobile — show in drag mode; pinned notes always visible above */
+body.notes-mobile-mode.notes-drag-mode .note-card:not(.note-card-pinned) .note-card-pin {
   display: flex !important;
   opacity: 0.7;
 }
@@ -31876,6 +33068,14 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   align-items: center;
   gap: 6px;
 }
+.notes-search-bar .notes-sort-select {
+  flex-shrink: 0;
+  width: 86px;
+  height: 30px;
+  min-height: 30px;
+  font-size: 11px;
+  top: 0;
+}
 .notes-select-trigger {
   position: relative;
   top: 3px;
@@ -32105,6 +33305,19 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   color: var(--red, #e55);
   background: color-mix(in srgb, var(--red, #e55) 12%, transparent);
   border-color: color-mix(in srgb, var(--red, #e55) 65%, var(--border));
+}
+.notes-label-import {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--accent) 85%, var(--fg));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.notes-label-import:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
 }
 /* Today + Goals filter chips — share styling, tint with a warm accent so
    they read as "long-term work" alongside the cool reminder chip. */
@@ -33021,6 +34234,244 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
 .note-form-icon-btn svg { width: 31px !important; height: 31px !important; }
 .note-form-icon-btn:hover { opacity: 1; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .note-form-delete-btn:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 50%, var(--border)); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.note-form-handoff-btn:hover {
+  color: var(--accent, var(--hl-function));
+  border-color: color-mix(in srgb, var(--accent, var(--hl-function)) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent, var(--hl-function)) 10%, transparent);
+}
+.note-handoff-menu-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  padding: 6px 10px 2px;
+}
+.note-handoff-tag {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, var(--hl-function, #61afef) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--hl-function, #61afef) 35%, transparent);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.note-handoff-tag:hover { opacity: 0.9; }
+.note-handoff-tag--queued {
+  border-color: color-mix(in srgb, var(--hl-warning, #e5c07b) 45%, transparent);
+  background: color-mix(in srgb, var(--hl-warning, #e5c07b) 14%, transparent);
+}
+.note-handoff-tag--running {
+  border-color: color-mix(in srgb, var(--hl-function, #61afef) 55%, transparent);
+  animation: note-handoff-pulse 1.6s ease-in-out infinite;
+}
+.note-handoff-tag--complete {
+  border-color: color-mix(in srgb, var(--green, #98c379) 45%, transparent);
+  background: color-mix(in srgb, var(--green, #98c379) 14%, transparent);
+}
+.note-handoff-tag--failed {
+  border-color: color-mix(in srgb, var(--red, #e06c75) 45%, transparent);
+  background: color-mix(in srgb, var(--red, #e06c75) 12%, transparent);
+}
+@keyframes note-handoff-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+.note-handoff-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--hl-function, #61afef) 35%, transparent);
+  background: color-mix(in srgb, var(--hl-function, #61afef) 10%, transparent);
+  font-size: 11px;
+}
+.note-handoff-banner code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+.note-handoff-banner-open,
+.note-handoff-banner-agent {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.note-handoff-outcome {
+  font-size: 11px;
+  opacity: 0.85;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--green, #98c379) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green, #98c379) 25%, transparent);
+  white-space: pre-wrap;
+}
+.note-handoff-outcome--failed {
+  background: color-mix(in srgb, var(--red, #e06c75) 10%, transparent);
+  border-color: color-mix(in srgb, var(--red, #e06c75) 25%, transparent);
+}
+
+/* ── Selection action bar (highlight → Handoff / Search / Listen / Cal / Fork / Gen) ── */
+.selection-action-bar {
+  position: fixed;
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel, var(--bg)) 92%, transparent);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--fg) 12%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.selection-action-bar.hidden {
+  display: none;
+}
+.selection-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+/* `display: inline-flex` above beats the UA [hidden] rule — without this,
+   a disabled Listen button stays visible and just looks greyed-out. */
+.selection-action-btn[hidden] {
+  display: none !important;
+}
+.selection-action-btn svg {
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+.selection-action-btn:hover:not(:disabled):not(.selection-action-btn-disabled) {
+  background: color-mix(in srgb, var(--accent, var(--hl-function)) 12%, transparent);
+  color: var(--accent, var(--hl-function));
+}
+.selection-action-btn:disabled,
+.selection-action-btn.selection-action-btn-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.selection-handoff-menu.note-handoff-menu-dropdown,
+.selection-cal-menu-dropdown,
+.selection-search-menu-dropdown,
+.selection-gen-menu-dropdown {
+  min-width: 180px;
+  max-height: min(360px, calc(100vh - 16px));
+  overflow-y: auto;
+}
+.selection-gen-preview {
+  position: relative;
+  margin: 4px 10px 8px;
+  padding: 8px;
+  padding-bottom: 40px; /* room for save/edit/copy overlay buttons */
+  max-height: 240px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: color-mix(in srgb, var(--fg) 85%, transparent);
+}
+.selection-gen-preview > code {
+  display: block;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  white-space: inherit;
+  word-break: inherit;
+}
+/* Always show overlay controls in the Gen menu (hover-only is easy to miss). */
+.selection-gen-preview .copy-code,
+.selection-gen-preview .edit-code,
+.selection-gen-preview .save-to-note {
+  opacity: 0.75;
+}
+.selection-handoff-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+.selection-search-query-preview {
+  padding: 4px 10px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--fg) 70%, transparent);
+  word-break: break-word;
+}
+.selection-search-agent--unavailable {
+  opacity: 0.45;
+}
+.selection-search-loading,
+.selection-search-empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+.selection-cal-preview {
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.selection-cal-preview-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.selection-cal-preview-when {
+  color: var(--accent, var(--hl-function));
+  font-weight: 600;
+}
+.selection-cal-preview-title {
+  color: var(--fg-muted, color-mix(in srgb, var(--fg) 70%, transparent));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selection-cal-preview-more {
+  font-size: 10px;
+  color: var(--fg-muted, color-mix(in srgb, var(--fg) 55%, transparent));
+  padding-top: 2px;
+}
+.note-form-handoff-btn.note-handoff-sent {
+  color: var(--green, #98c379);
+  border-color: color-mix(in srgb, var(--green, #98c379) 50%, var(--border));
+}
 
 /* Draw mode — canvas + small toolbar */
 .note-form-draw-wrap {
@@ -35163,6 +36614,32 @@ body.research-panel-view #research-divider { display:none; }
   border:2px solid currentColor; border-right-color:transparent; border-radius:50%;
   animation: spin 0.7s linear infinite;
 }
+.research-template-row {
+  display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; align-items:center;
+}
+.research-template-btn {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.research-template-btn:hover {
+  border-color: var(--red);
+  color: var(--fg);
+}
+.research-template-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.research-template-btn.research-template-swarm {
+  border-color: color-mix(in srgb, var(--accent, #6366f1) 45%, var(--border));
+  color: color-mix(in srgb, var(--accent, #6366f1) 85%, var(--fg-muted));
+}
 .research-category-row {
   display:flex; gap:4px; margin-top:8px; flex-wrap:wrap;
 }
@@ -36689,4 +38166,80 @@ body.theme-frosted .modal {
 /* Reuses .confirm-btn .confirm-btn-primary; flex-row deltas + height match to
    the input beside it (.confirm-btn won't stretch on its own). */
 .ask-user-other-send { flex-shrink: 0; white-space: nowrap; min-height: 39px; }
+
+/* Agent Bin — handoff inbox widget */
+.agent-bin-content .modal-body.agent-bin-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  max-height: min(60vh, 520px);
+}
+.agent-bin-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #444) 60%, transparent);
+  background: color-mix(in srgb, var(--bg2, #2a2a2a) 50%, transparent);
+}
+.agent-bin-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.agent-bin-status {
+  cursor: default;
+  pointer-events: none;
+}
+.agent-bin-target {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.agent-bin-when {
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.55;
+}
+.agent-bin-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.agent-bin-outcome {
+  font-size: 11px;
+  opacity: 0.85;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--green, #98c379) 8%, transparent);
+  white-space: pre-wrap;
+}
+.agent-bin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-bin-empty {
+  padding: 24px 12px;
+  text-align: center;
+  opacity: 0.6;
+  font-size: 13px;
+}
+.rail-agent-bin-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  background: var(--red, #e06c75);
+  color: #fff;
+  pointer-events: none;
+}
+#rail-agent-bin { position: relative; }
 .ask-user-other-send:disabled { opacity: 0.5; cursor: default; }

@@ -1,0 +1,4 @@
+# Local speech-to-text only — faster-whisper (CTranslate2).
+# Installed when Docker build arg INSTALL_STT=true.
+# Kept separate from requirements-optional.txt so STT does not pull AGPL PyMuPDF.
+faster-whisper

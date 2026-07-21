@@ -115,6 +115,21 @@ def test_validate_caldav_url_blocks_mixed_dns_in_any_order(monkeypatch, addrs):
         caldav_sync.validate_caldav_url("https://calendar.example.com/dav")
 
 
+def test_sync_caldav_not_configured_returns_soft_noop(monkeypatch):
+    import types
+    import sys
+
+    prefs_mod = types.ModuleType("routes.prefs_routes")
+    prefs_mod._load_for_user = lambda owner: {}
+    monkeypatch.setitem(sys.modules, "routes.prefs_routes", prefs_mod)
+
+    result = asyncio.run(caldav_sync.sync_caldav("alice"))
+
+    assert result["configured"] is False
+    assert result["errors"] == []
+    assert result["events"] == 0
+
+
 def test_sync_caldav_decrypts_stored_password_and_validates_url(monkeypatch):
     monkeypatch.setattr(
         caldav_sync,

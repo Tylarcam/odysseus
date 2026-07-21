@@ -163,6 +163,13 @@ KNOWN_CONTEXT_WINDOWS = {
     'qwen2': 32768,
     'qwq': 32768,
 
+    # --- Z.ai / GLM ---
+    'glm-5.2': 976000,
+    'glm-5': 976000,
+    'glm-4.7': 200000,
+    'glm-4.6': 200000,
+    'glm-4.5': 128000,
+
     # --- Cohere ---
     'command-r-plus': 128000,
     'command-r': 128000,

@@ -1472,6 +1472,7 @@ const compareModule = {
   handleCompareSubmit,
   isActive: isCompareActive,
   hasVisibleResults: () => state._hasVisibleResults,
+  getPaneSessionId: (paneIdx) => state._paneSessionIds[paneIdx] || null,
   deactivate,
   closeCompare,
   cleanupResults,

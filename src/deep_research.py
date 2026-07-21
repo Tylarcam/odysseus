@@ -176,6 +176,15 @@ CATEGORY_PROMPTS = {
 - Include a ## Verdict section with one of: **Supported**, **Mixed Evidence**, or **Unsupported**
 - End with ## Nuance & Caveats for important context and limitations
 - Be balanced and cite sources for every claim""",
+
+    "interview": """IMPORTANT FORMAT OVERRIDE — this is an INTERVIEW PREP report:
+- Start with ## Coach briefing (read first) — ≤15 lines: thesis for how to show up, 3 cited facts, which STAR to lead with, one risk to avoid
+- Then ## Org / program covering mission, products/constraints, and recent moves with citations
+- Then ## Interviewer dossiers — one ### section per interviewer (owns/cares about, likely questions, evidence to cite, STAR to lead)
+- Include a ## STAR × interviewer matrix as a markdown table (columns: STAR, Best for, Hook line)
+- Add ## Likely questions + talking points (From them / Ask them)
+- End with ## Risks, gaps, open questions
+- Cite sources inline; prefer primary org pages and interviewer bios over fluff""",
 }
 
 # ---------------------------------------------------------------------------

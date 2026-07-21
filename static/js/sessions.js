@@ -438,6 +438,10 @@ function createSessionItem(s) {
       if (dot) dot.click();
       return;
     }
+    if (e.shiftKey && window.splitChatModule?.openSplit && s.id !== currentSessionId) {
+      window.splitChatModule.openSplit(s.id);
+      return;
+    }
     selectSession(s.id);
   });
 
@@ -494,6 +498,25 @@ function createSessionItem(s) {
     });
     dropdown.appendChild(starItem);
   }
+
+  const _splitIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="8" height="18" rx="1"/><rect x="14" y="3" width="8" height="18" rx="1"/></svg>';
+  const splitItem = document.createElement('div');
+  splitItem.className = 'dropdown-item-compact';
+  splitItem.innerHTML = _icon(_splitIcon) + '<span>Open in split view</span><span class="dropdown-shortcut">Shift+click</span>';
+  splitItem.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    dropdown.style.display = 'none';
+    const mod = window.splitChatModule;
+    if (!mod?.openSplit) {
+      uiModule.showToast?.('Split chat unavailable');
+      return;
+    }
+    if (s.id === currentSessionId) {
+      uiModule.showToast?.('Pick a different chat for the split pane');
+      return;
+    }
+    await mod.openSplit(s.id);
+  });
 
   const copyItem = document.createElement('div');
   copyItem.className = 'dropdown-item-compact';
@@ -558,6 +581,7 @@ function createSessionItem(s) {
 
   // Copy & Move to folder
   const folderItem = buildFolderSubmenu(s.id, s.folder, dropdown);
+  if (!isOpenClaw) dropdown.appendChild(splitItem);
   dropdown.appendChild(copyItem);
   dropdown.appendChild(folderItem);
 
@@ -1493,6 +1517,11 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
   if (window.compareModule && window.compareModule.isActive()) {
     window.compareModule.deactivate(true);
     return; // deactivate does a page reload
+  }
+  // If navigating main chat to the split pane's session, collapse split (one chat)
+  if (window.splitChatModule?.isActive?.()
+      && window.splitChatModule.getSecondarySessionId?.() === id) {
+    window.splitChatModule.closeSplit();
   }
   try {
     const navToken = ++_sessionNavToken;

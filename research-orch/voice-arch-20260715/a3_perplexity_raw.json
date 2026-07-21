@@ -1,0 +1,113 @@
+{
+  "ok": true,
+  "engine": "perplexity_agent_direct",
+  "odysseus_route": "fallback_direct",
+  "preset": "pro-search",
+  "result": {
+    "report": "For a \"vault-style\" command center where reliability and low latency are paramount, the objective is to move from a **sequential cascade** (wait for speech to end $\\rightarrow$ transcribe $\\rightarrow$ process) to a **continuous stream with speculative execution**.\n\nIn your existing stack (OpenAI Realtime + Jarvis Bridge), the \"friction\" usually stems from the gap between the `input_audio_buffer.speech_stopped` event and the agent's first action.\n\n### 1. Canonical Happy-Path Pipeline (Mic $\\rightarrow$ VAD $\\rightarrow$ STT $\\rightarrow$ Agent)\nThe optimal path uses **Server-side VAD with Semantic Commit**. Instead of waiting for a \"silence\" event to trigger a transcript, you use the continuous transcription stream to \"pre-warm\" the agent.\n\n| Stage | Implementation Pattern | Why it eliminates friction |\n| :--- | :--- | :--- |\n| **Mic Capture** | 16kHz Mono, raw PCM (WebRTC) | Lowest overhead; avoids browser-side compression latency. |\n| **VAD** | `server_vad` (OpenAI) with `silence_threshold_ms: 400-600` | Moving VAD to the server reduces client CPU jitter and allows the server to start \"thinking\" before the client knows the user is done. |\n| **STT Stream** | `input_audio_transcription` (Realtime API) | Real-time deltas (partials) allow for \"Eager Processing\" (LLM can start planning while Whisper is still refining). |\n| **Turn Commit** | **Hybrid:** `speech_stopped` + `End-of-Thought` detection | Don't just rely on silence. If the transcript contains a complete command (e.g., \"Turn off the lights.\"), trigger the agent immediately (50-100ms gain). |\n| **Agent Loop** | **Stream Redirection** | Instead of canceling the Realtime reply, use `conversation.item.create` to inject the final transcript and immediately call a tool. |\n\n### 2. Unifying 3 Parallel STT Modes\nTo eliminate the \"hop\" when one service fails or is slow, use a **Racing Leaderboard** pattern rather than a sequential fallback.\n\n*   **Primary (Happy Path):** OpenAI Realtime API (`gpt-realtime-whisper`). This is the lowest latency because it's already integrated with the session state.\n*   **Secondary (Local/Edge):** `faster-whisper` running in a sidecar (via WebAssembly or local Python service).\n*   **Tertiary (Last Resort):** Browser Web Speech (OS-native).\n\n**The Logic:**\n1.  **Broadcast:** Stream audio to all three simultaneously.\n2.  **First-to-Commit Wins:** Use the first service to reach a \"high-confidence\" end-of-turn. \n3.  **State Sync:** When the \"Winner\" triggers the agent, send a `cancel` signal to the other two.\n4.  **Fallback Trigger:** If the Realtime API WebSocket closes or `ping` exceeds 500ms, the system promotes the local `faster-whisper` stream to \"Primary\" status for the remainder of the session.\n\n### 3. Turn-Taking, Partials, and Empty Speech\nFriction often occurs when the system \"hallucinates\" speech from background noise or cuts the user off.\n\n*   **Empty/No-Speech:** Filter transcripts at the \"bridge\" level. If `input_audio_transcription.delta` is just noise (e.g., \"Um\", \"Uh\", \"...\") or contains fewer than 3 characters after 1 second of speech detection, do not commit the turn.\n*   **Partial Transcripts:** Use \"Eager Tool Selection.\" If a partial transcript matches a high-confidence tool (e.g., \"Open the vau\u2014\"), the agent should start the \"Vault Opening\" animation or API pre-fetch immediately.\n*   **Barge-in:** When the agent is speaking (TTS), keep the Mic active but use a **Short-Window VAD** (200ms). If a user speaks, immediately send an `audio_buffer.clear` to OpenAI and stop the local TTS playback.\n\n### 4. Mic Lease and Multi-App Patterns\nIn a vault/command center environment, \"Mic Lease\" contention is the #1 UX killer.\n\n*   **The \"Singleton\" Controller:** Create a dedicated worker (or a hidden iframe/Electron main process) that holds the `MediaStream` once and \"distributes\" the raw audio bytes to your various listeners via a MessageBus.\n*   **Lease Relinquishment:** If a local app (like Zoom or a System Voice Memo) requests the mic, your app should detect the `track.onmute` event, pause the Realtime session, and show a \"Mic in use by System\" UI.\n*   **Keep-Alive:** Use `requestAnimationFrame` or a silent `AudioWorklet` to prevent the browser from putting the mic process to sleep during long periods of silence.\n\n### 5. Optimization Checklist (Ordered by ROI)\n\n| Priority | Optimization | Technical Action | ROI |\n| :--- | :--- | :--- | :--- |\n| **1** | **Eager Commitment** | Commit turn on `speech_stopped` + `0ms` (don't wait for final Whisper pass). | **High** (300-500ms) |\n| **2** | **Server-side VAD** | Enable OpenAI `server_vad`; set `prefix_padding_ms` to `300` to avoid clipping. | **High** (Stability) |\n| **3** | **Streaming Tools** | Start tool execution on partial transcripts for deterministic commands. | **Med** (Perceived speed) |\n| **4** | **Local Sidecar STT** | Run `faster-whisper` (tiny.en) locally for instant \"No-Network\" feedback. | **Med** (Reliability) |\n| **5** | **PCM over WebRTC** | Switch from G.711/Opus to raw 16-bit PCM if bandwidth allows. | **Low** (Quality/Latency) |\n\n### Authoritative Architectures for Reference\n*   **Pipecat / LiveKit Agents:** Use their \"Transcriber\" abstraction which handles the \"Interim vs. Final\" logic. See [LiveKit Agent Docs](https://docs.livekit.io/agents/overview/).\n*   **Deepgram Voice Agent API:** Note their \"Direct-to-LLM\" streaming pattern where the STT isn't a separate hop but a continuous feed into the LLM context.\n*   **OpenAI Realtime API:** Follow the `input_audio_buffer.speech_stopped` $\\rightarrow$ `conversation.item.create` pattern to bypass the built-in (sometimes slow) model response.",
+    "sources": [
+      {
+        "url": "https://deepgram.com/learn/designing-voice-ai-workflows-using-stt-nlp-tts",
+        "title": "Designing Voice AI Workflows Using STT + NLP + TTS - Deepgram"
+      },
+      {
+        "url": "https://deepgram.com/learn/voice-agent-api-architecture-bundled-vs-assembled",
+        "title": "Voice Agent API Architecture: Bundled vs Assembled"
+      },
+      {
+        "url": "https://luonghongthuan.com/en/blog/voice-ai-playbook-pipeline-architectures-part2/",
+        "title": "The Voice AI Interview Playbook: Cascaded vs. Speech-to-Speech \u2014 Choosing Your Pipeline Architecture (Part 2 of 12) - Luong Hong Thuan"
+      },
+      {
+        "url": "https://deepgram.com/learn/unified-end-to-end-text-to-speech-architecture-cuts-latency",
+        "title": "End-to-End Text-to-Speech: Cut Voice Latency by 50-70% - Deepgram"
+      },
+      {
+        "url": "https://developers.openai.com/api/docs/guides/realtime",
+        "title": "Realtime and audio | OpenAI API"
+      },
+      {
+        "url": "https://developers.deepgram.com/docs/voice-agent-architecture",
+        "title": "Architecture Overview | Deepgram's Docs"
+      },
+      {
+        "url": "https://arxiv.org/html/2603.05413v1",
+        "title": "Building Enterprise Realtime Voice Agents from Scratch"
+      },
+      {
+        "url": "https://platform.openai.com/docs/guides/realtime-transcription",
+        "title": "Realtime transcription - OpenAI API"
+      },
+      {
+        "url": "https://developers.openai.com/api/docs/guides/realtime-transcription",
+        "title": "Guide vocabulary and domain..."
+      },
+      {
+        "url": "https://deepgram.com/learn/top-apis-programmable-voice-agents",
+        "title": "Top APIs for Programmable Voice Agents in 2026"
+      }
+    ],
+    "findings": [
+      {
+        "url": "https://deepgram.com/learn/designing-voice-ai-workflows-using-stt-nlp-tts",
+        "title": "Designing Voice AI Workflows Using STT + NLP + TTS - Deepgram",
+        "summary": "In production, you can bring this **RTT below 1000 ms** with:\n- Bump RATE down to 16 kHz (saves ~6 KB/s over the wire)\n- Replace SYS_PROMPT with a domain-specific policy or function-calling schema.\n- Adjusting SEND_EVERY and streaming buffer size\n- Lower queue_empty_wait to 0.15 s and run the agent and LLM in the same region.\nMove inference closer to the edge (via Whisper + local LLM [e.g., Llama-3 via vLLM] + open-source TTS)."
+      },
+      {
+        "url": "https://deepgram.com/learn/voice-agent-api-architecture-bundled-vs-assembled",
+        "title": "Voice Agent API Architecture: Bundled vs Assembled",
+        "summary": "- Streaming STT is the biggest latency decision: streaming pipelines hit sub-second time-to-first-audio, while batch transcription runs multiple seconds slower.\n- Assembled stacks win when you need custom ASR, self-hosted models, or strict component control.\n...\nWhether your STT streams or runs in batch is still the biggest latency decision you'll make.\nCascaded pipelines that stream end to end achieved sub-second time-to-first-audio in cited research.\nWaiting for a full batch transcription instead pushes first-word delay into multi-second territory that breaks the feel of a live conversation.\n...\nIf you're below 10,000 minutes per month and don't need custom ASR, a bundled API can save weeks of orchestration work.\nIf you're above that threshold and already have infrastructure depth, assembled components give you more cost levers.\n...\nThree questions usually cut through the noise.\nDo you need a custom-trained STT model for domain vocabulary?\nDo compliance requirements force on-premises deployment for every component?\nDo you have the engineering capacity to maintain cross-provider error handling?\nIf the answer is no across the board, bundled is usually the simpler starting move.\n...\nExpect performance near well-tuned streaming pipelines.\nThe bigger variable is streaming versus batch STT, not bundled versus assembled.\n...\nBuild your own when you need custom ASR, a self-hosted LLM, on-premises deployment, or proprietary TTS control.\nIt also fits teams that already run WebSocket infrastructure and cross-provider monitoring."
+      },
+      {
+        "url": "https://luonghongthuan.com/en/blog/voice-ai-playbook-pipeline-architectures-part2/",
+        "title": "The Voice AI Interview Playbook: Cascaded vs. Speech-to-Speech \u2014 Choosing Your Pipeline Architecture (Part 2 of 12) - Luong Hong Thuan",
+        "summary": "**Best practice:** Enable streaming at every stage.\nNon-streaming cascaded pipelines are not viable for real-time voice.\n**Best practice:** Use \u201ceager processing\u201d \u2014 start the LLM as soon as you have a medium-confidence STT transcript, not the final one.\nThis can save 50-100ms.\n...\n**Best practice:** Always run parallel STT even with S2S models.\nThe transcript is too valuable for evaluation, compliance, and debugging to skip.\n...\n**Best practice:** Start with Silero VAD at 400ms silence threshold.\nIf you\u2019re getting too many cutoffs during thinking pauses, increase to 500ms.\nIf the AI waits too long after the candidate finishes, consider adding semantic VAD on top."
+      },
+      {
+        "url": "https://deepgram.com/learn/unified-end-to-end-text-to-speech-architecture-cuts-latency",
+        "title": "End-to-End Text-to-Speech: Cut Voice Latency by 50-70% - Deepgram",
+        "summary": "End-to-end models reach 200-250ms by processing audio directly to audio without intermediate text representations, removing format conversions, network hops, and queue complexity.\n...\nFor any team preparing a production rollout, use this framework as a validation checklist.\nConfirm your TTFB numbers under load, map your quota requirements before you ship, and build your cost forecasts using real conversation data rather than pilot assumptions."
+      },
+      {
+        "url": "https://developers.openai.com/api/docs/guides/realtime",
+        "title": "Realtime and audio | OpenAI API",
+        "summary": "You can transcribe audio in more than one way.\nUse a realtime transcription session when your application needs live transcript deltas from streaming audio.\nUse the Speech to text guide for file uploads, request-based transcription, or diarization-focused workflows.\nFor realtime transcription, `gpt-realtime-whisper` gives you controllable latency.\nLower delay settings produce earlier partial text, while higher delay settings can improve transcript quality.\nTest with your real audio conditions, target languages, accents, and domain vocabulary before choosing a production default.\n...\nChoose the transport based on where your application captures and plays audio:\n...\nUse when your server already receives raw audio from a media pipeline, call\nsystem, or worker.\n...\nUse for telephony voice agents.\nConfirm model support before using SIP for\ntranslation or transcription.\n...\nIf your application identifies individual end users, include a safety identifier with Realtime API requests.\n...\nUse a stable, privacy-preserving value, such as a hashed internal user ID.\nFor Realtime API requests, send the identifier in the `OpenAI-Safety-Identifier` header.\nWhen using ephemeral tokens, set the header on the server-side request that creates the client secret so the identifier is bound to that session.\nWhen connecting from a trusted server with WebSocket or the unified WebRTC interface, set the header on the connection request."
+      },
+      {
+        "url": "https://developers.deepgram.com/docs/voice-agent-architecture",
+        "title": "Architecture Overview | Deepgram's Docs",
+        "summary": "Speech-to-text turns the audio into text in real time and detects when the user\u2019s turn ends."
+      },
+      {
+        "url": "https://arxiv.org/html/2603.05413v1",
+        "title": "Building Enterprise Realtime Voice Agents from Scratch",
+        "summary": "Through systematic investigation, we find that (1) native speech-to-speech models like Qwen2.5-Omni, while capable of high-quality audio generation, are too slow for realtime interaction (\\sim13s time-to-first-audio); (2) the industry-standard approach uses a cascaded streaming pipeline: STT \\rightarrow LLM \\rightarrow TTS, where each component streams its output to the next; and (3) the key to \u201crealtime\u201d is not any single fast model but rather streaming and pipelining across components.\n...\nNative speech-to-speech models are not viable for realtime voice agents at this time due to (1) slow audio generation (\\sim2\\times realtime), (2) no function calling support, and (3) no streaming audio output in the Talker.\n...\n   Realtime = streaming + pipelining: The perception of instant response comes from overlapping execution of STT, LLM, and TTS.\nThe sentence buffer is the critical orchestration primitive."
+      },
+      {
+        "url": "https://platform.openai.com/docs/guides/realtime-transcription",
+        "title": "Realtime transcription - OpenAI API",
+        "summary": "To send audio data to the transcription session, you can use the\n`input_audio_buffer.append` event.\n...\n`input_audio_noise_reduction` property to configure how to handle noise reduction in the audio stream.\n...\n`near_field`: Use near-field noise reduction.\n`far_field`: Use far-field noise reduction.\n`null`: Disable noise reduction.\nThe default value is\n`near_field`, and you can disable noise reduction by setting the property to\n`null`."
+      },
+      {
+        "url": "https://developers.openai.com/api/docs/guides/realtime-transcription",
+        "title": "Guide vocabulary and domain...",
+        "summary": "Use realtime transcription when your application needs live speech-to-text without a spoken assistant response.\n...\nFor the lowest-latency streaming transcription path, use `gpt-realtime-whisper`.\nFor offline files or workflows that don\u2019t need streaming deltas, use the standard speech-to-text models in the Audio API.\n...\nTest it against your audio, languages, vocabulary, and latency requirements before switching production traffic.\n...\nStreaming transcription trades latency for transcript quality.\nLower delay settings can produce earlier partial text.\nHigher delay settings give the model more audio context before emitting text and can improve word error rate.\nStart by setting `audio.input.transcription.delay` and testing against your real audio.\nUseful starting points are:\n- `minimal` for the most latency-sensitive interactions;\n- `low` for low-latency live captions;\n- `medium` for a balanced latency/accuracy tradeoff;\n- `high` when accuracy matters more than immediate display;\n- `xhigh` when your workflow can tolerate the most delay for additional context.\nThe exact delay in milliseconds can vary by model configuration, so benchmark with representative audio instead of assuming a fixed timing per level.\nDon\u2019t choose a setting from synthetic audio alone.\nTest with representative microphones, telephony audio, accents, background noise, code-switching, domain vocabulary, and long sessions.\n...\nIf your application depends on exact domain vocabulary, include a language hint and use prompt or keyword steering only when your selected model supports it.\n...\nWhere prompt steering is available, use short keyword lists rather than long instructions.\nThe model is already instructed to transcribe, so focus prompts on domain vocabulary, spelling, or style rather than re-stating the transcription task.\n...\nFor production, treat keyword steering as an aid rather than a guarantee.\nContinue to evaluate names, numbers, dates, medication names, product names, artist names, and other h"
+      },
+      {
+        "url": "https://deepgram.com/learn/top-apis-programmable-voice-agents",
+        "title": "Top APIs for Programmable Voice Agents in 2026",
+        "summary": "The speech-to-speech option in this list.\nIt makes sense when you want GPT-native reasoning and can manage token-based audio costs carefully.\nIt's the only provider here that skips the traditional STT-LLM-TTS cascade, which changes both the latency profile and the cost structure.\n...\nThe Realtime API bundles STT, reasoning, and TTS into a single connection.\nGPT-Realtime-2 processes audio input and emits audio output without a separate text stage.\nTelephony comes from Twilio, LiveKit, or another transport provider for phone calls."
+      }
+    ],
+    "stats": {
+      "Engine": "Perplexity Agent",
+      "Preset": "pro-search",
+      "Queries": 5,
+      "URLs": 10,
+      "Rounds": 1,
+      "Cost USD": "$0.0160"
+    },
+    "total_cost_usd": 0.01598,
+    "response_id": "resp_1f62ab93-4510-46bf-b3d8-07aee2406524"
+  }
+}

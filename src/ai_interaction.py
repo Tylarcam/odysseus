@@ -1493,7 +1493,7 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 
     elif action == "open_panel":
         # Open a top-level panel/modal: documents/library, gallery,
-        # email, sessions, notes, memories, skills, settings, cookbook.
+        # email, sessions, notes, memories, skills, settings, cookbook, cmd-center/vault.
         panel = parts[1].lower() if len(parts) > 1 else ""
         _panel_aliases = {
             "documents": "documents",
@@ -1526,10 +1526,16 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
             "llm": "cookbook",
             "serve": "cookbook",
             "serving": "cookbook",
+            "cmd-center": "cmd-center",
+            "cmdcenter": "cmd-center",
+            "cmd_center": "cmd-center",
+            "command-center": "cmd-center",
+            "commandcenter": "cmd-center",
+            "vault": "cmd-center",
         }
         target = _panel_aliases.get(panel)
         if not target:
-            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, cookbook."}
+            return {"error": f"Unknown panel '{panel}'. Valid: documents, gallery, email, sessions, notes, memories, skills, settings, cookbook, cmd-center."}
         return {
             "ui_event": "open_panel",
             "panel": target,

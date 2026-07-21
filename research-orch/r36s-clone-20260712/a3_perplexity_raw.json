@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "agent": "A3",
+    "query": "R36S clone ArkOS gamepad mapping reset + WiFi internal/dongle RTL8811AU/8821AU",
+    "timestamp": "2026-07-12T20:05:00-06:00",
+    "odysseus_api": {
+      "attempted": true,
+      "endpoint": "POST http://localhost:7000/api/research/start",
+      "research_engine": "perplexity_agent",
+      "server_up": true,
+      "result": "failed",
+      "error": "403 API tokens must use a scope-aware API route (research not in codex token scopes)"
+    },
+    "fallback": "perplexity_research via user-MCP_DOCKER + firecrawl_search/scrape"
+  },
+  "perplexity_research": {
+    "source": "user-MCP_DOCKER/perplexity_research",
+    "model": "sonar-deep-research",
+    "citations_count": 19,
+    "key_findings": {
+      "gamepad_persistence": [
+        "SD card read-only or corruption prevents es_input.cfg / RetroArch remap writes",
+        "DTB/panel mismatch changes input device IDs across boots",
+        "EmulationStation vs RetroArch separate config layers; remaps not saved",
+        "Hotkey/FN+Select conflicts common on R36S clones",
+        "Per-core/game overrides can override global mappings"
+      ],
+      "wifi": [
+        "Many R36S clones have NO internal WiFi; require OTG dongle on bottom-right port",
+        "Internal WiFi models break after ArkOS update when DTB omits WiFi node — restore boot DTB",
+        "RTL8188FTV cheap dongles best supported via TeamXNL installer on official ArkOS",
+        "AC600 RTL8811AU/8821AU/8812AU need out-of-tree drivers (8821au/8812au); not in stock ArkOS",
+        "AeolusUX ArkOS-R3XS community build may include more dongle drivers",
+        "lsusb shows dongle but no wlan0 = missing driver; iwconfig empty = kernel-level gap"
+      ]
+    },
+    "citation_urls": [
+      "https://github.com/schoperena/R36S-FN-SELECT-FIX",
+      "https://www.teamxnl.com/installing-cheap-wifi-on-your-r36s-or-r36h/",
+      "https://github.com/AeolusUX/ArkOS-R3XS",
+      "https://github.com/morrownr/8821au",
+      "https://github.com/morrownr/8812au",
+      "https://www.reddit.com/r/SBCGaming/comments/18pgngw/very_cheap_wifi_dongle_that_works_on_the_r36s/",
+      "https://github.com/AeolusUX/ArkOS-R3XS/issues/95"
+    ]
+  },
+  "firecrawl_supplement": {
+    "gamepad_sources": [
+      "https://github.com/schoperena/R36S-FN-SELECT-fIX",
+      "https://github.com/AeolusUX/ArkOS-R3XS/issues/95"
+    ],
+    "wifi_sources": [
+      "https://www.teamxnl.com/installing-cheap-wifi-on-your-r36s-or-r36h/",
+      "https://www.reddit.com/r/SBCGaming/comments/18pgngw/very_cheap_wifi_dongle_that_works_on_the_r36s/"
+    ]
+  }
+}

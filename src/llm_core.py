@@ -1,6 +1,7 @@
 # src/llm_core.py
 import httpx
 import asyncio
+import random
 import time
 import json
 import logging
@@ -21,7 +22,53 @@ class LLMConfig:
     DEFAULT_MAX_TOKENS = 0
     MAX_RETRIES = 3
     RETRY_DELAY = 0.5
+    RATE_LIMIT_BASE_DELAY = 2.0
+    RATE_LIMIT_MAX_DELAY = 60.0
     STREAM_TIMEOUT = 300
+
+
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+
+
+def _parse_retry_after(headers) -> Optional[float]:
+    """Parse Retry-After header (seconds form only)."""
+    if not headers:
+        return None
+    raw = headers.get("Retry-After") or headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _retry_delay_seconds(status_code: int, attempt: int, headers=None) -> float:
+    """Seconds to wait before the next attempt (attempt is 1-based)."""
+    jitter = random.uniform(0.05, 0.15)
+    if status_code == 429:
+        retry_after = _parse_retry_after(headers)
+        if retry_after is not None:
+            return min(retry_after + jitter, 120.0)
+        base = LLMConfig.RATE_LIMIT_BASE_DELAY * (2 ** max(0, attempt - 1))
+        return min(base + jitter, LLMConfig.RATE_LIMIT_MAX_DELAY)
+    base = LLMConfig.RETRY_DELAY * (2 ** max(0, attempt - 1))
+    return min(base + jitter, 10.0)
+
+
+async def _sleep_before_retry(
+    status_code: int,
+    attempt: int,
+    headers,
+    target_url: str,
+    max_retries: int = LLMConfig.MAX_RETRIES,
+) -> None:
+    delay = _retry_delay_seconds(status_code, attempt, headers)
+    logger.info(
+        "LLM retry %d/%d for %s after HTTP %d (sleep %.1fs)",
+        attempt, max_retries, target_url, status_code, delay,
+    )
+    await asyncio.sleep(delay)
 
 
 # Cache for LLM responses
@@ -294,6 +341,28 @@ def _is_ollama_openai_compat_url(url: str) -> bool:
     return local_ollama_host and (path == "/v1" or path.startswith("/v1/"))
 
 
+def _prefer_native_ollama_for_thinking(url: str, model: str) -> str:
+    """Rewrite local Ollama /v1 → native /api/chat for thinking models.
+
+    Ollama's OpenAI-compat ``/v1/chat/completions`` ignores ``think: false`` for
+    qwen3.5+ — the model still fills ``reasoning`` and leaves ``content`` empty,
+    so agent/voice paths (Clicky) hear nothing. Native ``/api/chat`` honors
+    ``think: false`` and returns real content. Non-thinking models and non-local
+    /v1 endpoints are left unchanged.
+    """
+    if not url or not _supports_thinking(model):
+        return url
+    if not _is_ollama_openai_compat_url(url):
+        return url
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return url
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    return f"{parsed.scheme}://{parsed.netloc}/api/chat"
+
+
 def _ollama_api_root(url: str) -> str:
     """Return a native Ollama API root such as https://ollama.com/api."""
     url = (url or "").strip().rstrip("/")
@@ -394,6 +463,9 @@ def _build_ollama_payload(
         payload["options"] = options
     if tools:
         payload["tools"] = tools
+    # Native /api/chat honors think:false; keep tool calls out of <think> blocks.
+    if _supports_thinking(model):
+        payload["think"] = False
     return payload
 
 
@@ -446,6 +518,8 @@ def _detect_provider(url: str) -> str:
         return "groq"
     if _host_match(url, "nvidia.com"):
         return "nvidia"
+    if _host_match(url, "cloudflare.com") and "/ai/" in (urlparse(url).path or ""):
+        return "cloudflare"
     from src.chatgpt_subscription import is_chatgpt_subscription_base
     if is_chatgpt_subscription_base(url):
         return "chatgpt-subscription"
@@ -527,6 +601,7 @@ def _provider_label(url: str) -> str:
     from src.copilot import is_copilot_base
     if is_copilot_base(url): return "GitHub Copilot"
     if _host_match(url, "mistral.ai"): return "Mistral"
+    if _host_match(url, "minimax.io", "minimaxi.com", "minimax.chat"): return "MiniMax"
     if _host_match(url, "deepseek.com"): return "DeepSeek"
     if _host_match(url, "nvidia.com"): return "NVIDIA"
     if _host_match(url, "googleapis.com"): return "Google"
@@ -682,7 +757,7 @@ def _restricts_temperature(model: str) -> bool:
     return any(m.startswith(p) or f"/{p}" in m for p in _FIXED_TEMPERATURE_MODELS)
 
 # Models that support structured thinking — may output </think> without opening tag
-_THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "minimax", "m2-reap", "gemma")
+_THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "minimax", "m2-reap", "gemma", "glm-5")
 
 def _supports_thinking(model: str) -> bool:
     """Check if model supports structured thinking output."""
@@ -732,6 +807,79 @@ def _convert_openai_content_to_anthropic(content):
         else:
             converted.append(block)
     return converted
+
+
+def _extract_b64_from_content_block(block: Dict) -> Optional[str]:
+    """Pull raw base64 from an OpenAI image_url or Anthropic image block."""
+    if not isinstance(block, dict):
+        return None
+    if block.get("type") == "image_url":
+        url = (block.get("image_url") or {}).get("url") or ""
+        if url.startswith("data:") and "," in url:
+            return url.split(",", 1)[1]
+        return None
+    if block.get("type") == "image":
+        source = block.get("source") or {}
+        if source.get("type") == "base64" and source.get("data"):
+            return str(source["data"])
+    return None
+
+
+def _adapt_messages_for_cloudflare_vision(
+    messages: List[Dict],
+) -> Tuple[List[Dict], Optional[str]]:
+    """Cloudflare Workers AI vision expects a top-level ``image`` field.
+
+    OpenAI-style ``image_url`` content blocks are rejected with:
+    "Unable to add image when there are no user-supplied nor system-supplied messages."
+    Extract the first base64 image, strip image blocks from messages, and return
+    ``(text_messages, image_b64)``.
+    """
+    image_b64: Optional[str] = None
+    out: List[Dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            out.append(msg)
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            out.append(msg)
+            continue
+        text_parts: List[str] = []
+        kept_blocks: List[Dict] = []
+        for block in content:
+            b64 = _extract_b64_from_content_block(block) if isinstance(block, dict) else None
+            if b64:
+                if image_b64 is None:
+                    image_b64 = b64
+                continue
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text") or ""
+                if text:
+                    text_parts.append(str(text))
+                kept_blocks.append(block)
+            elif isinstance(block, dict):
+                kept_blocks.append(block)
+        if image_b64 is not None:
+            # Prefer a plain string content once images are lifted out —
+            # CF vision is happier with string messages + top-level image.
+            joined = "\n".join(text_parts).strip()
+            new_msg = dict(msg)
+            new_msg["content"] = joined if joined else (text_parts[0] if text_parts else "")
+            if new_msg["content"] or msg.get("role") == "system":
+                out.append(new_msg)
+        else:
+            out.append(msg if kept_blocks == content else {**msg, "content": kept_blocks})
+    return out, image_b64
+
+
+def _apply_cloudflare_vision_payload(payload: Dict, messages: List[Dict]) -> List[Dict]:
+    """Mutate OpenAI-compat payload for Cloudflare vision models; return messages used."""
+    adapted, image_b64 = _adapt_messages_for_cloudflare_vision(messages)
+    payload["messages"] = adapted
+    if image_b64:
+        payload["image"] = image_b64
+    return adapted
 
 
 def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=False, tools=None):
@@ -1151,6 +1299,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
              max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 
              timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
+    url = _prefer_native_ollama_for_thinking(url, model)
     h = _provider_headers(_detect_provider(url))
     # Tolerate headers that arrive as a JSON string (some sessions stored them
     # double-encoded) — otherwise h.update() throws "dictionary update sequence
@@ -1210,6 +1359,8 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
+        if provider == "cloudflare":
+            messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
     try:
         note_model_activity(target_url, model)
         r = httpx.post(target_url, headers=h, json=payload, timeout=timeout)
@@ -1310,6 +1461,7 @@ async def llm_call_async(
     session_id: Optional[str] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    url = _prefer_native_ollama_for_thinking(url, model)
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1407,6 +1559,8 @@ async def llm_call_async(
         # Suppress thinking for qwen3/gemma4 on Ollama /v1 — same as stream_llm.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+        if provider == "cloudflare":
+            messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
         _apply_local_cache_affinity(payload, url, session_id)
 
     if _is_host_dead(target_url):
@@ -1428,8 +1582,10 @@ async def llm_call_async(
                     f"LLM async call to {target_url} failed in {duration:.2f}s "
                     f"(attempt {attempt}): HTTP {r.status_code} {friendly}"
                 )
-                if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
-                    await asyncio.sleep(LLMConfig.RETRY_DELAY)
+                if r.status_code in _RETRYABLE_STATUS and attempt < max_retries:
+                    await _sleep_before_retry(
+                        r.status_code, attempt, r.headers, target_url, max_retries,
+                    )
                     continue
                 raise HTTPException(r.status_code, friendly)
             logger.info(f"LLM async call to {target_url} succeeded in {duration:.2f}s (attempt {attempt})")
@@ -1454,13 +1610,13 @@ async def llm_call_async(
             logger.warning(f"LLM async connect to {target_url} failed after {duration:.2f}s: {e}{_tail}")
             if _cooled or attempt >= max_retries:
                 raise HTTPException(503, f"Cannot reach {_host_key(target_url)}: {e}")
-            await asyncio.sleep(LLMConfig.RETRY_DELAY)
+            await asyncio.sleep(_retry_delay_seconds(503, attempt))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             duration = time.time() - start
             logger.warning(f"LLM async call attempt {attempt} failed after {duration:.2f}s: {e}")
             if attempt >= max_retries:
                 raise HTTPException(502, f"POST {target_url} failed after {max_retries} attempts: {e}")
-            await asyncio.sleep(LLMConfig.RETRY_DELAY)
+            await asyncio.sleep(_retry_delay_seconds(502, attempt))
 
 async def stream_llm(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
                      max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
@@ -1474,6 +1630,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
       - event: error                       — errors
       - data: [DONE]                       — end of stream
     """
+    url = _prefer_native_ollama_for_thinking(url, model)
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -1518,7 +1675,9 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         }
         if _restricts_temperature(model):
             payload.pop("temperature", None)
-        if provider not in {"openrouter", "groq"}:
+        # Cloudflare Workers AI vision silently ignores top-level `image` when
+        # stream_options is present — omit it (same as openrouter/groq).
+        if provider not in {"openrouter", "groq", "cloudflare"}:
             payload["stream_options"] = {"include_usage": True}
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
@@ -1530,6 +1689,8 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+        if provider == "cloudflare":
+            messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
         _apply_local_cache_affinity(payload, url, session_id)
         h = _provider_headers(provider, headers)
         if provider == "copilot":
@@ -1816,218 +1977,238 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
 
     try:
         client = _get_http_client()
-        async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
-            _clear_host_dead(target_url)
-            if r.status_code != 200:
-                raw = (await r.aread()).decode(errors="replace")
-                friendly = _format_upstream_error(r.status_code, raw, target_url)
-                yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
-                return
-
-            async for line in r.aiter_lines():
-                if not line:
-                    continue
-
-                # SSE allows "data:value" with no space after the colon; gating
-                # on "data: " silently dropped content + usage from providers
-                # that omit it.
-                if line.startswith("data:"):
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        for event in _format_routed_content(_harmony_router.flush()):
-                            yield event
-                        tc_event = _emit_tool_calls()
-                        if tc_event:
-                            yield tc_event
-                        yield "data: [DONE]\n\n"
+        stream_attempt = 0
+        while stream_attempt < LLMConfig.MAX_RETRIES:
+            stream_attempt += 1
+            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+                _clear_host_dead(target_url)
+                if r.status_code in _RETRYABLE_STATUS and stream_attempt < LLMConfig.MAX_RETRIES:
+                    await r.aread()
+                    # A 429 with a long Retry-After (quota exhaustion, not a
+                    # momentary burst) is not worth sleeping through here:
+                    # agent loops re-enter this function every round, so
+                    # 3 retries x 120s stalls each round for minutes while a
+                    # healthy fallback candidate sits unused. Surface the
+                    # error immediately and let the fallback chain switch.
+                    if r.status_code == 429 and (_parse_retry_after(r.headers) or 0) > 30:
+                        friendly = _format_upstream_error(r.status_code, "", target_url)
+                        yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": "retry-after too long; failing over"})}\n\n'
                         return
+                    await _sleep_before_retry(
+                        r.status_code, stream_attempt, r.headers, target_url,
+                    )
+                    continue
+                if r.status_code != 200:
+                    raw = (await r.aread()).decode(errors="replace")
+                    friendly = _format_upstream_error(r.status_code, raw, target_url)
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    return
 
-                    try:
-                        if data.strip():
-                            if data.startswith("{"):
-                                j = json.loads(data)
-                                chunk_model = j.get("model")
-                                if isinstance(chunk_model, str) and chunk_model.strip():
-                                    _actual_model = chunk_model.strip()
-                                    if (
-                                        not _actual_model_announced
-                                        and not _same_model_identity(_actual_model, model)
-                                    ):
-                                        _actual_model_announced = True
-                                        yield f'data: {json.dumps({"type": "model_actual", "requested_model": model, "model": _actual_model})}\n\n'
-                                # Usage chunk (from stream_options)
-                                _choices = j.get("choices") or []
-                                _delta0 = _choices[0].get("delta") if (_choices and _choices[0] is not None) else None
-                                # Capture usage whenever the chunk carries it and
-                                # the delta has no actual output. Some gateways /
-                                # local servers attach usage to the FINAL delta,
-                                # which also carries role/finish_reason (so it is
-                                # not exactly None/{}/{"content": None}); gating on
-                                # those exact shapes discarded their token counts.
-                                _delta_has_output = isinstance(_delta0, dict) and (
-                                    _delta0.get("content")
-                                    or _delta0.get("reasoning_content")
-                                    or _delta0.get("reasoning")
-                                    or _delta0.get("thinking")
-                                    or _delta0.get("tool_calls")
-                                )
-                                if "usage" in j and not _delta_has_output:
-                                    u = j["usage"] or {}
-                                    _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
-                                    # llama.cpp puts a `timings` block alongside `usage` with the
-                                    # TRUE generation speed (predicted_per_second) — pure decode,
-                                    # excluding prefill/network. Pass it through so the UI shows the
-                                    # real gen t/s instead of recomputing tokens/wall-clock (which
-                                    # includes prefill and reads ~20-40% low). Prefill speed too.
-                                    _tm = j.get("timings")
-                                    if isinstance(_tm, dict):
-                                        if _tm.get("predicted_per_second"):
-                                            _usage_data["gen_tps"] = round(_tm["predicted_per_second"], 2)
-                                        if _tm.get("prompt_per_second"):
-                                            _usage_data["prefill_tps"] = round(_tm["prompt_per_second"], 2)
-                                    if _actual_model:
-                                        _usage_data["model"] = _actual_model
-                                        if not _same_model_identity(_actual_model, model):
-                                            _usage_data["requested_model"] = model
-                                    yield f'data: {json.dumps({"type": "usage", "data": _usage_data})}\n\n'
-                                elif "choices" in j:
-                                    _c0 = (j["choices"] or [None])[0]
-                                    if _c0 is None:
-                                        continue
-                                    delta = _c0.get("delta") or {}
-                                    if isinstance(delta, dict):
-                                        # Text content
-                                        # Reasoning tokens (VLLM --reasoning-parser, e.g. Qwen3/DeepSeek-R1, Nemotron). vLLM 0.20.2 / NIM emit the field as `reasoning`; older builds use `reasoning_content`. Some OpenAI-compatible Ollama builds use `thinking`.
-                                        reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
-                                        if reasoning:
-                                            yield _stream_delta_event(reasoning, thinking=True)
-                                        content = delta.get("content") or ""
-                                        if content:
-                                            stripped = content.lstrip()
-                                            # gpt-oss harmony format (<|channel|>analysis/final): route via the harmony
-                                            # stream router. Sticky once the first marker appears — distinct from the
-                                            # <think> path below (handled in the else, preserving #2588 behaviour).
-                                            if _harmony_active or "<|" in content:
-                                                _harmony_active = True
-                                                for event in _format_routed_content(_harmony_router.feed(content)):
-                                                    yield event
-                                            else:
-                                                # Auto-detect <think>…</think> in content stream.
-                                                # Covers Qwen3-derived models (Qwopus, QwQ forks) whose
-                                                # names don't match _THINKING_MODEL_PATTERNS but still
-                                                # emit literal <think> markup via llama.cpp --jinja.
-                                                if not _first_content_sent and not _thinking_model and not _in_think_tag and stripped.lower().startswith("<think"):
-                                                    _thinking_model = True
-                                                    _in_think_tag = True
-                                                if _in_think_tag:
-                                                    close_idx = content.lower().find("</think>")
-                                                    if close_idx != -1:
-                                                        # Split: up-to-</think> → thinking, remainder → content
-                                                        think_part = content[:close_idx]
-                                                        if not _think_open_stripped:
-                                                            # Strip the opening <think[...] > from the first chunk.
-                                                            # Use a dedicated flag — _first_content_sent stays False
-                                                            # throughout the think block, so it must not be reused.
-                                                            tag_end = think_part.lower().find(">")
-                                                            if tag_end != -1:
-                                                                think_part = think_part[tag_end + 1:]
-                                                            _think_open_stripped = True
-                                                        regular_part = content[close_idx + len("</think>"):]
-                                                        _in_think_tag = False
-                                                        if think_part:
-                                                            yield f'data: {json.dumps({"delta": think_part, "thinking": True})}\n\n'
-                                                        if regular_part:
-                                                            _first_content_sent = True
-                                                            yield f'data: {json.dumps({"delta": regular_part})}\n\n'
-                                                    else:
-                                                        # Still inside <think>: route to thinking channel
-                                                        if not _think_open_stripped:
-                                                            # Strip the opening <think[...] > tag (first chunk only)
-                                                            tag_end = stripped.lower().find(">")
-                                                            if tag_end != -1:
-                                                                content = stripped[tag_end + 1:]
-                                                            _think_open_stripped = True
-                                                        if content:
-                                                            yield f'data: {json.dumps({"delta": content, "thinking": True})}\n\n'
-                                                else:
-                                                    # Some thinking backends start normal content with a
-                                                    # stray closing tag. Repair only that shape; do not
-                                                    # wrap every first token for model families like
-                                                    # MiniMax, which often stream ordinary answers.
-                                                    if _thinking_model and not _first_content_sent and stripped.lower().startswith("</think"):
-                                                        content = "<think>" + content
-                                                    _first_content_sent = True
-                                                    yield f'data: {json.dumps({"delta": content})}\n\n'
-                                        # Native tool calls — accumulate across chunks
-                                        for tc in delta.get("tool_calls") or []:
-                                            if tc is None:
-                                                continue
-                                            func = tc.get("function") or {}
-                                            raw_idx = tc.get("index")
-                                            if raw_idx is None:
-                                                # Gemini's OpenAI-compat layer omits `index` on
-                                                # parallel tool calls (every delta arrives as
-                                                # index=None) and sends each call complete in one
-                                                # delta. Without this, all parallel calls collide
-                                                # into slot 0 — later calls overwrite the first's
-                                                # name and CORRUPT its arguments by concatenation,
-                                                # so only one malformed call survives and the
-                                                # follow-up round 400s. A function name marks the
-                                                # start of a new call → allocate a fresh slot;
-                                                # an arg-only continuation attaches to the last.
-                                                if func.get("name") or _tc_last_idx[0] < 0:
-                                                    # Next free slot ABOVE any existing key (not
-                                                    # len()), so a provider mixing integer indices
-                                                    # with index=None can never collide.
-                                                    idx = max(_tc_acc, default=-1) + 1
-                                                else:
-                                                    idx = _tc_last_idx[0]
-                                            else:
-                                                idx = raw_idx
-                                            _tc_last_idx[0] = idx
-                                            if idx not in _tc_acc:
-                                                _tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                                            if tc.get("id"):
-                                                _tc_acc[idx]["id"] = tc["id"]
-                                            # Gemini 3 returns an opaque thought_signature in
-                                            # extra_content on the function-call delta. It MUST be
-                                            # echoed back on the assistant tool_call next round or the
-                                            # follow-up request 400s ("Function call is missing a
-                                            # thought_signature"). Preserve it verbatim; other
-                                            # providers never send it, so this is a no-op for them.
-                                            if tc.get("extra_content"):
-                                                _tc_acc[idx]["extra_content"] = tc["extra_content"]
-                                            if func.get("name"):
-                                                _tc_acc[idx]["name"] = func["name"]
-                                            if "arguments" in func:
-                                                # Guard against a null arguments delta: `func` can be
-                                                # {"arguments": None} (JSON null), and a raw `+= None`
-                                                # raises TypeError that the broad except swallows,
-                                                # silently dropping the rest of the chunk. Matches the
-                                                # Anthropic accumulator (`partial = ... or ""`) above.
-                                                _tc_acc[idx]["arguments"] += func["arguments"] or ""
-                                                # Stream tool arg deltas for doc tools
-                                                if func["arguments"] and _tc_acc[idx].get("name") in ("create_document", "update_document", "edit_document"):
-                                                    yield f'data: {json.dumps({"type": "tool_call_delta", "index": idx, "name": _tc_acc[idx]["name"], "arg_delta": func["arguments"]})}\n\n'
-                                elif "text" in j:
-                                    if j["text"]:
-                                        for event in _format_routed_content(_harmony_router.feed(j["text"])):
-                                            yield event
-                            else:
-                                if data.strip():
-                                    for event in _format_routed_content(_harmony_router.feed(data)):
-                                        yield event
-                    except Exception as e:
-                        logger.error(f"Error parsing stream data: {e}")
+                async for line in r.aiter_lines():
+                    if not line:
                         continue
+    
+                    # SSE allows "data:value" with no space after the colon; gating
+                    # on "data: " silently dropped content + usage from providers
+                    # that omit it.
+                    if line.startswith("data:"):
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            for event in _format_routed_content(_harmony_router.flush()):
+                                yield event
+                            tc_event = _emit_tool_calls()
+                            if tc_event:
+                                yield tc_event
+                            yield "data: [DONE]\n\n"
+                            return
 
-            # End of stream (no explicit [DONE] received)
-            for event in _format_routed_content(_harmony_router.flush()):
-                yield event
-            tc_event = _emit_tool_calls()
-            if tc_event:
-                yield tc_event
-            yield "data: [DONE]\n\n"
+                        try:
+                            if data.strip():
+                                if data.startswith("{"):
+                                    j = json.loads(data)
+                                    chunk_model = j.get("model")
+                                    if isinstance(chunk_model, str) and chunk_model.strip():
+                                        _actual_model = chunk_model.strip()
+                                        if (
+                                            not _actual_model_announced
+                                            and not _same_model_identity(_actual_model, model)
+                                        ):
+                                            _actual_model_announced = True
+                                            yield f'data: {json.dumps({"type": "model_actual", "requested_model": model, "model": _actual_model})}\n\n'
+                                    # Usage chunk (from stream_options)
+                                    _choices = j.get("choices") or []
+                                    _delta0 = _choices[0].get("delta") if (_choices and _choices[0] is not None) else None
+                                    # Capture usage whenever the chunk carries it and
+                                    # the delta has no actual output. Some gateways /
+                                    # local servers attach usage to the FINAL delta,
+                                    # which also carries role/finish_reason (so it is
+                                    # not exactly None/{}/{"content": None}); gating on
+                                    # those exact shapes discarded their token counts.
+                                    _delta_has_output = isinstance(_delta0, dict) and (
+                                        _delta0.get("content")
+                                        or _delta0.get("reasoning_content")
+                                        or _delta0.get("reasoning")
+                                        or _delta0.get("thinking")
+                                        or _delta0.get("tool_calls")
+                                    )
+                                    if "usage" in j and not _delta_has_output:
+                                        u = j["usage"] or {}
+                                        _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
+                                        # llama.cpp puts a `timings` block alongside `usage` with the
+                                        # TRUE generation speed (predicted_per_second) — pure decode,
+                                        # excluding prefill/network. Pass it through so the UI shows the
+                                        # real gen t/s instead of recomputing tokens/wall-clock (which
+                                        # includes prefill and reads ~20-40% low). Prefill speed too.
+                                        _tm = j.get("timings")
+                                        if isinstance(_tm, dict):
+                                            if _tm.get("predicted_per_second"):
+                                                _usage_data["gen_tps"] = round(_tm["predicted_per_second"], 2)
+                                            if _tm.get("prompt_per_second"):
+                                                _usage_data["prefill_tps"] = round(_tm["prompt_per_second"], 2)
+                                        if _actual_model:
+                                            _usage_data["model"] = _actual_model
+                                            if not _same_model_identity(_actual_model, model):
+                                                _usage_data["requested_model"] = model
+                                        yield f'data: {json.dumps({"type": "usage", "data": _usage_data})}\n\n'
+                                    elif "choices" in j:
+                                        _c0 = (j["choices"] or [None])[0]
+                                        if _c0 is None:
+                                            continue
+                                        delta = _c0.get("delta") or {}
+                                        if isinstance(delta, dict):
+                                            # Text content
+                                            # Reasoning tokens (VLLM --reasoning-parser, e.g. Qwen3/DeepSeek-R1, Nemotron). vLLM 0.20.2 / NIM emit the field as `reasoning`; older builds use `reasoning_content`. Some OpenAI-compatible Ollama builds use `thinking`.
+                                            reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
+                                            if reasoning:
+                                                yield _stream_delta_event(reasoning, thinking=True)
+                                            content = delta.get("content") or ""
+                                            if content:
+                                                stripped = content.lstrip()
+                                                # gpt-oss harmony format (<|channel|>analysis/final): route via the harmony
+                                                # stream router. Sticky once the first marker appears — distinct from the
+                                                # <think> path below (handled in the else, preserving #2588 behaviour).
+                                                if _harmony_active or "<|" in content:
+                                                    _harmony_active = True
+                                                    for event in _format_routed_content(_harmony_router.feed(content)):
+                                                        yield event
+                                                else:
+                                                    # Auto-detect <think>…</think> in content stream.
+                                                    # Covers Qwen3-derived models (Qwopus, QwQ forks) whose
+                                                    # names don't match _THINKING_MODEL_PATTERNS but still
+                                                    # emit literal <think> markup via llama.cpp --jinja.
+                                                    if not _first_content_sent and not _thinking_model and not _in_think_tag and stripped.lower().startswith("<think"):
+                                                        _thinking_model = True
+                                                        _in_think_tag = True
+                                                    if _in_think_tag:
+                                                        close_idx = content.lower().find("</think>")
+                                                        if close_idx != -1:
+                                                            # Split: up-to-</think> → thinking, remainder → content
+                                                            think_part = content[:close_idx]
+                                                            if not _think_open_stripped:
+                                                                # Strip the opening <think[...] > from the first chunk.
+                                                                # Use a dedicated flag — _first_content_sent stays False
+                                                                # throughout the think block, so it must not be reused.
+                                                                tag_end = think_part.lower().find(">")
+                                                                if tag_end != -1:
+                                                                    think_part = think_part[tag_end + 1:]
+                                                                _think_open_stripped = True
+                                                            regular_part = content[close_idx + len("</think>"):]
+                                                            _in_think_tag = False
+                                                            if think_part:
+                                                                yield f'data: {json.dumps({"delta": think_part, "thinking": True})}\n\n'
+                                                            if regular_part:
+                                                                _first_content_sent = True
+                                                                yield f'data: {json.dumps({"delta": regular_part})}\n\n'
+                                                        else:
+                                                            # Still inside <think>: route to thinking channel
+                                                            if not _think_open_stripped:
+                                                                # Strip the opening <think[...] > tag (first chunk only)
+                                                                tag_end = stripped.lower().find(">")
+                                                                if tag_end != -1:
+                                                                    content = stripped[tag_end + 1:]
+                                                                _think_open_stripped = True
+                                                            if content:
+                                                                yield f'data: {json.dumps({"delta": content, "thinking": True})}\n\n'
+                                                    else:
+                                                        # Some thinking backends start normal content with a
+                                                        # stray closing tag. Repair only that shape; do not
+                                                        # wrap every first token for model families like
+                                                        # MiniMax, which often stream ordinary answers.
+                                                        if _thinking_model and not _first_content_sent and stripped.lower().startswith("</think"):
+                                                            content = "<think>" + content
+                                                        _first_content_sent = True
+                                                        yield f'data: {json.dumps({"delta": content})}\n\n'
+                                            # Native tool calls — accumulate across chunks
+                                            for tc in delta.get("tool_calls") or []:
+                                                if tc is None:
+                                                    continue
+                                                func = tc.get("function") or {}
+                                                raw_idx = tc.get("index")
+                                                if raw_idx is None:
+                                                    # Gemini's OpenAI-compat layer omits `index` on
+                                                    # parallel tool calls (every delta arrives as
+                                                    # index=None) and sends each call complete in one
+                                                    # delta. Without this, all parallel calls collide
+                                                    # into slot 0 — later calls overwrite the first's
+                                                    # name and CORRUPT its arguments by concatenation,
+                                                    # so only one malformed call survives and the
+                                                    # follow-up round 400s. A function name marks the
+                                                    # start of a new call → allocate a fresh slot;
+                                                    # an arg-only continuation attaches to the last.
+                                                    if func.get("name") or _tc_last_idx[0] < 0:
+                                                        # Next free slot ABOVE any existing key (not
+                                                        # len()), so a provider mixing integer indices
+                                                        # with index=None can never collide.
+                                                        idx = max(_tc_acc, default=-1) + 1
+                                                    else:
+                                                        idx = _tc_last_idx[0]
+                                                else:
+                                                    idx = raw_idx
+                                                _tc_last_idx[0] = idx
+                                                if idx not in _tc_acc:
+                                                    _tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                                                if tc.get("id"):
+                                                    _tc_acc[idx]["id"] = tc["id"]
+                                                # Gemini 3 returns an opaque thought_signature in
+                                                # extra_content on the function-call delta. It MUST be
+                                                # echoed back on the assistant tool_call next round or the
+                                                # follow-up request 400s ("Function call is missing a
+                                                # thought_signature"). Preserve it verbatim; other
+                                                # providers never send it, so this is a no-op for them.
+                                                if tc.get("extra_content"):
+                                                    _tc_acc[idx]["extra_content"] = tc["extra_content"]
+                                                if func.get("name"):
+                                                    _tc_acc[idx]["name"] = func["name"]
+                                                if "arguments" in func:
+                                                    # Guard against a null arguments delta: `func` can be
+                                                    # {"arguments": None} (JSON null), and a raw `+= None`
+                                                    # raises TypeError that the broad except swallows,
+                                                    # silently dropping the rest of the chunk. Matches the
+                                                    # Anthropic accumulator (`partial = ... or ""`) above.
+                                                    _tc_acc[idx]["arguments"] += func["arguments"] or ""
+                                                    # Stream tool arg deltas for doc tools
+                                                    if func["arguments"] and _tc_acc[idx].get("name") in ("create_document", "update_document", "edit_document"):
+                                                        yield f'data: {json.dumps({"type": "tool_call_delta", "index": idx, "name": _tc_acc[idx]["name"], "arg_delta": func["arguments"]})}\n\n'
+                                    elif "text" in j:
+                                        if j["text"]:
+                                            for event in _format_routed_content(_harmony_router.feed(j["text"])):
+                                                yield event
+                                else:
+                                    if data.strip():
+                                        for event in _format_routed_content(_harmony_router.feed(data)):
+                                            yield event
+                        except Exception as e:
+                            logger.error(f"Error parsing stream data: {e}")
+                            continue
+    
+                # End of stream (no explicit [DONE] received)
+                for event in _format_routed_content(_harmony_router.flush()):
+                    yield event
+                tc_event = _emit_tool_calls()
+                if tc_event:
+                    yield tc_event
+                yield "data: [DONE]\n\n"
+                return
 
     except (httpx.ConnectError, httpx.ConnectTimeout) as e:
         _cooled = _mark_host_dead(target_url)
@@ -2099,13 +2280,31 @@ async def stream_llm_with_fallback(candidates, messages, **kwargs):
                     break
                 yield chunk
                 continue
+            # HTTP 200 but the stream ended with ZERO output (no text, no tool
+            # calls). Providers occasionally return an instantly-closed stream
+            # under load; without this check the empty "success" propagates as
+            # "The model returned an empty response" even though healthy
+            # fallbacks were configured. Treat it like a pre-content failure.
+            if chunk.startswith("data: [DONE]") and not emitted and not is_last:
+                last_error = (
+                    'event: error\ndata: '
+                    + json.dumps({"error": f"{model} returned an empty stream", "status": 502})
+                    + "\n\n"
+                )
+                retried = True
+                logger.warning(f"[fallback] {model} returned 200 but an empty stream; trying next candidate")
+                break
             # Any data chunk other than the terminal [DONE] means real output.
             if chunk.startswith("data: ") and not chunk.startswith("data: [DONE]"):
                 try:
                     event_data = json.loads(chunk[6:])
                 except Exception:
                     event_data = {}
-                if event_data.get("type") == "model_actual":
+                # Metadata chunks (model echo, token usage) are not real model
+                # output — pass them through without marking the candidate as
+                # having produced output, so a 200-but-empty stream still
+                # falls through to the next candidate.
+                if event_data.get("type") in ("model_actual", "usage"):
                     yield chunk
                     continue
                 # First real output from a NON-primary candidate: tell the client

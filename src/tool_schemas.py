@@ -81,6 +81,21 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "transcribe_video",
+            "description": "Get the FULL transcript of a video (especially YouTube) from its URL. Tries YouTube captions first, then falls back to the Aether local server (yt-dlp + Whisper STT) for caption-less videos. Use for 'transcribe this video', 'get the transcript', 'brief/summarize this YouTube video' when the full text is needed. Returns plain text plus title/duration metadata. May take several minutes for long caption-less videos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full video URL (YouTube or any yt-dlp-supported site)"},
+                    "save_as_document": {"type": "boolean", "description": "If true, save the raw transcript as an Odysseus document and return its id (recommended for long videos so the text is not lost)"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "read_file",
             "description": "Read a file from disk. Optionally read a line range with offset/limit for large files.",
             "parameters": {
@@ -492,7 +507,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_tasks",
-            "description": "Manage scheduled/automated tasks: list, create, edit, delete, pause, resume, or run tasks. Use this for ANY recurring/scheduled request ('every morning…', 'each day at 7:30', 'daily summarize…') — create a task rather than doing it once. Task types: llm (AI runs a prompt), research (runs the deep-research pipeline on a question), or action (built-in automation). Triggers can be time-based or event-based.",
+            "description": "Manage SCHEDULED BACKGROUND AI JOBS (recurring automations in the Tasks panel) — NOT the user's todo list. An empty list here does NOT mean the user has no todos; use manage_notes action=list for user todos/checklists. Use for ANY recurring/scheduled request ('every morning…', 'each day at 7:30', 'daily summarize…') — create a task rather than doing it once. Task types: llm, research, or action. Triggers can be time-based or event-based.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -560,7 +575,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_notes",
-            "description": "Manage notes and checklists (Google Keep-style): list, add, update, delete, toggle_item. IMPORTANT: For to-do lists / checklists, set note_type='checklist' and pass the items as the `checklist_items` array — do NOT serialize them into `content` as plain text. For freeform notes, use note_type='note' and put the body in `content`. `due_date` accepts natural language like 'tomorrow at 9am' (parsed in the user's timezone) and fires a notification — do not also create a calendar event for the same reminder.",
+            "description": "Manage the user's notes, todos, checklists, and reminders in Odysseus Notes. Call action=list when the user asks to see/analyze/categorize their todo list — this is the canonical todo source. NOT manage_tasks (scheduled AI jobs) and NOT Notion unless the user explicitly says their tasks live in Notion. For to-do lists / checklists, set note_type='checklist' and pass items as `checklist_items`. `due_date` accepts natural language ('tomorrow at 9am') and fires a notification — do not also create a calendar event for the same reminder.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -999,6 +1014,54 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "process_job_application",
+            "description": (
+                "Job search pipeline: ingest postings, evaluate fit (rubric gate >= 4.0), "
+                "dispatch Cursor tailoring handoffs, build apply packages, mark applied after "
+                "Handshake submit, or schedule follow-ups. Does NOT auto-submit to Handshake."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "ingest",
+                            "advance",
+                            "evaluate",
+                            "tailor",
+                            "status",
+                            "validate",
+                            "route",
+                            "ready_to_apply",
+                            "apply_package",
+                            "mark_applied",
+                            "schedule_followup",
+                            "list",
+                            "get",
+                        ],
+                        "description": (
+                            "evaluate=run rubric gate; tailor=dispatch handoff (requires evaluated 4.0+); "
+                            "status/get=job+events; list=recent jobs"
+                        ),
+                    },
+                    "job_id": {"type": "string", "description": "Odysseus job record id"},
+                    "company": {"type": "string"},
+                    "role": {"type": "string"},
+                    "jd_text": {"type": "string"},
+                    "apply_url": {"type": "string"},
+                    "handshake_job_id": {"type": "string"},
+                    "status": {"type": "string", "description": "For list: filter by pipeline status"},
+                    "limit": {"type": "integer", "description": "For list: max rows (default 50)"},
+                    "followup_days": {"type": "integer", "description": "Days until follow-up (default 7)"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "resolve_contact",
             "description": "Look up a contact's email address by name. Searches CardDAV address book and sent email history. Use when the user says 'message [name]' or 'email [name]' without an email address.",
             "parameters": {
@@ -1175,6 +1238,109 @@ FUNCTION_TOOL_SCHEMAS = [
                     "account": {"type": "string", "description": "Account name/email/id from list_email_accounts"},
                 },
                 "required": ["uid"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_look",
+            "description": "See the user's screen via Screenpipe OCR. For 'what's on my screen right now' call with NO query (last 60s). For recent content (minutes ago), pass minutes + a SHORT keyword query only (1-4 words, e.g. 'OpenDesign' or 'GLM') — never the full user sentence (long queries return zero hits). Read-only; requires Screenpipe.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Optional SHORT keyword(s) to find in OCR (e.g. 'OpenDesign', 'error'). Do not pass the full spoken sentence."},
+                    "minutes": {"type": "integer", "description": "Lookback window in minutes (default 5 when query given, max 120). Use for 'a few minutes ago'."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screen_recall",
+            "description": "Semantic recall over INDEXED PixelRAG screen history + memories/notes. Prefer screen_look(minutes=...) for 'a few minutes ago' — PixelRAG is often empty or slow. If this returns no visual_results, immediately retry with screen_look and a short keyword.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to find in past screen content (e.g. 'stripe invoice dashboard')"},
+                    "k": {"type": "integer", "description": "Max visual matches to return (default 5, max 20)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "spec_trace",            "description": "Read UI element context bundles the user captured with the SpecTracer extension (DOM hierarchy, selector, classes, position, console/event tail). Use when the user says 'the element I just grabbed/traced/inspected'. action=latest for the most recent capture, list for recent captures, get with trace_id for a specific one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["latest", "list", "get"], "description": "latest (default) = most recent bundle; list = recent bundle summaries; get = fetch by trace_id"},
+                    "trace_id": {"type": "string", "description": "Bundle id (for action=get)"},
+                    "limit": {"type": "integer", "description": "Max bundles for action=list (default 10)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "desktop_act",
+            "description": "Perform a desktop action on the user's machine via the Clicky worker: move/click/double_click/drag the mouse at coordinates or at target_text visible on screen (resolved via screen OCR; unique match required), or speak text aloud. REQUIRES per-session user consent: on consent_required, ask the user with ask_user, then retry with user_approved=true. Every action is audited.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["move", "click", "double_click", "drag", "speak", "listen"], "description": "The desktop action to perform"},
+                    "x": {"type": "integer", "description": "Screen X coordinate (pointer actions)"},
+                    "y": {"type": "integer", "description": "Screen Y coordinate (pointer actions)"},
+                    "to_x": {"type": "integer", "description": "Drag destination X"},
+                    "to_y": {"type": "integer", "description": "Drag destination Y"},
+                    "target_text": {"type": "string", "description": "Visible on-screen text to click instead of coordinates (e.g. a button label)"},
+                    "button": {"type": "string", "enum": ["left", "right"], "description": "Mouse button (default left)"},
+                    "text": {"type": "string", "description": "Text to speak (action=speak)"},
+                    "user_approved": {"type": "boolean", "description": "Set true ONLY after the user explicitly approved desktop control this session"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_act",
+            "description": "Control the user's already-running Chrome via DevTools. Read-only (no consent): tabs = list open tabs; snapshot = interactive elements of a tab with stable refs. Mutating (per-session consent, like desktop_act): navigate a URL, click/type by selector or snapshot ref, evaluate a JS expression. Requires Chrome started with --remote-debugging-port=9222.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["tabs", "snapshot", "navigate", "click", "type", "evaluate"], "description": "The browser action"},
+                    "target_id": {"type": "string", "description": "Tab/target id from action=tabs (defaults to the first open tab)"},
+                    "url": {"type": "string", "description": "URL for action=navigate"},
+                    "selector": {"type": "string", "description": "CSS selector for click/type"},
+                    "ref": {"type": "string", "description": "Snapshot node ref (e.g. 'n12') for click/type"},
+                    "text": {"type": "string", "description": "Text to type (action=type)"},
+                    "expression": {"type": "string", "description": "JavaScript expression to evaluate (action=evaluate)"},
+                    "user_approved": {"type": "boolean", "description": "Set true ONLY after the user approved browser control this session (mutating actions)"}
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "operator_research",
+            "description": "Fan out ONE web query across TinyFish + Perplexity + Firecrawl in parallel and return merged, deduplicated, ranked results with per-provider attribution. Use for broader/cross-checked lookups than web_search when you want multiple engines at once. NOT the deep-research sidebar job (that's trigger_research) and heavier than web_search (uses several API quotas) — prefer web_search for a single quick fact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query to fan out"},
+                    "count": {"type": "integer", "description": "Max results per provider (default from settings)"}
+                },
+                "required": ["query"]
             }
         }
     },
@@ -1372,7 +1538,8 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = action
     elif tool_type in ("manage_tasks", "manage_skills", "api_call",
                         "manage_endpoints", "manage_mcp", "manage_webhooks",
-                        "manage_tokens", "manage_documents", "manage_settings"):
+                        "manage_tokens", "manage_documents", "manage_settings",
+                        "process_job_application"):
         content = json.dumps(args)
     elif tool_type == "ask_teacher":
         content = args.get("model", "auto") + "\n" + args.get("problem", "")

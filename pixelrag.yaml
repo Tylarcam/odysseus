@@ -1,0 +1,9 @@
+source:
+  type: local
+  path: ./my_index/tiles
+
+embed:
+  model: Qwen/Qwen3-VL-Embedding-2B
+  device: auto
+
+output: ./my_index

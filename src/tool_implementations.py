@@ -308,7 +308,7 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
         except Exception:
             logger.debug("document_created event dispatch failed", exc_info=True)
 
-        return {
+        result = {
             "action": "create",
             "doc_id": doc_id,
             "title": title,
@@ -316,6 +316,18 @@ async def do_create_document(content_block: str, session_id: Optional[str] = Non
             "content": content,
             "version": 1,
         }
+        try:
+            from src.handoff_materialize import maybe_materialize_handoff_jd
+            materialized = maybe_materialize_handoff_jd(
+                doc_id=doc_id,
+                title=title,
+                content=content or "",
+            )
+            if materialized:
+                result["materialized_jd"] = materialized
+        except Exception:
+            logger.debug("handoff JD materialize skipped on agent create", exc_info=True)
+        return result
     except Exception as e:
         db.rollback()
         return {"error": f"Failed to create document: {e}"}
@@ -363,7 +375,7 @@ async def do_update_document(content: str, doc_id: Optional[str] = None, owner: 
         db.add(ver)
         db.commit()
 
-        return {
+        result = {
             "action": "update",
             "doc_id": target_id,
             "title": doc.title,
@@ -371,6 +383,18 @@ async def do_update_document(content: str, doc_id: Optional[str] = None, owner: 
             "content": new_content,
             "version": new_ver,
         }
+        try:
+            from src.handoff_materialize import maybe_materialize_handoff_jd
+            materialized = maybe_materialize_handoff_jd(
+                doc_id=target_id,
+                title=doc.title or "",
+                content=new_content or "",
+            )
+            if materialized:
+                result["materialized_jd"] = materialized
+        except Exception:
+            logger.debug("handoff JD materialize skipped on agent update", exc_info=True)
+        return result
     except Exception as e:
         db.rollback()
         return {"error": f"Failed to update document: {e}"}
@@ -1509,7 +1533,8 @@ async def do_manage_settings(content: str, owner: Optional[str] = None) -> Dict:
         # so API keys never flow through chat. User sets these in the panel.
         _SECRET_KEYS = {
             "brave_api_key", "google_pse_key", "google_pse_cx",
-            "tavily_api_key", "serper_api_key", "app_public_url",
+            "tavily_api_key", "serper_api_key", "firecrawl_api_key",
+            "tinyfish_api_key", "app_public_url",
         }
         def _is_secret(k):
             # `token` must be a suffix, not a substring: otherwise the int
@@ -1849,15 +1874,25 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
     try:
         if action == "list":
             q = db.query(Note)
-            if owner is not None:
-                q = q.filter(Note.owner == owner)
+            # Match owner_filter(): empty owner means single-user / auth-off
+            # mode — do not filter to owner=="" (that matches nothing).
+            if owner:
+                from src.auth_helpers import owner_filter
+                q = owner_filter(q, Note, owner)
             if args.get("label"):
                 q = q.filter(Note.label == args["label"])
             show_archived = args.get("archived", False)
             q = q.filter(Note.archived == show_archived)
             notes = q.order_by(Note.pinned.desc(), Note.updated_at.desc()).all()
             if not notes:
-                return {"response": "No notes found.", "exit_code": 0}
+                return {
+                    "response": (
+                        "No notes or todos found for this account. "
+                        "Do NOT invent items — tell the user their list is empty."
+                    ),
+                    "exit_code": 0,
+                    "empty": True,
+                }
             lines = []
             for n in notes:
                 pin = " [PINNED]" if n.pinned else ""
@@ -2048,7 +2083,17 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_calendar tool calls: list/create/update/delete calendar events (local SQLite)."""
     from datetime import datetime, timedelta
     from core.database import SessionLocal, CalendarCal, CalendarEvent, Note
-    from routes.calendar_routes import _ensure_default_calendar, _parse_dt, _parse_dt_pair, parse_due_for_user, _resolve_base_uid
+    from routes.calendar_routes import (
+        _ensure_default_calendar,
+        _parse_dt,
+        _parse_dt_pair,
+        parse_due_for_user,
+        _resolve_base_uid,
+        event_writeback_payload,
+        writeback_calendar_event,
+        FALLBACK_OWNER,
+    )
+    from core.database import calendar_owner_key
     import uuid as _uuid
 
     try:
@@ -2176,6 +2221,13 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
         )
         db.add(note)
         return note.id, None
+
+    def _writeback_owner_for_cal(cal) -> str:
+        if cal and cal.owner:
+            return cal.owner
+        if owner is not None:
+            return calendar_owner_key(owner)
+        return FALLBACK_OWNER
 
     try:
         if action == "list_calendars":
@@ -2403,6 +2455,9 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
                     dtstart_is_utc and not all_day,
                 )
             db.commit()
+            writeback = await writeback_calendar_event(
+                _writeback_owner_for_cal(cal), cal, event_writeback_payload(ev),
+            )
             tag_blurb = f" [{event_type}]" if event_type else ""
             if minutes_before is None:
                 reminder_blurb = ""
@@ -2419,6 +2474,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
                 "anchor": f"[{summary}](#event-{uid})",
                 "reminder_note_id": reminder_note_id,
                 "reminder_skipped_reason": reminder_skipped_reason,
+                "writeback": writeback,
                 "exit_code": 0,
             }
 
@@ -2433,6 +2489,7 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
             ev = _event_query().filter(CalendarEvent.uid == base_uid).first()
             if not ev:
                 return {"error": f"Event {uid} not found", "exit_code": 1}
+            cal = db.query(CalendarCal).filter(CalendarCal.id == ev.calendar_id).first()
             if args.get("summary") is not None:
                 ev.summary = args["summary"]
             if args.get("description") is not None:
@@ -2461,7 +2518,10 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
             if args.get("importance") is not None:
                 ev.importance = args["importance"]
             db.commit()
-            return {"response": f"Updated event {uid}", "exit_code": 0}
+            writeback = await writeback_calendar_event(
+                _writeback_owner_for_cal(cal), cal, event_writeback_payload(ev),
+            )
+            return {"response": f"Updated event {uid}", "writeback": writeback, "exit_code": 0}
 
         elif action == "delete_event":
             uid = args.get("uid")
@@ -2474,9 +2534,14 @@ async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
             ev = _event_query().filter(CalendarEvent.uid == base_uid).first()
             if not ev:
                 return {"error": f"Event {uid} not found", "exit_code": 1}
+            cal = db.query(CalendarCal).filter(CalendarCal.id == ev.calendar_id).first()
+            ev_uid = ev.uid
             db.delete(ev)
             db.commit()
-            return {"response": f"Deleted event {uid}", "exit_code": 0}
+            writeback = await writeback_calendar_event(
+                _writeback_owner_for_cal(cal), cal, {"uid": ev_uid}, delete=True,
+            )
+            return {"response": f"Deleted event {uid}", "writeback": writeback, "exit_code": 0}
 
         else:
             return {
@@ -4292,6 +4357,82 @@ async def do_trigger_research(content: str, owner: Optional[str] = None) -> Dict
         return {"error": str(e), "exit_code": 1}
 
 
+# ── Video transcription ──
+
+# Transcripts beyond this are truncated in the tool result; the full text is
+# preserved via save_as_document. ~60k chars ≈ a 90-minute talk.
+_TRANSCRIPT_INLINE_CAP = 60_000
+
+
+async def do_transcribe_video(content: str, session_id: Optional[str] = None,
+                              owner: Optional[str] = None) -> Dict:
+    """Full-transcript waterfall: YouTube captions -> Aether local server
+    (yt-dlp + Groq Whisper on the host's residential IP). Returns the full
+    text inline (capped) and optionally saves it as a document."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        # Tolerate a bare URL instead of JSON.
+        raw = (content or "").strip()
+        if raw.startswith(("http://", "https://")):
+            args = {"url": raw.split()[0]}
+        else:
+            return {"error": "Invalid JSON arguments — pass {\"url\": \"...\"}", "exit_code": 1}
+    url = (args.get("url") or "").strip()
+    if not url:
+        return {"error": "url is required", "exit_code": 1}
+
+    from services.transcribe import transcribe_video_url
+    result = await transcribe_video_url(url)
+
+    if not result.get("success"):
+        return {"error": result.get("error", "Transcription failed"), "exit_code": 1}
+
+    text = result["text"]
+    title = result.get("title") or "Video transcript"
+    meta_lines = [
+        f"Source: {url}",
+        f"Method: {result.get('method')}",
+    ]
+    if result.get("title"):
+        meta_lines.append(f"Title: {result['title']}")
+    if result.get("channel"):
+        meta_lines.append(f"Channel: {result['channel']}")
+    if result.get("duration_sec"):
+        meta_lines.append(f"Duration: ~{result['duration_sec'] // 60} min")
+    for w in result.get("warnings", []):
+        meta_lines.append(f"Note: {w}")
+
+    doc_line = ""
+    if args.get("save_as_document"):
+        doc_content = "\n".join(meta_lines) + "\n\n---\n\n" + text
+        doc_result = await do_create_document(
+            f"Transcript — {title}\nmarkdown\n{doc_content}",
+            session_id=session_id, owner=owner,
+        )
+        if doc_result.get("doc_id"):
+            doc_line = f"\nSaved full transcript as document id {doc_result['doc_id']}."
+
+    inline = text
+    truncated_note = ""
+    if len(inline) > _TRANSCRIPT_INLINE_CAP:
+        inline = inline[:_TRANSCRIPT_INLINE_CAP]
+        truncated_note = (
+            f"\n\n[... transcript truncated at {_TRANSCRIPT_INLINE_CAP} of "
+            f"{len(text)} chars — full text is in the saved document]"
+            if doc_line else
+            f"\n\n[... transcript truncated at {_TRANSCRIPT_INLINE_CAP} of "
+            f"{len(text)} chars — re-run with save_as_document=true for the full text]"
+        )
+
+    return {
+        "output": "\n".join(meta_lines) + doc_line + "\n\n--- TRANSCRIPT ---\n" + inline + truncated_note,
+        "method": result.get("method"),
+        "char_count": result.get("char_count"),
+        "exit_code": 0,
+    }
+
+
 # ── Contact tools ──
 
 async def do_resolve_contact(content: str, owner: Optional[str] = None) -> Dict:
@@ -4596,3 +4737,264 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
         pass
 
     return {"output": "Vault unlocked. Session saved.", "exit_code": 0}
+
+
+async def do_process_job_application(content: str, owner: Optional[str] = None) -> Dict:
+    """Job search pipeline tool — ingest, apply package, mark applied, follow-ups."""
+    try:
+        args = _parse_tool_args(content) if content.strip().startswith("{") else {}
+    except ValueError as exc:
+        return {"error": str(exc), "exit_code": 1}
+    if not isinstance(args, dict):
+        args = {}
+
+    action = (args.get("action") or "").strip().lower()
+    job_id = (args.get("job_id") or "").strip()
+
+    from src.job_pipeline.orchestrator import (
+        evaluate_job,
+        inbound_job_event,
+        mark_applied,
+        process_job_record,
+        tailor_job,
+        transition_to_ready_to_apply,
+        validate_and_route,
+    )
+    from src.job_pipeline.store import get_job_events, get_job_record, job_event_to_dict, job_record_to_dict, list_job_records
+
+    if action == "evaluate":
+        if not job_id:
+            return {"error": "job_id required for evaluate", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        try:
+            job = evaluate_job(job_id, owner=owner)
+        except ValueError as exc:
+            return {"error": str(exc), "exit_code": 1}
+        return {"response": f"Evaluated — status {job.get('status')}", "job": job, "exit_code": 0}
+
+    if action == "tailor":
+        if not job_id:
+            return {"error": "job_id required for tailor", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        try:
+            job = tailor_job(job_id, owner=owner)
+        except ValueError as exc:
+            return {"error": str(exc), "exit_code": 1}
+        return {"response": "Tailoring handoff dispatched", "job": job, "exit_code": 0}
+
+    if action in ("validate", "route"):
+        if not job_id:
+            return {"error": "job_id required for validate", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        try:
+            result = validate_and_route(job_id)
+        except ValueError as exc:
+            return {"error": str(exc), "exit_code": 1}
+        return {
+            "response": f"Validated → {result.get('terminal_status')}",
+            **result,
+            "exit_code": 0,
+        }
+
+    if action == "status":
+        if not job_id:
+            return {"error": "job_id required for status", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        events = get_job_events(job_id)
+        return {
+            "job": job_record_to_dict(record),
+            "events": [job_event_to_dict(e) for e in events],
+            "exit_code": 0,
+        }
+
+    if action == "ingest":
+        payload = {k: v for k, v in args.items() if k not in ("action", "job_id", "followup_days")}
+        if not payload.get("jd_text") or not payload.get("company") or not payload.get("role"):
+            return {"error": "ingest requires company, role, jd_text", "exit_code": 1}
+        job = inbound_job_event(payload, owner=owner, source=payload.get("source") or "manual")
+        return {"response": "Job ingested", "job": job, "exit_code": 0}
+
+    if action == "advance":
+        if not job_id:
+            return {"error": "job_id required for advance", "exit_code": 1}
+        job = process_job_record(job_id)
+        return {"response": f"Advanced job to {job.get('status')}", "job": job, "exit_code": 0}
+
+    if action == "ready_to_apply":
+        if not job_id:
+            return {"error": "job_id required for ready_to_apply", "exit_code": 1}
+        result = transition_to_ready_to_apply(job_id)
+        return {"response": "Job ready to apply", **result, "exit_code": 0}
+
+    if action == "apply_package":
+        from src.job_pipeline.apply_queue import get_apply_package
+
+        if not job_id:
+            return {"error": "job_id required for apply_package", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        package = get_apply_package(job_id)
+        return {"response": "Apply package ready", "apply_package": package, "exit_code": 0}
+
+    if action == "mark_applied":
+        if not job_id:
+            return {"error": "job_id required for mark_applied", "exit_code": 1}
+        try:
+            job = mark_applied(job_id, owner=owner)
+        except ValueError as exc:
+            return {"error": str(exc), "exit_code": 1}
+        return {"response": "Marked applied", "job": job, "exit_code": 0}
+
+    if action == "schedule_followup":
+        from src.job_pipeline.followups import schedule_followup
+
+        if not job_id:
+            return {"error": "job_id required for schedule_followup", "exit_code": 1}
+        days = int(args.get("followup_days") or 7)
+        try:
+            result = schedule_followup(job_id, days=days, owner=owner)
+        except ValueError as exc:
+            return {"error": str(exc), "exit_code": 1}
+        return {"response": "Follow-up scheduled", **result, "exit_code": 0}
+
+    if action == "list":
+        status = args.get("status")
+        jobs = list_job_records(limit=int(args.get("limit") or 50), status=status, owner=owner)
+        return {
+            "response": f"Found {len(jobs)} jobs",
+            "jobs": [job_record_to_dict(j) for j in jobs],
+            "exit_code": 0,
+        }
+
+    if action == "get":
+        if not job_id:
+            return {"error": "job_id required for get", "exit_code": 1}
+        record = get_job_record(job_id)
+        if not record:
+            return {"error": f"Job {job_id} not found", "exit_code": 1}
+        if owner and record.owner and record.owner != owner:
+            return {"error": "Access denied", "exit_code": 1}
+        return {"job": job_record_to_dict(record), "exit_code": 0}
+
+    return {"error": f"Unknown action: {action or '(missing)'}", "exit_code": 1}
+
+
+# ---------------------------------------------------------------------------
+# Operator tools — agentic operator perception/recall
+# (see openspec/changes/add-agentic-operator)
+# ---------------------------------------------------------------------------
+
+async def do_screen_look(content: str) -> Dict:
+    """See the user's screen via Screenpipe OCR (live view or recent lookback)."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        # Tolerate bare text instead of JSON — treat it as the query.
+        args = {"query": (content or "").strip() or None}
+    minutes = args.get("minutes")
+    try:
+        minutes = int(minutes) if minutes is not None else None
+    except (TypeError, ValueError):
+        minutes = None
+    from services.operator.perception import screen_look
+    return await asyncio.to_thread(
+        screen_look, query=(args.get("query") or None), minutes=minutes,
+    )
+
+
+async def do_screen_recall(content: str) -> Dict:
+    """Semantic recall over indexed screen history (PixelRAG + unified memory)."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        args = {"query": (content or "").strip()}
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {"error": "query is required — pass {\"query\": \"...\"}", "exit_code": 1}
+    try:
+        k = int(args.get("k") or 5)
+    except (TypeError, ValueError):
+        k = 5
+    from services.operator.recall import screen_recall
+    return await asyncio.to_thread(screen_recall, query, k)
+
+
+async def do_spec_trace(content: str) -> Dict:
+    """Read SpecTracer element-context bundles captured by the extension."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        args = {"action": (content or "").strip() or "latest"}
+    action = (args.get("action") or "latest").strip().lower()
+    from services.operator.tracer import get_trace, list_traces
+    if action == "list":
+        try:
+            limit = int(args.get("limit") or 10)
+        except (TypeError, ValueError):
+            limit = 10
+        return await asyncio.to_thread(list_traces, limit)
+    if action in ("latest", "get"):
+        trace_id = (args.get("trace_id") or "").strip() or None
+        return await asyncio.to_thread(get_trace, trace_id)
+    return {"error": f"Unknown action '{action}' — use latest, list, or get", "exit_code": 1}
+
+
+async def do_desktop_act(content: str, session_id: Optional[str] = None) -> Dict:
+    """Consent-gated desktop actions (mouse/audio) through the Clicky worker."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments — pass {\"action\": \"click\", ...}", "exit_code": 1}
+    if not args.get("action"):
+        return {"error": "action is required (move|click|double_click|drag|speak|listen)", "exit_code": 1}
+    from services.operator.desktop import desktop_act
+    return await asyncio.to_thread(desktop_act, args, session_id)
+
+
+async def do_browser_act(content: str, session_id: Optional[str] = None) -> Dict:
+    """CDP browser control (tabs/snapshot read-only; navigate/click/type/evaluate consent-gated)."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        return {"error": "Invalid JSON arguments — pass {\"action\": \"snapshot\", ...}", "exit_code": 1}
+    if not args.get("action"):
+        return {"error": "action is required (tabs|snapshot|navigate|click|type|evaluate)", "exit_code": 1}
+    from services.operator.browser import browser_act
+    return await asyncio.to_thread(browser_act, args, session_id)
+
+
+async def do_operator_research(content: str) -> Dict:
+    """Parallel research fan-out across TinyFish + Perplexity + Firecrawl."""
+    try:
+        args = _parse_tool_args(content)
+    except ValueError:
+        args = {"query": (content or "").strip()}
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {"error": "query is required — pass {\"query\": \"...\"}", "exit_code": 1}
+    count = args.get("count")
+    try:
+        count = int(count) if count is not None else None
+    except (TypeError, ValueError):
+        count = None
+    from services.operator.research import operator_research
+    return await asyncio.to_thread(operator_research, query, count)

@@ -48,6 +48,20 @@ DEFAULT_SETTINGS = {
     "stt_provider": "disabled",
     "stt_model": "base",
     "stt_language": "",
+    "voice_chat_enabled": True,
+    "voice_realtime_enabled": True,
+    "voice_realtime_model": "",
+    "voice_realtime_voice": "",
+    # server_vad | semantic_vad — hands-free end-of-turn detection
+    "voice_realtime_turn_detection": "server_vad",
+    "voice_realtime_silence_ms": 500,
+    "voice_realtime_vad_threshold": 0.5,
+    "voice_realtime_transcription_model": "whisper-1",
+    # Custom persona/instructions for realtime voice ("" = built-in Odysseus persona)
+    "voice_realtime_instructions": "",
+    # Let realtime voice call curated Odysseus tools (web search, notes,
+    # calendar, memory) via function calling
+    "voice_tools_enabled": True,
     "search_provider": "searxng",
     # Default fallback chain — when the primary provider fails or
     # rate-limits, we try DuckDuckGo next. Free, no API key required, so
@@ -70,19 +84,30 @@ DEFAULT_SETTINGS = {
     #     DuckDuckGo    safesearch=off/moderate/on (library + HTML kp param)
     #     Google PSE    safe=active (omitted for "off"; PSE has no middle tier)
     #     Serper.dev    safe=active (omitted for "off"; proxies Google's `safe`)
-    # Providers NOT touched: Tavily (no SafeSearch knob; filters at index time)
-    # and any custom backend reached via search_url — they keep whatever the
-    # backend itself decides, so operators stay in control of self-hosted /
-    # niche search instances.
+    # Providers NOT touched: Tavily / Firecrawl / TinyFish (no SafeSearch knob;
+    # filter at index time) and any custom backend reached via search_url —
+    # they keep whatever the backend itself decides, so operators stay in
+    # control of self-hosted / niche search instances.
     "search_safesearch": "strict",
     "brave_api_key": "",
     "google_pse_key": "",
     "google_pse_cx": "",
     "tavily_api_key": "",
     "serper_api_key": "",
+    "firecrawl_api_key": "",
+    # TinyFish Search (api.search.tinyfish.ai) — free, LLM-ready; best for
+    # low-latency agent/voice lookups. Get a key at agent.tinyfish.ai/api-keys.
+    "tinyfish_api_key": "",
     "research_endpoint_id": "",
     "research_model": "",
     "research_search_provider": "",
+    # Deep research backend: "iterative" (local LLM + search loop) or
+    # "perplexity_agent" (Perplexity Agent API / Search-as-Code preset).
+    "research_engine": "iterative",
+    "perplexity_api_key": "",
+    "perplexity_research_preset": "deep-research",
+    # Daily spend cap for Perplexity Agent calls (USD). 0 = no cap.
+    "perplexity_daily_budget_usd": 5.0,
     "research_max_tokens": 16384,
     "research_extraction_timeout_seconds": 90,
     # Lightweight planning/query LLM calls happen before any search starts.

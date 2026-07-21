@@ -446,11 +446,15 @@ async function loadEndpoints() {
       const keyLabel = ep.has_key
         ? (ep.api_key_fingerprint ? ` (key ${esc(ep.api_key_fingerprint)})` : ' (key set)')
         : '';
+      const epLogo = providerLogo(ep.base_url || '') || providerLogo(ep.name || '');
+      const epLogoHtml = epLogo
+        ? `<span class="adm-ep-provider-logo provider-logo" aria-hidden="true">${epLogo}</span>`
+        : '';
       return `
         <div class="admin-user-row${ep.is_enabled ? '' : ' admin-ep-disabled'}${justAddedClass}" data-adm-ep-id="${ep.id}">
           <div style="display:flex;align-items:center;justify-content:space-between;${hasModels ? 'cursor:pointer;' : ''}padding:4px 0;" data-adm-ep-header="${ep.id}">
             <div class="admin-user-info" style="flex:1;flex-wrap:wrap;gap:0.3rem;">
-              <span class="admin-user-name">${esc(ep.name)}</span>
+              <span class="admin-user-name adm-ep-name-row">${epLogoHtml}${esc(ep.name)}</span>
               ${ep.model_type === 'image' ? '<span class="admin-badge" style="background:color-mix(in srgb, var(--accent) 20%, transparent);color:var(--accent);">Image</span>' : ''}
               ${kindLabel ? `<span class="admin-badge">${esc(kindLabel)}</span>` : ''}
               ${statusBadge}
@@ -808,6 +812,33 @@ function initEndpointForm() {
     pickerCurrent.querySelector('.adm-provider-logo').innerHTML = logo;
     pickerCurrent.querySelector('.adm-provider-name').textContent = opt.textContent;
   }
+  /** Keep preset provider selected when the user edits placeholder tokens
+   *  (e.g. YOUR_ACCOUNT_ID) or otherwise tweaks the URL on the same host. */
+  function _urlMatchesProviderPreset(url, optionValue) {
+    const trimmed = (url || '').trim();
+    if (!optionValue) return !trimmed;
+    if (trimmed === optionValue) return true;
+    const placeholderRe = /YOUR_[A-Z0-9_]+/i;
+    if (placeholderRe.test(optionValue)) {
+      const token = optionValue.match(placeholderRe)[0];
+      const splitAt = optionValue.indexOf(token);
+      const prefix = optionValue.slice(0, splitAt);
+      const suffix = optionValue.slice(splitAt + token.length);
+      return trimmed.startsWith(prefix) && trimmed.endsWith(suffix) && trimmed.length > prefix.length;
+    }
+    try {
+      const opt = new URL(optionValue);
+      const cur = new URL(trimmed);
+      return opt.hostname === cur.hostname && trimmed.startsWith(opt.origin);
+    } catch (_) {
+      return false;
+    }
+  }
+  function _providerOptionForUrl(url) {
+    const trimmed = _normalizeBaseUrl((url || '').trim());
+    if (!trimmed) return null;
+    return Array.from(provider.options).find(o => o.value && _urlMatchesProviderPreset(trimmed, o.value)) || null;
+  }
   if (picker && pickerBtn && pickerMenu && pickerCurrent) {
     _renderPickerMenu();
     _syncPickerCurrent();
@@ -837,13 +868,47 @@ function initEndpointForm() {
       _syncPickerCurrent();
       return;
     }
-    if (provider.value) urlInput.value = provider.value;
-    else urlInput.value = '';
+    if (provider.value) {
+      urlInput.value = provider.value;
+      if (provider.value.includes('cloudflare.com') && urlInput.placeholder !== undefined) {
+        urlInput.placeholder = 'https://api.cloudflare.com/client/v4/accounts/YOUR_ACCOUNT_ID/ai/v1';
+      }
+    } else {
+      urlInput.value = '';
+      urlInput.placeholder = 'Base URL or pick provider';
+    }
     if (kindSel) kindSel.value = provider.value ? 'api' : 'proxy';
     _setApiFormForProvider();
   });
+  urlInput.addEventListener('blur', () => {
+    const normalized = _normalizeBaseUrl(urlInput.value);
+    if (normalized && normalized !== urlInput.value.trim()) {
+      urlInput.value = normalized;
+      const matched = _providerOptionForUrl(normalized);
+      if (matched && provider.value !== matched.value) {
+        provider.value = matched.value;
+        if (kindSel) kindSel.value = 'api';
+      }
+      _renderPickerMenu();
+      _syncPickerCurrent();
+    }
+  });
   urlInput.addEventListener('input', () => {
-    if (provider.value && urlInput.value.trim() !== provider.value) {
+    const trimmed = urlInput.value.trim();
+    if (provider.value && _urlMatchesProviderPreset(trimmed, provider.value)) {
+      _renderPickerMenu();
+      _syncPickerCurrent();
+      return;
+    }
+    const matched = _providerOptionForUrl(trimmed);
+    if (matched) {
+      provider.value = matched.value;
+      if (kindSel) kindSel.value = 'api';
+      _renderPickerMenu();
+      _syncPickerCurrent();
+      return;
+    }
+    if (provider.value) {
       provider.value = '';
       if (kindSel) kindSel.value = 'api';
       _renderPickerMenu();
@@ -854,8 +919,44 @@ function initEndpointForm() {
   function _apiEndpointKind() {
     return (kindSel && kindSel.value) ? kindSel.value : 'api';
   }
+  function _repairCloudflareUrl(u) {
+    const raw = (u || '').trim();
+    if (!raw || /cloudflare\.com/i.test(raw)) return raw;
+    const acct = raw.match(/accounts\/([^/]+)\/ai/i);
+    if (!acct) return raw;
+    try {
+      const probe = /^https?:\/\//i.test(raw) ? raw : 'http://' + raw.replace(/^\/+/, '');
+      const host = new URL(probe).hostname.toLowerCase();
+      if (host === 'v4' || /^v4\//i.test(raw.replace(/^\/+/, ''))) {
+        return `https://api.cloudflare.com/client/v4/accounts/${acct[1]}/ai/v1`;
+      }
+    } catch (_) {
+      if (/^v4\/accounts\//i.test(raw.replace(/^\/+/, ''))) {
+        return `https://api.cloudflare.com/client/v4/accounts/${acct[1]}/ai/v1`;
+      }
+    }
+    return raw;
+  }
+  function _normalizeCloudflareWorkersAiUrl(u) {
+    try {
+      const parsed = new URL(u);
+      if (!parsed.hostname.endsWith('cloudflare.com')) return u;
+      const path = parsed.pathname.replace(/\/+$/, '');
+      const runMatch = path.match(/^(\/client\/v4\/accounts\/[^/]+\/ai)\/run(?:\/.*)?$/i);
+      if (runMatch) {
+        parsed.pathname = runMatch[1] + '/v1';
+        return parsed.href.replace(/\/+$/, '');
+      }
+      if (/\/accounts\/[^/]+\/ai$/i.test(path)) {
+        parsed.pathname = path + '/v1';
+        return parsed.href.replace(/\/+$/, '');
+      }
+    } catch (_) {}
+    return u;
+  }
   function _normalizeBaseUrl(raw) {
     let u = raw.trim();
+    u = _repairCloudflareUrl(u);
     // Fix common protocol typos
     u = u.replace(/^https?:\/(?!\/)/, m => m + '/');  // https:/ → https://
     u = u.replace(/^htp:/, 'http:').replace(/^htps:/, 'https:');
@@ -865,6 +966,8 @@ function initEndpointForm() {
     if (!/^https?:\/\//.test(u)) u = 'http://' + u;
     // Strip trailing slashes
     u = u.replace(/\/+$/, '');
+    // Cloudflare dashboard "Use REST API" copies /ai/run — rewrite to OpenAI /ai/v1
+    u = _normalizeCloudflareWorkersAiUrl(u);
     // Strip trailing paths that shouldn't be in a base URL
     u = u.replace(/\/v1\/(models|chat\/completions|completions|messages)\/?$/i, '/v1');
     u = u.replace(/\/(models|chat\/completions|completions|v1\/messages)\/?$/i, '');
@@ -940,7 +1043,7 @@ function initEndpointForm() {
       const apiKey = el('adm-epApiKey').value.trim();
       if (!rawUrl) { msg.textContent = 'Select a provider or enter a base URL'; msg.className = 'admin-error'; return; }
       if (provider.value && !apiKey) { msg.textContent = 'API key is required for cloud providers'; msg.className = 'admin-error'; return; }
-      const url = provider.value && rawUrl === provider.value ? rawUrl : _normalizeBaseUrl(rawUrl);
+      const url = _normalizeBaseUrl(rawUrl);
       apiTestController = new AbortController();
       apiTestBtn.disabled = true;
       apiTestBtn.textContent = 'Testing...';
@@ -993,7 +1096,7 @@ function initEndpointForm() {
     if (!rawUrl) { msg.textContent = 'Select a provider or enter a base URL'; msg.className = 'admin-error'; return; }
     if (provider.value && !apiKey) { msg.textContent = 'API key is required for cloud providers'; msg.className = 'admin-error'; return; }
     // Normalize URL (fix typos, add /v1, strip wrong paths)
-    const url = provider.value && rawUrl === provider.value ? rawUrl : _normalizeBaseUrl(rawUrl);
+    const url = _normalizeBaseUrl(rawUrl);
     const btn = el('adm-epAddBtn');
     btn.disabled = true; btn.textContent = 'Adding...';
     try {
@@ -1019,6 +1122,8 @@ function initEndpointForm() {
         el('adm-epApiKey').value = ''; provider.value = '';
         if (kindSel) kindSel.value = 'proxy';
         if (epType) epType.value = 'llm';
+        _renderPickerMenu();
+        _syncPickerCurrent();
         if (d.id) _recentlyAddedEpId = String(d.id);
         await loadEndpoints();
         await _selectAddedModelInChat(d);
