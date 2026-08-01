@@ -40,6 +40,7 @@ def compose_handshake_apply_message(
         "Run the Handshake job-application workflow end-to-end in ONE session (no mid-flow handoffs).",
         "",
         "Rules:",
+        # Path A — see docs/grounded-build-spec-browser-harness-handoff.md
         "- Use browser-harness + Comet CDP (BU_CDP_URL=http://127.0.0.1:9333), NOT Docker MCP Playwright.",
         "- Stop once if login wall (/access); user finishes OTP in Comet, then continue.",
         "- Same agent builds DOCX, converts PDF, and uploads — do not hand off between those steps.",

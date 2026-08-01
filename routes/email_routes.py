@@ -47,7 +47,7 @@ from routes.email_helpers import (
     _extract_attachment_text, _list_attachments_from_msg,
     _extract_attachment_to_disk, _extract_html, _extract_text,
     _fetch_sender_thread_context, _pre_retrieve_context,
-    _EMAIL_REPLY_SYS_PROMPT_BASE, _POOL_HOOKS,
+    _EMAIL_REPLY_SYS_PROMPT_BASE, _POOL_HOOKS, register_list_emails_sync,
     _friendly_email_auth_error,
     SendEmailRequest, ExtractStyleRequest,
     ATTACHMENTS_DIR, COMPOSE_UPLOADS_DIR, SCHEDULED_DB,
@@ -969,6 +969,8 @@ def setup_email_routes():
                     conn.logout()
                 except Exception:
                     pass
+
+    register_list_emails_sync(_list_emails_sync)
 
     @router.get("/list")
     async def list_emails(

@@ -5,9 +5,26 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from core.database import JobEvent, JobRecord, SessionLocal
+
+# Progressive AGENCY funnel buckets (mutually exclusive by JobRecord.status).
+# Excludes terminal out-of-funnel states (archived/error/rejected).
+FUNNEL_STAGE_STATUSES: dict[str, frozenset[str]] = {
+    "ingested": frozenset({"email_received", "parsed", "normalized", "deduped"}),
+    "evaluated": frozenset(
+        {
+            "evaluated",
+            "tailoring_started",
+            "tailoring_complete",
+            "validated",
+            "needs_review",
+        }
+    ),
+    "ready": frozenset({"ready_to_apply"}),
+    "applied": frozenset({"applied"}),
+}
 
 
 def _new_id() -> str:
@@ -100,6 +117,38 @@ def get_job_record(job_id: str) -> Optional[JobRecord]:
         db.close()
 
 
+def _filter_job_records(
+    q,
+    *,
+    status: Optional[str] = None,
+    terminal_status: Optional[str] = None,
+    attention: Optional[str] = None,
+    owner: Optional[str] = None,
+):
+    """Apply shared filters. ``attention`` matches via status OR terminal_status."""
+    if attention == "ready_to_apply":
+        q = q.filter(
+            or_(
+                JobRecord.terminal_status == "ready_to_apply",
+                JobRecord.status == "ready_to_apply",
+            )
+        )
+    elif attention == "needs_review":
+        q = q.filter(
+            or_(
+                JobRecord.terminal_status == "needs_review",
+                JobRecord.status == "needs_review",
+            )
+        )
+    if status:
+        q = q.filter(JobRecord.status == status)
+    if terminal_status:
+        q = q.filter(JobRecord.terminal_status == terminal_status)
+    if owner:
+        q = q.filter(JobRecord.owner == owner)
+    return q
+
+
 def list_job_records(
     *,
     limit: int = 50,
@@ -111,28 +160,52 @@ def list_job_records(
     """List job records. ``attention`` matches ready_to_apply / needs_review via status OR terminal_status."""
     db = SessionLocal()
     try:
-        q = db.query(JobRecord).order_by(JobRecord.created_at.desc())
-        if attention == "ready_to_apply":
-            q = q.filter(
-                or_(
-                    JobRecord.terminal_status == "ready_to_apply",
-                    JobRecord.status == "ready_to_apply",
-                )
-            )
-        elif attention == "needs_review":
-            q = q.filter(
-                or_(
-                    JobRecord.terminal_status == "needs_review",
-                    JobRecord.status == "needs_review",
-                )
-            )
-        if status:
-            q = q.filter(JobRecord.status == status)
-        if terminal_status:
-            q = q.filter(JobRecord.terminal_status == terminal_status)
+        q = _filter_job_records(
+            db.query(JobRecord).order_by(JobRecord.created_at.desc()),
+            status=status,
+            terminal_status=terminal_status,
+            attention=attention,
+            owner=owner,
+        )
+        return q.limit(max(1, min(limit, 200))).all()
+    finally:
+        db.close()
+
+
+def count_job_records(
+    *,
+    status: Optional[str] = None,
+    terminal_status: Optional[str] = None,
+    attention: Optional[str] = None,
+    owner: Optional[str] = None,
+) -> int:
+    """Count job records with the same filters as ``list_job_records``, uncapped."""
+    db = SessionLocal()
+    try:
+        q = _filter_job_records(
+            db.query(JobRecord),
+            status=status,
+            terminal_status=terminal_status,
+            attention=attention,
+            owner=owner,
+        )
+        return int(q.count())
+    finally:
+        db.close()
+
+
+def count_job_funnel_stages(*, owner: Optional[str] = None) -> dict[str, int]:
+    """Uncapped counts for AGENCY funnel stages: ingested/evaluated/ready/applied."""
+    db = SessionLocal()
+    try:
+        q = db.query(JobRecord.status, func.count()).group_by(JobRecord.status)
         if owner:
             q = q.filter(JobRecord.owner == owner)
-        return q.limit(max(1, min(limit, 200))).all()
+        by_status = {str(status or ""): int(n) for status, n in q.all()}
+        return {
+            stage: sum(by_status.get(s, 0) for s in statuses)
+            for stage, statuses in FUNNEL_STAGE_STATUSES.items()
+        }
     finally:
         db.close()
 

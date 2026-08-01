@@ -4740,7 +4740,7 @@ async def do_vault_unlock(content: str, owner: Optional[str] = None) -> Dict:
 
 
 async def do_process_job_application(content: str, owner: Optional[str] = None) -> Dict:
-    """Job search pipeline tool — ingest, apply package, mark applied, follow-ups."""
+    """Job search pipeline tool — ingest, apply package, mark applied, archive, follow-ups."""
     try:
         args = _parse_tool_args(content) if content.strip().startswith("{") else {}
     except ValueError as exc:
@@ -4752,6 +4752,7 @@ async def do_process_job_application(content: str, owner: Optional[str] = None) 
     job_id = (args.get("job_id") or "").strip()
 
     from src.job_pipeline.orchestrator import (
+        archive_job,
         evaluate_job,
         inbound_job_event,
         mark_applied,
@@ -4863,6 +4864,22 @@ async def do_process_job_application(content: str, owner: Optional[str] = None) 
         except ValueError as exc:
             return {"error": str(exc), "exit_code": 1}
         return {"response": "Marked applied", "job": job, "exit_code": 0}
+
+    if action == "archive":
+        if not job_id:
+            return {"error": "job_id required for archive", "exit_code": 1}
+        reason = (args.get("reason") or "").strip() or None
+        try:
+            job = archive_job(job_id, owner=owner, reason=reason)
+        except ValueError as exc:
+            err = str(exc)
+            code = 1
+            if "not found" in err.lower():
+                return {"error": err, "exit_code": 1, "not_found": True}
+            if "access denied" in err.lower():
+                return {"error": err, "exit_code": 1}
+            return {"error": err, "exit_code": code}
+        return {"response": "Archived", "job": job, "exit_code": 0}
 
     if action == "schedule_followup":
         from src.job_pipeline.followups import schedule_followup

@@ -992,6 +992,10 @@ def _migrate_add_notes_sort_order():
             conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_started_at TEXT")
         if columns and "handoff_relay_completed_at" not in columns:
             conn.execute("ALTER TABLE notes ADD COLUMN handoff_relay_completed_at TEXT")
+        if columns and "task_status" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN task_status TEXT")
+        if columns and "task_status_at" not in columns:
+            conn.execute("ALTER TABLE notes ADD COLUMN task_status_at TEXT")
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1524,6 +1528,40 @@ class Note(TimestampMixin, Base):
     handoff_relay_session_id = Column(String, nullable=True)
     handoff_relay_started_at = Column(String, nullable=True)
     handoff_relay_completed_at = Column(String, nullable=True)
+    # PROD orbital board column — queued|in_progress|blocked|done (nullable).
+    # Server source of truth replacing client-only localStorage maps (D3).
+    task_status = Column(String, nullable=True)
+    task_status_at = Column(String, nullable=True)
+
+
+class LineageEdge(Base):
+    """Generic spawn/provenance edge between directive-worthy objects.
+
+    Kinds are short strings (note, job, handoff, task_run, email). Email uses a
+    synthetic source_id of ``account_id:uid`` since messages are not DB rows.
+    """
+    __tablename__ = "lineage_edges"
+
+    id = Column(String, primary_key=True, index=True)
+    source_kind = Column(String, nullable=False, index=True)
+    source_id = Column(String, nullable=False, index=True)
+    target_kind = Column(String, nullable=False, index=True)
+    target_id = Column(String, nullable=False, index=True)
+    relation = Column(String, nullable=False, index=True)
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False)
+
+    __table_args__ = (
+        Index("ix_lineage_edges_target", "target_kind", "target_id"),
+        Index("ix_lineage_edges_source", "source_kind", "source_id"),
+        Index(
+            "ix_lineage_edges_pair_relation",
+            "source_kind",
+            "source_id",
+            "target_kind",
+            "target_id",
+            "relation",
+        ),
+    )
 
 
 class JobRecord(TimestampMixin, Base):
@@ -1811,6 +1849,39 @@ def init_db():
     _migrate_backfill_task_folders()
     _migrate_job_records_phase4_columns()
     _migrate_job_records_phase23_columns()
+    _migrate_lineage_edges_table()
+
+
+def _migrate_lineage_edges_table():
+    """Ensure lineage_edges exists (additive; no historical backfill)."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS lineage_edges (
+                    id VARCHAR PRIMARY KEY,
+                    source_kind VARCHAR NOT NULL,
+                    source_id VARCHAR NOT NULL,
+                    target_kind VARCHAR NOT NULL,
+                    target_id VARCHAR NOT NULL,
+                    relation VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_lineage_edges_target "
+                "ON lineage_edges (target_kind, target_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_lineage_edges_source "
+                "ON lineage_edges (source_kind, source_id)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_lineage_edges_relation "
+                "ON lineage_edges (relation)"
+            ))
+            conn.commit()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"lineage_edges migration: {e}")
 
 
 def _migrate_job_records_phase23_columns():

@@ -22,6 +22,7 @@ from src.prompt_security import untrusted_context_message
 from src.tool_security import blocked_tools_for_owner, plan_mode_disabled_tools
 from src.tool_policy import GUIDE_ONLY_DIRECTIVE, ToolPolicy
 from src.tool_utils import get_mcp_manager
+from src.tool_index import OPERATOR_BRIEF_TOOLS
 from src.agent_tools import (
     parse_tool_blocks,
     strip_tool_blocks,
@@ -267,6 +268,12 @@ _DOMAIN_RULES = {
 - Use `manage_settings` for preferences and tool enable/disable.
 - Use named tools over `app_api` when a named wrapper exists.
 - `app_api` is only for safe UI/API actions without a named tool; do not use it for shell, package installs, engine rebuilds, or sensitive auth/admin paths.""",
+    "operator_brief": """\
+## Operator brief / focus rules
+- Tool-call first: gather live notes/todos, calendar (today), email inbox, and handoffs via `app_api` GET `/api/notes/handoffs` before writing.
+- Prefer loading a morning-brief / daily-brief skill with `manage_skills` when listed; otherwise write a concise brief from tool results.
+- Never invent email, calendar, or task data. If a tool fails, note `⚠️ [tool] failed` in that section and continue.
+- End with ONE clear human action for today; defer or drop noise.""",
 }
 
 _DOMAIN_TOOL_MAP = {
@@ -279,6 +286,7 @@ _DOMAIN_TOOL_MAP = {
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
     "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
+    "operator_brief": set(OPERATOR_BRIEF_TOOLS),
 }
 
 def _domain_rules_for_tools(tool_names: set) -> list[str]:
@@ -798,6 +806,19 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("files")
     if has(r"\b(endpoint|api token|mcp|webhook|preference|configure|config|setting)\b"):
         domains.add("settings")
+    # Operator brief / focus — must never collapse to ALWAYS_AVAILABLE-only.
+    if has(
+        r"\b(?:morning|daily)\s+brief\b",
+        r"\bras\s+morning\s+brief\b",
+        r"\bwhat have we been working on\b",
+        r"\bwhat(?:'s| is)\s+next(?:\s+today)?\b",
+        r"\btoday'?s?\s+focus\b",
+        r"\bfocus\s+for\s+today\b",
+        r"\bcatch me up\b",
+        r"\bopen loops?\b",
+        r"\b(?:give me|generate|produce|run|write)\s+(?:a\s+|my\s+|the\s+)?(?:morning|daily)\s+brief\b",
+    ):
+        domains.add("operator_brief")
 
     low_signal = not continuation and not domains
     return {

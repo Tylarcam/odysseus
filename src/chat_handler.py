@@ -213,13 +213,15 @@ class ChatHandler:
                             except Exception:
                                 pass
                     else:
-                        # Main model is text-only — use VL model for description.
+                        # Main model is text-only — try local OCR transcription
+                        # first, then fall back to VL model description.
                         # Prefer the cached/user-edited text in UPLOAD_DIR/.vision/{id}.txt
                         # so a manual correction (via the chat attachment dropdown's
-                        # editable textarea) overrides what the vision model would say.
+                        # editable textarea) overrides what OCR/vision would say.
                         _vcache = os.path.join(UPLOAD_DIR, ".vision", att_id + ".txt")
                         vl_desc = None
                         vl_model = get_setting("vision_model", "") or ""
+                        label = "Image"
                         if os.path.exists(_vcache):
                             try:
                                 with open(_vcache, encoding="utf-8") as _vf:
@@ -228,6 +230,21 @@ class ChatHandler:
                                     vl_desc = cached_desc
                             except Exception:
                                 vl_desc = None
+                        if not vl_desc and get_setting("ocr_enabled", True):
+                            from src.ocr_processor import analyze_image_with_ocr, is_ocr_text_usable
+                            ocr_result = analyze_image_with_ocr(
+                                file_info["path"], lang=get_setting("ocr_lang", "en") or "en"
+                            )
+                            if is_ocr_text_usable(ocr_result):
+                                vl_desc = ocr_result["text"]
+                                vl_model = "paddleocr"
+                                label = "OCR text for image"
+                                try:
+                                    os.makedirs(os.path.join(UPLOAD_DIR, ".vision"), exist_ok=True)
+                                    with open(_vcache, "w", encoding="utf-8") as _vf:
+                                        _vf.write(vl_desc)
+                                except Exception:
+                                    pass
                         if not vl_desc:
                             vl_result = analyze_image_with_vl_result(file_info["path"], owner=owner)
                             vl_desc = vl_result.get("text", "")
@@ -239,7 +256,7 @@ class ChatHandler:
                                         _vf.write(vl_desc)
                                 except Exception:
                                     pass
-                        enhanced_message = f"{enhanced_message}\n\n[Image: {file_info['name']}]\n{vl_desc}"
+                        enhanced_message = f"{enhanced_message}\n\n[{label}: {file_info['name']}]\n{vl_desc}"
                         # Surface the description to the client live so it renders as a
                         # collapsible "image description" on the user bubble (not just
                         # after a refresh that re-parses the stored message).

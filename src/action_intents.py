@@ -100,6 +100,16 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("research", "deep research imperative request", rf"{_PLEASE}(?:research|deep\s+dive|look\s+into|investigate)\s+.+"),
         ("research", "assistant deep research request", rf"{_ACTION_QUESTION}(?:research|do\s+research|deep\s+dive|look\s+into|investigate)\s+.+"),
 
+        # Operator brief / focus consensus — must escalate Chat→Agent so gather
+        # tools are reachable (notes, calendar, email, handoffs).
+        ("operator_brief", "morning/daily brief request", r"\b(?:morning|daily)\s+brief\b"),
+        ("operator_brief", "ras morning brief request", r"\bras\s+morning\s+brief\b"),
+        ("operator_brief", "generate morning brief request", r"\b(?:give me|generate|produce|run|write)\s+(?:a\s+|my\s+|the\s+)?(?:morning|daily)\s+brief\b"),
+        ("operator_brief", "what have we been working on", r"\bwhat have we been working on\b"),
+        ("operator_brief", "what's next today", r"\bwhat(?:'s| is)\s+next(?:\s+today)?\b"),
+        ("operator_brief", "today's focus", r"\b(?:today'?s?\s+focus|focus\s+for\s+today)\b"),
+        ("operator_brief", "catch me up / open loops", r"\b(?:catch me up|open loops?)\b"),
+
         # Shell / remote-host intent.
         ("shell", "ssh request", r"\bssh\s+(?:in)?to\b"),
         ("shell", "ssh target request", r"\bssh\s+\w+"),

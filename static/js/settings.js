@@ -938,6 +938,8 @@ async function initVisionSettings() {
   const vlSel = el('set-vlModelSelect');
   const msg = el('set-visionSettingsMsg');
   const enabledToggle = el('set-visionEnabledToggle');
+  const ocrEnabledToggle = el('set-ocrEnabledToggle');
+  const ocrLangInput = el('set-ocrLangInput');
   const configWrap = vlSel ? vlSel.closest('div[style*="flex-direction"]') : null;
   var _visionEndpoints = [];
   var visionFallbackWidget = null;
@@ -972,6 +974,8 @@ async function initVisionSettings() {
     const settings = await settingsRes.json();
     if (settings.vision_model) vlSel.value = settings.vision_model;
     if (enabledToggle) enabledToggle.checked = settings.vision_enabled !== false;
+    if (ocrEnabledToggle) ocrEnabledToggle.checked = settings.ocr_enabled !== false;
+    if (ocrLangInput) ocrLangInput.value = settings.ocr_lang || 'en';
     visionFallbackWidget = _bindFallbackWidget({
       containerId: 'set-visionFallbacks',
       addBtnId: 'set-visionAddFallback',
@@ -997,12 +1001,19 @@ async function initVisionSettings() {
   async function saveSettings() {
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vision_enabled: enabledToggle ? enabledToggle.checked : true, vision_model: vlSel.value }) });
+        body: JSON.stringify({
+          vision_enabled: enabledToggle ? enabledToggle.checked : true,
+          vision_model: vlSel.value,
+          ocr_enabled: ocrEnabledToggle ? ocrEnabledToggle.checked : true,
+          ocr_lang: ocrLangInput ? (ocrLangInput.value.trim() || 'en') : 'en',
+        }) });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
   vlSel.addEventListener('change', saveSettings);
   if (enabledToggle) enabledToggle.addEventListener('change', function() { syncVisionDisabled(); saveSettings(); });
+  if (ocrEnabledToggle) ocrEnabledToggle.addEventListener('change', saveSettings);
+  if (ocrLangInput) ocrLangInput.addEventListener('change', saveSettings);
 
   _registerAiEndpointRefresh(function(endpoints) {
     _visionEndpoints = endpoints;

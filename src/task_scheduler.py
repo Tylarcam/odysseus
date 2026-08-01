@@ -10,6 +10,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, Tuple
 
+from src.tool_index import MORNING_BRIEF_TOOLS  # shared with chat operator-brief routing
+
 logger = logging.getLogger(__name__)
 
 
@@ -254,19 +256,6 @@ def is_empty_agent_response(text: str) -> bool:
     if not stripped or stripped == "(no output)":
         return True
     return stripped == _EMPTY_AGENT_RESPONSE
-
-
-# Morning Brief: model gathers live data via app/MCP tools (no server prefetch).
-MORNING_BRIEF_TOOLS = frozenset({
-    "manage_notes",
-    "manage_calendar",
-    "app_api",
-    "create_document",
-    "update_document",
-    "manage_documents",
-    "mcp__email__list_emails",
-    "list_emails",
-})
 
 
 def _is_morning_brief_task(task) -> bool:
@@ -1390,11 +1379,24 @@ class TaskScheduler:
                 crew = None
 
         # Determine endpoint + model
+        # Prefer: per-task pin → crew → Settings task_model → recent-session fallback.
+        # Without resolve_task_endpoint, unset tasks inherit whichever chat model
+        # ran last — so Settings → Task model (e.g. Ornith) never took effect.
         endpoint_url = task.endpoint_url
         model = task.model
         if (not endpoint_url or not model) and crew:
             endpoint_url = endpoint_url or crew.endpoint_url
             model = model or crew.model
+        if not endpoint_url or not model:
+            try:
+                from src.task_endpoint import resolve_task_endpoint
+                ep_url, ep_model, _ep_headers = resolve_task_endpoint(
+                    owner=task.owner or None,
+                )
+                endpoint_url = endpoint_url or ep_url
+                model = model or ep_model
+            except Exception:
+                pass
         if not endpoint_url or not model:
             endpoint_url, model = self._resolve_defaults(db, task.owner)
         if not endpoint_url or not model:

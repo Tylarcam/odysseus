@@ -18,6 +18,10 @@ let _pendingFile = null;
 let _activeFlowId = null;
 let _flowPhases   = [];
 let _handoffOptions = [];
+let _exitConfirmShowing = false;
+let _draftSaveTimer = null;
+
+const DRAFT_STORAGE_KEY = 'formflow.draft.v1';
 
 // Live DOM refs — set each time the pane opens, cleared on close
 let _pane        = null;
@@ -180,6 +184,7 @@ textarea.ff-input { min-height:110px; resize:vertical; line-height:1.5; }
   border-top:1px solid var(--border);
 }
 .ff-nav.visible { display:flex; }
+.ff-nav-right { display:flex; gap:8px; }
 .ff-nav-btn {
   padding:8px 22px; border-radius:8px; font-size:0.88rem; font-weight:500; cursor:pointer;
   border:1px solid var(--border); background:var(--panel); color:var(--fg);
@@ -190,6 +195,49 @@ textarea.ff-input { min-height:110px; resize:vertical; line-height:1.5; }
 .ff-nav-btn.primary:hover:not(:disabled) { opacity:0.85; }
 .ff-nav-btn:disabled { opacity:0.3; cursor:not-allowed; }
 .ff-nav-btn.invisible { visibility:hidden; }
+.ff-nav-btn.hidden { display:none; }
+/* ── Exit control + confirm ── */
+.ff-exit-btn:hover { border-color:var(--red); background:var(--red); color:#fff; }
+.ff-exit-confirm {
+  display:none; position:absolute; inset:0; z-index:5; align-items:center; justify-content:center;
+  background:color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+  padding:20px;
+}
+.ff-exit-confirm.visible { display:flex; }
+.ff-exit-confirm-card {
+  width:100%; max-width:320px; background:var(--panel); border:1px solid var(--border);
+  border-radius:10px; padding:18px; box-shadow:0 8px 28px color-mix(in srgb, #000 25%, transparent);
+}
+.ff-exit-confirm-title { font-size:1.02rem; font-weight:700; margin-bottom:5px; }
+.ff-exit-confirm-sub { font-size:0.82rem; color:color-mix(in srgb,var(--fg) 48%,transparent); margin-bottom:14px; }
+.ff-exit-confirm-actions { display:flex; flex-direction:column; gap:7px; }
+.ff-exit-confirm-actions .ff-review-btn { width:100%; text-align:center; }
+/* ── Resume draft banner ── */
+.ff-resume-banner {
+  border:1px solid color-mix(in srgb,var(--red) 40%,var(--border)); border-radius:8px;
+  padding:12px 14px; margin-bottom:14px; background:color-mix(in srgb,var(--red) 6%,var(--panel));
+}
+.ff-resume-text { font-size:0.84rem; margin-bottom:10px; line-height:1.4; }
+.ff-resume-actions { display:flex; gap:8px; }
+/* ── Question outline (jump) ── */
+.ff-q-outline { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px; }
+.ff-q-outline-item {
+  width:22px; height:22px; border-radius:50%; border:1px solid var(--border); background:var(--panel);
+  color:color-mix(in srgb,var(--fg) 55%,transparent); font-size:0.68rem; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; font-family:inherit; transition:border-color .15s,background .15s;
+}
+.ff-q-outline-item:hover { border-color:var(--red); }
+.ff-q-outline-item.current { border-color:var(--red); background:var(--red); color:#fff; }
+.ff-q-outline-item.answered:not(.current) { border-color:color-mix(in srgb,var(--red) 45%,var(--border)); color:var(--fg); }
+.ff-q-label-row { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:4px; }
+.ff-q-label-row .ff-q-label { margin-bottom:0; flex:1; }
+.ff-q-clear-btn {
+  display:none; flex-shrink:0; margin-top:3px; background:none; border:none; cursor:pointer;
+  font-family:inherit; font-size:0.74rem; color:color-mix(in srgb,var(--fg) 40%,transparent);
+  text-decoration:underline; padding:2px 0;
+}
+.ff-q-clear-btn:hover { color:var(--red); }
+.ff-q-clear-btn.visible { display:inline-block; }
 /* ── Review ── */
 .ff-review-title { font-size:1.2rem; font-weight:700; margin-bottom:5px; }
 .ff-review-sub { font-size:0.82rem; color:color-mix(in srgb,var(--fg) 45%,transparent); margin-bottom:18px; }
@@ -226,6 +274,7 @@ textarea.ff-input { min-height:110px; resize:vertical; line-height:1.5; }
 .ff-phase-pill {
   font-size:0.68rem; letter-spacing:.04em; padding:3px 8px; border-radius:999px;
   border:1px solid var(--border); color:color-mix(in srgb,var(--fg) 45%,transparent);
+  cursor:pointer;
 }
 .ff-phase-pill.active { border-color:var(--red); color:var(--fg); background:color-mix(in srgb,var(--red) 10%,var(--panel)); }
 .ff-q-hint { font-size:0.8rem; color:color-mix(in srgb,var(--fg) 48%,transparent); margin-bottom:10px; line-height:1.4; }
@@ -308,9 +357,24 @@ export function openPanel() {
         FormFlow
       </h4>
       <span style="flex:1"></span>
+      <button id="ff-exit-btn" class="modal-minimize-btn ff-exit-btn" title="Exit" aria-label="Exit FormFlow" style="display:none;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="5" x2="19" y2="19"/><line x1="19" y1="5" x2="5" y2="19"/></svg>
+      </button>
       <button id="ff-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize FormFlow" style="position:relative;left:2px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg>
       </button>
+    </div>
+
+    <div class="ff-exit-confirm" id="ff-exit-confirm">
+      <div class="ff-exit-confirm-card">
+        <div class="ff-exit-confirm-title">Leave this form?</div>
+        <div class="ff-exit-confirm-sub" id="ff-exit-confirm-sub"></div>
+        <div class="ff-exit-confirm-actions">
+          <button type="button" class="ff-review-btn primary" id="ff-exit-save">Save draft &amp; exit</button>
+          <button type="button" class="ff-review-btn" id="ff-exit-discard">Discard &amp; exit</button>
+          <button type="button" class="ff-review-btn" id="ff-exit-cancel">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <div class="ff-pane-body">
@@ -318,6 +382,13 @@ export function openPanel() {
       <div id="ff-screen-input" class="ff-screen active">
         <div class="ff-title">FormFlow</div>
         <div class="ff-sub">Paste a form or pick a decision flow — one question at a time, handoffs when done.</div>
+        <div class="ff-resume-banner" id="ff-resume-banner" style="display:none;">
+          <div class="ff-resume-text" id="ff-resume-text"></div>
+          <div class="ff-resume-actions">
+            <button type="button" class="ff-review-btn primary" id="ff-resume-btn">Resume</button>
+            <button type="button" class="ff-review-btn" id="ff-resume-dismiss-btn">Start fresh</button>
+          </div>
+        </div>
         <div class="ff-flow-pick" id="ff-flow-pick"></div>
         <div class="ff-tabs">
           <button class="ff-tab active" data-tab="paste">Paste text</button>
@@ -353,8 +424,12 @@ export function openPanel() {
       <!-- Form screen -->
       <div id="ff-screen-form" class="ff-screen">
         <div class="ff-phases" id="ff-phases"></div>
+        <div class="ff-q-outline" id="ff-q-outline"></div>
         <div class="ff-q-number" id="ff-q-number"></div>
-        <div class="ff-q-label" id="ff-q-label"></div>
+        <div class="ff-q-label-row">
+          <div class="ff-q-label" id="ff-q-label"></div>
+          <button type="button" class="ff-q-clear-btn" id="ff-q-clear-btn" title="Clear answer" aria-label="Clear answer">Clear</button>
+        </div>
         <div class="ff-q-hint" id="ff-q-hint"></div>
         <div class="ff-q-input-wrap" id="ff-q-input-wrap"></div>
         <div class="ff-limit-counter" id="ff-limit-counter"></div>
@@ -390,7 +465,10 @@ export function openPanel() {
     <!-- Fixed nav (form screen only) -->
     <div class="ff-nav" id="ff-nav">
       <button class="ff-nav-btn" id="ff-nav-back">Back</button>
-      <button class="ff-nav-btn primary" id="ff-nav-next">Next →</button>
+      <div class="ff-nav-right">
+        <button class="ff-nav-btn" id="ff-nav-skip">Skip</button>
+        <button class="ff-nav-btn primary" id="ff-nav-next">Next →</button>
+      </div>
     </div>
   `;
 
@@ -507,6 +585,10 @@ function _showScreen(name) {
   });
   const nav = document.getElementById('ff-nav');
   if (nav) nav.classList.toggle('visible', name === 'form');
+  const exitBtn = document.getElementById('ff-exit-btn');
+  if (exitBtn) exitBtn.style.display = (name === 'form' || name === 'review' || name === 'handoff') ? '' : 'none';
+  _hideExitConfirm();
+  if (name === 'input') _renderResumeBanner();
   _updateProgress();
 }
 
@@ -523,6 +605,128 @@ function _syncScreen(name) {
   } else {
     _showScreen('input');
   }
+}
+
+// ─── Exit / discard-safety ─────────────────────────────────────────────────
+function _hasAnyAnswer() {
+  return _visibleQs().some((q) => _hasAnswer(q));
+}
+
+function _showExitConfirm() {
+  _exitConfirmShowing = true;
+  const el = document.getElementById('ff-exit-confirm');
+  const sub = document.getElementById('ff-exit-confirm-sub');
+  if (sub) {
+    const n = _visibleQs().filter((q) => _hasAnswer(q)).length;
+    sub.textContent = `You've answered ${n} question${n === 1 ? '' : 's'}. Save your progress or discard it.`;
+  }
+  if (el) el.classList.add('visible');
+}
+
+function _hideExitConfirm() {
+  _exitConfirmShowing = false;
+  const el = document.getElementById('ff-exit-confirm');
+  if (el) el.classList.remove('visible');
+}
+
+function _requestExit() {
+  if (_hasAnyAnswer()) {
+    _showExitConfirm();
+  } else {
+    _clearDraft();
+    _resetWizardState();
+    closePanel();
+  }
+}
+
+function _resetWizardState() {
+  _questions = []; _answers = {}; _currentIdx = 0;
+  _activeFlowId = null; _flowPhases = []; _handoffOptions = [];
+  _screen = 'input';
+}
+
+function _doSaveExit() {
+  _saveDraft();
+  _resetWizardState();
+  _hideExitConfirm();
+  closePanel();
+}
+
+function _doDiscardExit() {
+  _clearDraft();
+  _resetWizardState();
+  _hideExitConfirm();
+  closePanel();
+}
+
+// ─── Draft autosave / resume ───────────────────────────────────────────────
+function _saveDraft() {
+  if (!_questions.length) return;
+  try {
+    const draft = {
+      questions: _questions,
+      answers: _answers,
+      currentIdx: _currentIdx,
+      activeFlowId: _activeFlowId,
+      flowPhases: _flowPhases,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {}
+}
+
+function _scheduleSaveDraft() {
+  if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(_saveDraft, 200);
+}
+
+function _loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw);
+    if (!draft || !Array.isArray(draft.questions) || !draft.questions.length || typeof draft.answers !== 'object') {
+      return null;
+    }
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function _clearDraft() {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+}
+
+function _renderResumeBanner() {
+  const banner = document.getElementById('ff-resume-banner');
+  if (!banner) return;
+  if (_questions.length) { banner.style.display = 'none'; return; }
+  const draft = _loadDraft();
+  if (!draft) { banner.style.display = 'none'; return; }
+  const answered = draft.questions.filter((q) => {
+    const a = draft.answers[q.id];
+    return a != null && a !== '' && !(Array.isArray(a) && !a.length);
+  }).length;
+  const textEl = document.getElementById('ff-resume-text');
+  if (textEl) {
+    const firstLabel = draft.questions[0]?.label || 'your form';
+    textEl.textContent = `Resume "${firstLabel}"${draft.questions.length > 1 ? '…' : ''} — ${answered} of ${draft.questions.length} answered.`;
+  }
+  banner.style.display = '';
+}
+
+function _resumeDraft() {
+  const draft = _loadDraft();
+  if (!draft) return;
+  _questions = draft.questions;
+  _answers = draft.answers || {};
+  _currentIdx = draft.currentIdx || 0;
+  _activeFlowId = draft.activeFlowId || null;
+  _flowPhases = draft.flowPhases || [];
+  _handoffOptions = [];
+  _renderQuestion(_currentIdx);
+  _showScreen('form');
 }
 
 function _updateProgress() {
@@ -545,6 +749,22 @@ function _wireEvents() {
   document.getElementById('ff-minimize-btn')?.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
     closePanel('down');
+  });
+
+  // Exit (distinct from minimize — fully closes, confirms if answers exist)
+  document.getElementById('ff-exit-btn')?.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    _requestExit();
+  });
+  document.getElementById('ff-exit-save')?.addEventListener('click', _doSaveExit);
+  document.getElementById('ff-exit-discard')?.addEventListener('click', _doDiscardExit);
+  document.getElementById('ff-exit-cancel')?.addEventListener('click', _hideExitConfirm);
+
+  // Resume draft banner
+  document.getElementById('ff-resume-btn')?.addEventListener('click', _resumeDraft);
+  document.getElementById('ff-resume-dismiss-btn')?.addEventListener('click', () => {
+    _clearDraft();
+    _renderResumeBanner();
   });
 
   // Tabs
@@ -586,9 +806,30 @@ function _wireEvents() {
   document.getElementById('ff-nav-back').addEventListener('click', () => {
     if (_currentIdx > 0) _renderQuestion(_currentIdx - 1);
   });
+  document.getElementById('ff-nav-skip').addEventListener('click', _advanceForm);
 
-  // Keyboard Enter to advance (global on pane)
+  // Per-question clear
+  document.getElementById('ff-q-clear-btn')?.addEventListener('click', () => {
+    const vis = _visibleQs();
+    const q = vis[_currentIdx];
+    if (!q) return;
+    delete _answers[q.id];
+    _renderQuestion(_currentIdx);
+    _scheduleSaveDraft();
+  });
+
+  // Keyboard: Enter to advance, Escape to blur/exit
   _pane.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      const active = document.activeElement;
+      const inField = active && _pane.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      if (_exitConfirmShowing) { e.preventDefault(); _hideExitConfirm(); return; }
+      if (_screen !== 'form' && _screen !== 'review' && _screen !== 'handoff') return;
+      e.preventDefault();
+      if (inField) { active.blur(); return; }
+      _requestExit();
+      return;
+    }
     if (_screen !== 'form') return;
     if (e.target.tagName === 'TEXTAREA') return;
     if (e.key === 'Enter') _tryAdvance();
@@ -598,6 +839,7 @@ function _wireEvents() {
   document.getElementById('ff-copy-btn').addEventListener('click', _copyAnswers);
   document.getElementById('ff-download-btn').addEventListener('click', _downloadAnswers);
   document.getElementById('ff-handoff-btn').addEventListener('click', () => {
+    _clearDraft();
     _renderHandoffs();
     _showScreen('handoff');
   });
@@ -852,9 +1094,38 @@ function _renderPhases(activePhase) {
   const el = document.getElementById('ff-phases');
   if (!el) return;
   if (!_flowPhases.length) { el.innerHTML = ''; return; }
-  el.innerHTML = _flowPhases.map((p) =>
-    `<span class="ff-phase-pill${p.id === activePhase ? ' active' : ''}">${_esc(p.label)}</span>`
-  ).join('');
+  el.innerHTML = '';
+  _flowPhases.forEach((p) => {
+    const pill = document.createElement('span');
+    pill.className = 'ff-phase-pill' + (p.id === activePhase ? ' active' : '');
+    pill.textContent = p.label;
+    if (p.id !== activePhase) {
+      pill.addEventListener('click', () => {
+        const vis = _visibleQs();
+        const targetIdx = vis.findIndex((q) => q.phase === p.id);
+        if (targetIdx >= 0) _renderQuestion(targetIdx);
+      });
+    }
+    el.appendChild(pill);
+  });
+}
+
+function _renderOutline(vis, currentIndex) {
+  const el = document.getElementById('ff-q-outline');
+  if (!el) return;
+  if (vis.length < 2 || vis.length > 12) { el.innerHTML = ''; return; }
+  el.innerHTML = '';
+  vis.forEach((q, i) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'ff-q-outline-item'
+      + (i === currentIndex ? ' current' : '')
+      + (_hasAnswer(q) ? ' answered' : '');
+    item.textContent = String(i + 1);
+    item.title = q.label;
+    item.addEventListener('click', () => _renderQuestion(i));
+    el.appendChild(item);
+  });
 }
 
 function _renderQuestion(index) {
@@ -878,8 +1149,11 @@ function _renderQuestion(index) {
   }
 
   _renderPhases(q.phase);
+  _renderOutline(vis, index);
   document.getElementById('ff-q-number').textContent = 'Question ' + (index + 1) + ' of ' + n;
   document.getElementById('ff-q-label').innerHTML = _esc(q.label) + (q.required ? '<span class="ff-q-required">*</span>' : '');
+  const clearBtn = document.getElementById('ff-q-clear-btn');
+  if (clearBtn) clearBtn.classList.toggle('visible', _hasAnswer(q));
   const hintEl = document.getElementById('ff-q-hint');
   if (hintEl) {
     hintEl.textContent = q.hint || '';
@@ -904,6 +1178,7 @@ function _renderQuestion(index) {
 
   _updateNav(renderQ);
   _updateProgress();
+  _scheduleSaveDraft();
   const first = wrap.querySelector('input, textarea');
   if (first) setTimeout(() => first.focus(), 40);
 }
@@ -919,6 +1194,7 @@ function _buildText(q, existing) {
     _updateLimit(q, inp.value);
     _updateNav(q);
     _maybeReflowVisible(q.id);
+    _scheduleSaveDraft();
   });
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _tryAdvance(); } });
   _updateLimit(q, inp.value);
@@ -935,6 +1211,7 @@ function _buildTextarea(q, existing) {
     _updateLimit(q, ta.value);
     _updateNav(q);
     _maybeReflowVisible(q.id);
+    _scheduleSaveDraft();
   });
   ta.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _tryAdvance(); } });
   _updateLimit(q, ta.value);
@@ -954,6 +1231,7 @@ function _buildChoice(q, existing) {
       _answers[q.id] = opt;
       _updateNav(q);
       _maybeReflowVisible(q.id);
+      _scheduleSaveDraft();
     });
     wrap.appendChild(item);
   });
@@ -976,6 +1254,7 @@ function _buildMulti(q, existing) {
       _answers[q.id] = selected.slice();
       _updateNav(q);
       _maybeReflowVisible(q.id);
+      _scheduleSaveDraft();
     });
     wrap.appendChild(item);
   });
@@ -995,6 +1274,7 @@ function _buildYesNo(q, existing) {
       _answers[q.id] = label;
       _updateNav(q);
       _maybeReflowVisible(q.id);
+      _scheduleSaveDraft();
     });
     wrap.appendChild(btn);
   });
@@ -1015,6 +1295,7 @@ function _buildScale(q, existing) {
       _answers[q.id] = val;
       _updateNav(q);
       _maybeReflowVisible(q.id);
+      _scheduleSaveDraft();
     });
     wrap.appendChild(btn);
   }
@@ -1069,9 +1350,11 @@ function _maybeReflowVisible(changedId) {
 function _updateNav(q) {
   const next = document.getElementById('ff-nav-next');
   const back = document.getElementById('ff-nav-back');
+  const skip = document.getElementById('ff-nav-skip');
   if (!next || !back) return;
   next.disabled = _isOverLimit(q) || (q.required && !_hasAnswer(q));
   back.classList.toggle('invisible', _currentIdx === 0);
+  if (skip) skip.classList.toggle('hidden', !!q.required);
   const vis = _visibleQs();
   next.textContent = _currentIdx === vis.length - 1 ? 'Review →' : 'Next →';
 }
@@ -1241,6 +1524,7 @@ function _downloadAnswers() {
 }
 
 function _restart() {
+  _clearDraft();
   _questions = []; _answers = {}; _currentIdx = 0; _pendingFile = null;
   _activeFlowId = null; _flowPhases = []; _handoffOptions = [];
   const paste = document.getElementById('ff-paste');

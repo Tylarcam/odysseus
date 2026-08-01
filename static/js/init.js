@@ -17,6 +17,21 @@ function clearFreshComposerRestore() {
 clearFreshComposerRestore();
 window.addEventListener('pageshow', clearFreshComposerRestore);
 
+/** Desktop-only: HTML autofocus removed so iOS Safari does not focus-zoom on load. */
+function focusComposerIfDesktop() {
+  if (window.innerWidth <= 768) return;
+  const msg = document.getElementById('message');
+  if (!msg || msg.disabled) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== msg) return;
+  try {
+    msg.focus({ preventScroll: true });
+  } catch (_) {
+    msg.focus();
+  }
+}
+focusComposerIfDesktop();
+
 // SECURITY: defense-in-depth state wipe on user switch. If the authenticated
 // user is different from the one whose state is cached in this browser,
 // wipe localStorage + sessionStorage so the new account doesn't inherit

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Dict, Optional
@@ -13,7 +14,7 @@ from core.database import Document, Note, ScheduledTask, SessionLocal, TaskRun
 from core.database import Session as DbSession
 from core.database import get_upcoming_events
 from routes.document_helpers import _owner_session_filter
-from services.home.cmd_center import build_cmd_center
+from services.home.cmd_center import build_cmd_center, fetch_comms_inbox_emails
 from services.home.dashboard import build_recent_projects
 from src.auth_helpers import effective_user, get_current_user
 from src.handoff_bin import bucket_handoff_notes
@@ -43,6 +44,8 @@ def _note_row_to_cmd(n: Note) -> Dict[str, Any]:
         "handoff_at": getattr(n, "handoff_at", None),
         "handoff_relay_status": getattr(n, "handoff_relay_status", None),
         "handoff_outcome": getattr(n, "handoff_outcome", None),
+        "task_status": getattr(n, "task_status", None),
+        "task_status_at": getattr(n, "task_status_at", None),
         "updated_at": n.updated_at.isoformat() if n.updated_at else None,
     }
 
@@ -120,6 +123,12 @@ def setup_home_routes() -> APIRouter:
     async def cmd_center(
         request: Request,
         sync_calendar: bool = Query(False, description="Pull CalDAV before building the vault snapshot"),
+        since_hash: Optional[str] = Query(
+            None, description="Last-seen payload_hash — matching hash short-circuits to a minimal response"
+        ),
+        include_globe: bool = Query(
+            True, description="Compute globe_graph (MemPalace fetch + rebuild) — false on the hot poll path"
+        ),
     ) -> Dict[str, Any]:
         """V.A.U.L.T. command center — live notes, docs, tasks, handoffs, jobs."""
         from src.auth_helpers import owner_filter
@@ -226,7 +235,15 @@ def setup_home_routes() -> APIRouter:
                 for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(25).all()
             ]
 
-            return build_cmd_center(
+            inbox_emails, inbox_account_id = [], ""
+            try:
+                inbox_emails, inbox_account_id = await asyncio.to_thread(
+                    fetch_comms_inbox_emails, user or ""
+                )
+            except Exception:
+                logger.debug("COMMS inbox preview skipped", exc_info=True)
+
+            payload = build_cmd_center(
                 notes=notes,
                 documents=documents,
                 tasks=tasks,
@@ -235,7 +252,18 @@ def setup_home_routes() -> APIRouter:
                 jobs=jobs,
                 task_runs=task_runs,
                 calendar_events=calendar_events,
+                inbox_emails=inbox_emails,
+                inbox_account_id=inbox_account_id,
+                owner=user or "",
+                include_globe=include_globe,
             )
+            if since_hash and payload.get("payload_hash") == since_hash:
+                return {
+                    "unchanged": True,
+                    "synced_at": payload["synced_at"],
+                    "payload_hash": payload["payload_hash"],
+                }
+            return payload
         finally:
             db.close()
 

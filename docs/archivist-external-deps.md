@@ -90,14 +90,19 @@ python -c "from clicky_integration.clicky_client import query_unified_memory, fo
 
 ## Browser Harness
 
+> **Dual stack:** Odysseus uses (A) the external `browser-harness` CLI (Comet CDP `:9333`, Handshake) and (B) in-repo `browser_act` (Chrome CDP `:9222`, chat tool). Full decision matrix, env vars, and handoff packet: [`docs/grounded-build-spec-browser-harness-handoff.md`](grounded-build-spec-browser-harness-handoff.md). Do not use Docker MCP Playwright for Handshake.
+
 ```powershell
 pip install -e C:\Users\tylar\code\browser-harness
+# Comet on this machine (avoids Lenovo Vantage on :9222):
+#   comet.exe --remote-debugging-port=9333 --user-data-dir="%LOCALAPPDATA%\Perplexity\Comet\User Data"
+# BU_CDP_URL is set in browser-harness\agent-workspace\.env → http://127.0.0.1:9333
 browser-harness --doctor
 ```
 
-Enable Chrome remote debugging at `chrome://inspect/#remote-debugging`, then:
+Enable Chrome remote debugging at `chrome://inspect/#remote-debugging` (or use Comet `:9333` as above), then:
 ```powershell
-browser-harness
+browser-harness <<'PY'
 print(page_info())
 PY
 ```

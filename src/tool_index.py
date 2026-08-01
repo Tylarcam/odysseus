@@ -61,6 +61,26 @@ ASSISTANT_ALWAYS_AVAILABLE = frozenset({
     "ui_control",
 })
 
+# Scheduled Ras Morning Brief allowlist (app-driven gather). Shared with chat
+# operator-brief routing so cron and conversational briefs cannot diverge.
+MORNING_BRIEF_TOOLS = frozenset({
+    "manage_notes",
+    "manage_calendar",
+    "app_api",
+    "create_document",
+    "update_document",
+    "manage_documents",
+    "mcp__email__list_emails",
+    "list_emails",
+})
+
+# Chat "Morning Brief" / focus / consensus: scheduled gather pack plus skill
+# load and a news scan. Must remain a strict superset of ALWAYS_AVAILABLE.
+OPERATOR_BRIEF_TOOLS = MORNING_BRIEF_TOOLS | frozenset({
+    "manage_skills",
+    "web_search",
+})
+
 COLLECTION_NAME = "odysseus_tool_index"
 
 # ── Tool description registry ──
@@ -96,7 +116,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "manage_tokens": "API token management: list, create, or delete API access tokens.",
     "manage_documents": "List, read, delete, or tidy documents in the editor panel. action='list' returns clickable rows (most-recent first) so the user can open any doc by clicking. action='read' (aka view/open/get) with document_id returns the content. action='delete' with document_id removes a doc (only way to delete). Use this for ANY 'show/read/list/open my documents/docs/files/notes' request — never shell or curl.",
     "manage_research": "List, read/open, or delete saved DEEP RESEARCH results from the Library. action='list' returns clickable [query](#research-<id>) rows (most-recent first). action='read' (aka open/view/get) with id returns the report + sources. action='delete' with id removes it. Use this for ANY 'open/read/find/delete my research / that report / the research on X' request. NOTE: this is for EXISTING research; to START new research use trigger_research.",
-    "process_job_application": "Job search pipeline: ingest postings, evaluate rubric gate (4.0+ proceeds), dispatch Cursor tailoring handoffs, list/status jobs, build Handshake apply packages, mark applied. NEVER auto-submits to Handshake.",
+    "process_job_application": "Job search pipeline: ingest postings, evaluate rubric gate (4.0+ proceeds), dispatch Cursor tailoring handoffs, list/status jobs, build Handshake apply packages, mark applied, or archive (user decline/pause — terminal archived, no follow-up). NEVER auto-submits to Handshake. Use archive — not mark_applied — when clearing stale leads.",
     "manage_settings": "Change ANY real app setting (the ones the Settings panel writes) so the user never has to open it: TTS voice/provider/speed, STT, search engine + result count, default/teacher/task/utility/vision/image/research models, image quality, reminder channel (browser/email/ntfy), agent timeout/tool-call budget, and more. action=set with key (friendly aliases ok: voice, 'search engine', 'default model', 'teacher model', 'image quality', 'reminder channel'...) + value; get/list/reset too. Also toggles tools on/off (disable_tool/enable_tool/list_tools). Secrets/API keys are read-only. Use for any 'change my…/set my…/use X for…/turn on…' preference request.",
     "create_session": "Create a new chat with a name and model.",
     "list_sessions": "List all chats with their metadata (the UI calls these 'chats'). Use for 'list my chats', 'rename all my chats' (list first, then manage_session to rename each).",
@@ -139,7 +159,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "screen_recall": "Search the user's INDEXED screen history semantically (PixelRAG visual tiles + agent memories + notes) — 'when did I see that stripe dashboard', 'find the article I had open yesterday'. If visual_results are empty, immediately fall back to screen_look with minutes + a short keyword. For the current screen or last few minutes use screen_look instead.",
     "spec_trace": "Read UI element context the user captured with the SpecTracer browser extension — DOM hierarchy, CSS selector, classes, position, console errors and events for a specific element they picked while developing. Use for 'the element I just grabbed/traced/captured/inspected', 'look at that button I picked', 'fix the element in my trace'. action=latest/list/get.",
     "desktop_act": "Control the user's desktop through the Clicky worker: move/click/double_click/drag the mouse at coordinates or at visible on-screen text (target_text, resolved via screen OCR), speak text aloud. Use for 'click the submit button', 'click on X', 'move the mouse to', 'double click'. Consent-gated per session — ask the user first when it returns consent_required. Pair with screen_look to see the screen before acting.",
-    "browser_act": "Control the user's running Chrome via DevTools: list tabs, snapshot a page's interactive elements, navigate to a URL, click/type by selector, or run JS with evaluate. Use for 'open <url> in my browser', 'what tabs do I have open', 'click the login button on the page', 'fill in the form', 'what's on this page' (structured, not OCR). Reads are free; navigate/click/type/evaluate are consent-gated. Needs Chrome on --remote-debugging-port=9222.",
+    "browser_act": "Control the user's running Chrome via DevTools (Path B, :9222): list tabs, snapshot interactive elements, navigate, click/type by selector, or evaluate JS. Use for 'open <url> in my browser', 'what tabs do I have open', 'click the login button on the page', 'fill in the form', 'what's on this page' (structured, not OCR). Reads are free; navigate/click/type/evaluate are consent-gated. For Handshake/Comet or screenshot→click_at_xy, use external browser-harness CLI at BU_CDP_URL=http://127.0.0.1:9333 instead (Path A) — not this tool, not Docker MCP Playwright. See docs/grounded-build-spec-browser-harness-handoff.md.",
     "operator_research": "Fan out ONE web query across TinyFish + Perplexity + Firecrawl at once and return merged, deduplicated, ranked results with per-provider attribution. Use for 'search everywhere for X', 'cross-check X across engines', 'give me a broad web sweep of X' — broader than web_search but NOT the deep-research sidebar (trigger_research). Heavier than web_search (multiple APIs); prefer web_search for a single quick fact.",
 }
 

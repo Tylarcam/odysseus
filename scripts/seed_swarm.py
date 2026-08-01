@@ -5,6 +5,11 @@ The swarm is Mycelia's doctrine expressed natively in Odysseus primitives — no
 Each agent is a CrewMember row (persona = personality/model/enabled_tools); each runs on a
 ScheduledTask (cron/daily). The network is the intelligence.
 
+MYCELIA command-center membership is NOT inferred from the ``swarm-`` id prefix.
+After seeding, registered tasks/docs must also appear in
+``services/home/swarm_registry.py`` (Phase 8 explicit registry) or they will not
+surface in ``agent_activity`` / ``mycelia_commands``.
+
 SAFETY (v1 = "bounded autonomy"):
   * Every task is installed status="paused" — nothing fires until you activate it.
   * No agent has send_email / reply_to_email / bulk_email / process_job_application. Everything is

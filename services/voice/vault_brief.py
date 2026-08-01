@@ -23,6 +23,264 @@ def _clip(text: str, n: int = 120) -> str:
     return t[: n - 1] + "…"
 
 
+# Branch ids → Domain labels for BRIEF ME highlight payloads (hq-openapi BriefLine).
+_DOMAIN_BY_BRANCH = {
+    "core": "CORE",
+    "mem": "MEM",
+    "prod": "PROD",
+    "comms": "COMMS",
+    "agency": "AGENCY",
+    "relay": "RELAY",
+    "mycelia": "MYCELIA",
+    "intel": "COMMS",
+    "chat": "CORE",
+    "voice": "CORE",
+}
+
+
+def _domain_label(branch: Optional[str]) -> str:
+    key = str(branch or "").strip().lower()
+    if key in _DOMAIN_BY_BRANCH:
+        return _DOMAIN_BY_BRANCH[key]
+    upper = str(branch or "").strip().upper()
+    if upper in ("CORE", "MEM", "PROD", "COMMS", "AGENCY", "RELAY", "MYCELIA"):
+        return upper
+    return "PROD"
+
+
+def _hl_overdue() -> Dict[str, Any]:
+    return {"type": "overdue"}
+
+
+def _hl_domain(branch: Optional[str]) -> Dict[str, Any]:
+    return {"type": "domain", "domain": _domain_label(branch)}
+
+
+def _hl_all() -> Dict[str, Any]:
+    return {"type": "all"}
+
+
+def _speech_num(n: int, singular: str, plural: str) -> str:
+    if n == 1:
+        return f"1 {singular}"
+    return f"{n} {plural}"
+
+
+def _speech_overdue_age(days: Optional[int]) -> str:
+    if days is None:
+        return ""
+    try:
+        d = int(days)
+    except (TypeError, ValueError):
+        return ""
+    if d <= 0:
+        return "due earlier today"
+    if d == 1:
+        return "one day overdue"
+    return f"{d} days overdue"
+
+
+def _speech_when_future(iso_or_dt: Any) -> str:
+    """Relative future phrase for speech — never an ISO timestamp."""
+    from datetime import datetime, timezone
+
+    if iso_or_dt is None:
+        return ""
+    if isinstance(iso_or_dt, datetime):
+        dt = iso_or_dt
+    else:
+        raw = str(iso_or_dt).strip()
+        if not raw:
+            return ""
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    seconds = (dt - now).total_seconds()
+    if seconds < 0:
+        return "already started"
+    if seconds < 60:
+        return "in under a minute"
+    if seconds < 3600:
+        mins = max(1, int(seconds // 60))
+        return f"in {mins} minute{'s' if mins != 1 else ''}"
+    if seconds < 86400:
+        hours = max(1, int(seconds // 3600))
+        return f"in about {hours} hour{'s' if hours != 1 else ''}"
+    days = max(1, int(seconds // 86400))
+    if days == 1:
+        return "tomorrow"
+    return f"in {days} days"
+
+
+def build_brief_script(
+    *,
+    hero: Optional[Dict[str, Any]] = None,
+    priority_queue: Optional[List[Dict[str, Any]]] = None,
+    counts: Optional[Dict[str, Any]] = None,
+    agenda: Optional[Dict[str, Any]] = None,
+    overdue_count: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Build a 3–6 line BRIEF ME script with synced highlight cues.
+
+    Each line is ``{text, highlight: {type: overdue|domain|all, domain?}}``.
+    Speech-friendly: no ISO dates.
+    """
+    hero = hero or {}
+    priority_queue = list(priority_queue or [])
+    counts = counts or {}
+    agenda = agenda or {}
+
+    queue_overdue = sum(1 for i in priority_queue if i.get("status") == "overdue")
+    agenda_overdue = len(agenda.get("overdue") or [])
+    if overdue_count is None:
+        overdue_n = max(queue_overdue, agenda_overdue)
+        hero_unit = str(hero.get("unit") or "").upper()
+        if hero_unit == "OVERDUE":
+            try:
+                overdue_n = max(overdue_n, int(hero.get("value") or 0))
+            except (TypeError, ValueError):
+                pass
+    else:
+        try:
+            overdue_n = max(0, int(overdue_count))
+        except (TypeError, ValueError):
+            overdue_n = max(queue_overdue, agenda_overdue)
+
+    inflight = 0
+    for key in ("handoffs_in_progress", "agents_inflight", "in_progress"):
+        if counts.get(key) is not None:
+            try:
+                inflight = max(inflight, int(counts.get(key) or 0))
+            except (TypeError, ValueError):
+                pass
+
+    lines: List[Dict[str, Any]] = []
+
+    # 1 — overdue / attention
+    if overdue_n > 0:
+        lines.append(
+            {
+                "text": (
+                    f"Good morning. {_speech_num(overdue_n, 'item needs', 'items need')} "
+                    f"your attention — overdue."
+                ),
+                "highlight": _hl_overdue(),
+            }
+        )
+    else:
+        lines.append(
+            {
+                "text": "Good morning. Nothing is overdue — the deck looks clear.",
+                "highlight": _hl_all(),
+            }
+        )
+
+    # 2 — top priority
+    top = priority_queue[0] if priority_queue else None
+    if top:
+        title = _clip(str(top.get("title") or top.get("label") or "priority item"), 90)
+        age = _speech_overdue_age(top.get("overdue_days"))
+        if top.get("status") == "overdue":
+            text = f"Top priority: {title}. {age}." if age else f"Top priority: {title}."
+            lines.append({"text": text, "highlight": _hl_overdue()})
+        else:
+            branch = top.get("branch") or hero.get("branch")
+            lines.append(
+                {
+                    "text": f"Top priority: {title}.",
+                    "highlight": _hl_domain(str(branch) if branch else "prod"),
+                }
+            )
+    elif hero.get("title"):
+        title = _clip(str(hero.get("title")), 90)
+        lines.append(
+            {
+                "text": f"Primary directive: {title}.",
+                "highlight": _hl_domain(str(hero.get("branch") or "core")),
+            }
+        )
+
+    # 3 — in-flight agents
+    if inflight > 0:
+        lines.append(
+            {
+                "text": (
+                    f"{_speech_num(inflight, 'agent is', 'agents are')} in flight "
+                    "on the relay."
+                ),
+                "highlight": _hl_domain("relay"),
+            }
+        )
+    else:
+        lines.append(
+            {
+                "text": "Zero agents in flight.",
+                "highlight": _hl_domain("relay"),
+            }
+        )
+
+    # 4 — calendar / up-next (optional)
+    next_event = agenda.get("next_event") or {}
+    if next_event.get("title"):
+        when = _speech_when_future(next_event.get("start"))
+        title = _clip(str(next_event.get("title")), 80)
+        when_bit = f" {when}" if when else ""
+        lines.append(
+            {
+                "text": f"Up next on the calendar: {title}{when_bit}.",
+                "highlight": _hl_domain("comms"),
+            }
+        )
+    else:
+        due_soon = (agenda.get("due_soon") or [])[:1]
+        if due_soon:
+            item = due_soon[0]
+            title = _clip(str(item.get("title") or "reminder"), 80)
+            when = _speech_when_future(item.get("due_date"))
+            when_bit = f" — {when}" if when else ""
+            lines.append(
+                {
+                    "text": f"Coming due soon: {title}{when_bit}.",
+                    "highlight": _hl_domain("prod"),
+                }
+            )
+        else:
+            next_task = agenda.get("next_task_run") or {}
+            if next_task.get("name") or next_task.get("title"):
+                name = _clip(str(next_task.get("name") or next_task.get("title")), 80)
+                when = _speech_when_future(next_task.get("next_run"))
+                when_bit = f" {when}" if when else ""
+                lines.append(
+                    {
+                        "text": f"Next scheduled task: {name}{when_bit}.",
+                        "highlight": _hl_domain("prod"),
+                    }
+                )
+
+    # 5 — close (always, if room)
+    if len(lines) < 6:
+        lines.append(
+            {
+                "text": "That's the state of the V.A.U.L.T.",
+                "highlight": _hl_all(),
+            }
+        )
+
+    # Clamp 3–6 (pad if somehow short).
+    while len(lines) < 3:
+        lines.append(
+            {
+                "text": "Vault standing by.",
+                "highlight": _hl_all(),
+            }
+        )
+    return lines[:6]
+
+
 def format_vault_brief(
     *,
     hero: Optional[Dict[str, Any]] = None,

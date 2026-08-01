@@ -53,6 +53,10 @@ GALLERY_DIR = os.path.join(DATA_DIR, "gallery")
 GALLERY_UPLOADS_DIR = os.path.join(DATA_DIR, "gallery_uploads")
 MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
 DOC_AUDIO_BRIEF_DIR = os.path.join(DATA_DIR, "doc_audio_briefs")
+# PaddleOCR detection/recognition/classification model weights, downloaded on
+# first use. Kept under DATA_DIR (not the default ~/.paddleocr/) so they
+# survive container/venv rebuilds alongside the rest of this app's state.
+OCR_MODELS_DIR = os.path.join(DATA_DIR, "ocr_models")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))

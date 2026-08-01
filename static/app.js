@@ -3145,35 +3145,31 @@ function initializeEventListeners() {
     });
   }
 
-  // Logo click → new chat (same logic as rail new-session button)
+  // Logo click → open CMD Center / V.A.U.L.T. (same as tool-cmd-center-btn)
   const brandBtn = el('sidebar-brand-btn');
   if (brandBtn) {
-    brandBtn.addEventListener('click', async () => {
-      if (!sessionModule) return;
-      if (_closeCompareIfActive()) return;
-      _deactivateIncognito();
-      if (presetsModule && presetsModule.deactivateCharacter) presetsModule.deactivateCharacter();
-      // Clear research toggle when starting a fresh chat (not via research button)
-      _syncResearchIndicator(false);
-      if (await _createDirectChatFromPreferredModel()) return;
-      // No models at all — show welcome screen
-      sessionModule.setCurrentSessionId(null);
-      if (documentModule && documentModule.isPanelOpen && documentModule.isPanelOpen()) documentModule.closePanel();
-      const docBtn2 = el('overflow-doc-btn');
-      if (docBtn2) docBtn2.classList.remove('active', 'has-docs');
-      const box = el('chat-history');
-      if (box) box.innerHTML = '';
-      if (chatModule && chatModule.showWelcomeScreen) chatModule.showWelcomeScreen();
-      if (homeDashboardModule?.refreshHomeDashboard) homeDashboardModule.refreshHomeDashboard();
-      document.querySelectorAll('.session-item.active').forEach(s => s.classList.remove('active'));
+    const openVaultFromBrand = async () => {
+      if (!cmdCenterModule) return;
+      const Modals = await import('./js/modalManager.js');
+      if (!Modals.toggle('cmd-center-panel')) {
+        if (cmdCenterModule.isCmdCenterOpen()) cmdCenterModule.minimizeCmdCenter();
+        else cmdCenterModule.openCmdCenter();
+      }
+    };
+    brandBtn.addEventListener('click', openVaultFromBrand);
+    brandBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openVaultFromBrand();
+      }
     });
   }
 
   const sidebarNewChatBtn = el('sidebar-new-chat-btn');
   if (sidebarNewChatBtn) {
     sidebarNewChatBtn.addEventListener('click', () => {
-      const brandBtn = el('sidebar-brand-btn');
-      if (brandBtn) brandBtn.click();
+      const railNew = el('rail-new-session');
+      if (railNew) railNew.click();
     });
   }
 

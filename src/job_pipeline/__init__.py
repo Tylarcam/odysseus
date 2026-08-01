@@ -13,6 +13,8 @@ from src.job_pipeline.orchestrator import (
 from src.job_pipeline.parser import parse_raw, compute_dedup_key, normalize_field
 from src.job_pipeline.brief import get_jobs_for_brief
 from src.job_pipeline.store import (
+    count_job_funnel_stages,
+    count_job_records,
     create_job_record,
     get_job_record,
     list_job_records,
@@ -36,6 +38,8 @@ __all__ = [
     "normalize_field",
     "create_job_record",
     "get_job_record",
+    "count_job_records",
+    "count_job_funnel_stages",
     "list_job_records",
     "get_job_events",
     "job_record_to_dict",

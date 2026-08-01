@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
   <title>Odysseus Chat</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="manifest" href="/static/manifest.json">
@@ -13,6 +14,22 @@
        browser-default styling that didn't match the Odysseus theme. -->
   <meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <!-- iOS Safari focus-zoom: >=16px on text fields before main CSS loads (see static/login.html). -->
+  <style>
+    @media (hover: none) and (pointer: coarse), (max-width: 768px) {
+      input[type="text"],
+      input[type="search"],
+      input[type="email"],
+      input[type="url"],
+      input[type="tel"],
+      input[type="password"],
+      input[type="number"],
+      input:not([type]),
+      textarea,
+      #message { font-size: 16px !important; }
+      .ghost-text-overlay { font-size: 16px !important; line-height: 1.5; }
+    }
+  </style>
   <script nonce="{{CSP_NONCE}}">
   window._odysseusLoadTime = Date.now();
   (function(){
@@ -219,7 +236,6 @@
   <link rel="modulepreload" href="/static/js/ui.js">
   <link rel="modulepreload" href="/static/js/sessions.js">
   <link rel="modulepreload" href="/static/js/markdown.js">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content, viewport-fit=cover" />
 </head>
 <body>
   <!-- Loading overlay — hides all flashing until app is ready -->
@@ -685,7 +701,7 @@
     <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
     <div class="sidebar-header">
       <button class="sidebar-hamburger" id="sidebar-toggle-btn" title="Toggle sidebar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-      <div class="sidebar-brand" id="sidebar-brand-btn" style="cursor:pointer;" title="New chat">
+      <div class="sidebar-brand" id="sidebar-brand-btn" style="cursor:pointer;" role="button" tabindex="0" title="Open V.A.U.L.T." aria-label="Open V.A.U.L.T.">
         <span class="sidebar-brand-title">Odysseus</span>
       </div>
     </div>
@@ -1043,7 +1059,7 @@
     <div class="chat-input-bar">
       <div class="chat-input-top">
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
-        <textarea id="message" placeholder="Message Odysseus..." required autocomplete="off" aria-label="Message input" rows="1" autofocus></textarea>
+        <textarea id="message" placeholder="Message Odysseus..." required autocomplete="off" aria-label="Message input" rows="1"></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
@@ -1574,6 +1590,14 @@
               </div>
               <div id="set-visionFallbacks" class="settings-fallbacks"></div>
               <button type="button" class="settings-fallback-add" id="set-visionAddFallback" title="Add a vision model to try if the one above fails">+ Add fallback</button>
+              <div style="display:flex;align-items:center;gap:0.75rem;padding-top:0.35rem;border-top:1px solid color-mix(in srgb, var(--fg) 10%, transparent);margin-top:0.35rem;">
+                <label class="settings-label" title="Transcribe text out of images locally (PaddleOCR) before falling back to a Vision-Language description — accurate for handwritten/printed notes, and works even with no vision model configured">
+                  <input type="checkbox" id="set-ocrEnabledToggle" checked> OCR text extraction
+                </label>
+                <span style="flex:1"></span>
+                <label class="settings-label">Language</label>
+                <input type="text" id="set-ocrLangInput" class="settings-select" style="width:5rem" value="en" maxlength="8" title="OCR recognition language code, e.g. en, ch, japan">
+              </div>
               <div id="set-visionSettingsMsg" style="font-size:11px;color:color-mix(in srgb, var(--fg) 45%, transparent);"></div>
             </div>
           </div>

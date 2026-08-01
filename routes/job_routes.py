@@ -17,6 +17,7 @@ from src.job_pipeline.orchestrator import (
     process_job,
     tailor_job,
     validate_and_route,
+    archive_job,
 )
 from src.job_pipeline.store import (
     get_job_events,
@@ -244,6 +245,28 @@ def setup_job_routes() -> APIRouter:
             job = mark_applied(job_id, owner=owner)
         except ValueError as exc:
             raise HTTPException(403, str(exc)) from exc
+        return {"job": job}
+
+    @router.post("/{job_id}/archive")
+    def archive_job_route(
+        request: Request,
+        job_id: str,
+        reason: Optional[str] = Query(None),
+    ) -> dict[str, Any]:
+        """User-initiated archive — terminal archived (not applied)."""
+        record = get_job_record(job_id)
+        if not record:
+            raise HTTPException(404, "Job record not found")
+        owner = _owner(request)
+        if owner and record.owner and record.owner != owner:
+            raise HTTPException(404, "Job record not found")
+        try:
+            job = archive_job(job_id, owner=owner, reason=reason)
+        except ValueError as exc:
+            msg = str(exc)
+            if "not found" in msg.lower():
+                raise HTTPException(404, msg) from exc
+            raise HTTPException(403, msg) from exc
         return {"job": job}
 
     return router

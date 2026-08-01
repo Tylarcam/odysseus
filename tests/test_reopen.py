@@ -7,9 +7,11 @@ import json
 import pytest
 
 from tools.unified_memory_api import (
+    DEFAULT_BU_CDP_URL,
     create_app,
     is_openable_url,
     lookup_article_metadata,
+    open_url_via_browser_harness,
 )
 
 
@@ -145,3 +147,48 @@ def test_reopen_endpoint_503_harness_unavailable(metadata_path, monkeypatch):
 
     assert resp.status_code == 503
     assert resp.json()["error"] == "browser-harness unavailable"
+
+
+def test_open_url_pins_bu_cdp_url(monkeypatch):
+    """Path A: subprocess always gets BU_CDP_URL (Comet :9333 default)."""
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        class R:
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr("tools.unified_memory_api.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.unified_memory_api.shutil.which", lambda _: "browser-harness")
+    monkeypatch.delenv("BU_CDP_URL", raising=False)
+    monkeypatch.setattr(
+        "tools.unified_memory_api.load_memory_stack_env",
+        lambda: {},
+    )
+
+    open_url_via_browser_harness("https://example.com")
+
+    assert seen["env"].get("BU_CDP_URL") == DEFAULT_BU_CDP_URL
+
+
+def test_open_url_respects_explicit_bu_cdp_url(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["env"] = kwargs.get("env") or {}
+        class R:
+            returncode = 0
+        return R()
+
+    monkeypatch.setattr("tools.unified_memory_api.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.unified_memory_api.shutil.which", lambda _: "browser-harness")
+    monkeypatch.setenv("BU_CDP_URL", "http://127.0.0.1:9444")
+    monkeypatch.setattr(
+        "tools.unified_memory_api.load_memory_stack_env",
+        lambda: {"BU_CDP_URL": "http://127.0.0.1:9333"},
+    )
+
+    open_url_via_browser_harness("https://example.com")
+
+    assert seen["env"].get("BU_CDP_URL") == "http://127.0.0.1:9444"

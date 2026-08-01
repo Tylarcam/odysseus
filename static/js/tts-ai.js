@@ -3,12 +3,44 @@
 import { emitVoiceSpeaking } from './voiceVisualizer.js';
 import { applySinkToMediaElement } from './audioOutput.js';
 import voiceTelemetry from './voiceTelemetry.js';
+import markdownModule from './markdown.js';
 
 let _firstAudioOutTurnId = null;
 const VOICE_STREAM_MIN_CHARS = 80;
 const VOICE_STREAM_HOLD_CHARS = 24;
 const VOICE_STREAM_MAX_CHARS = 150;
 const SYNTH_TIMEOUT_MS = 45000;
+
+/**
+ * Strip model reasoning so TTS only speaks the user-facing reply.
+ * Handles <think>/<thinking>/<thought> (incl. time= attrs), Gemma channel
+ * markers, Qwen "Thinking Process:", and mid-stream unclosed think blocks
+ * (never speak truncated reasoning while the tag is still open).
+ */
+function stripThinkingForSpeech(text) {
+    if (!text) return '';
+    let out = markdownModule.normalizeThinkingMarkup(String(text));
+
+    if (!markdownModule.hasUnclosedThinkTag(out)) {
+        return markdownModule.extractThinkingBlocks(out).content || '';
+    }
+
+    // Unclosed think: drop completed blocks, then everything from the open
+    // tag to EOF. extractThinkingBlocks keeps leading-unclosed body as reply
+    // (for UI reload); speech must stay silent until a real answer exists.
+    out = out.replace(/<\/think(?:ing)?>\s*<think(?:ing)?(?:\s+[^>]*)?>/gi, '\n\n');
+    let prev;
+    do {
+        prev = out;
+        out = out.replace(/<think(?:ing)?(?:\s+[^>]*)?>[\s\S]*?<\/think(?:ing)?>\s*/gi, '');
+    } while (out !== prev);
+    out = out.replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>[\s\S]*$/gi, '');
+    out = out.replace(/<\|channel>thought[\s\S]*$/gi, '');
+    const orphan = out.match(/^([\s\S]+?)<\/(?:think(?:ing)?|thought)>/i);
+    if (orphan) out = out.slice(orphan[0].length);
+    out = out.replace(/<\/(?:think(?:ing)?|thought)>/gi, '');
+    return out.trim();
+}
 
 function _ttsErrorMessage(err) {
     if (!err) return 'TTS failed';
@@ -196,8 +228,9 @@ class AITTSManager {
     }
 
     extractPlainText(content) {
-        // Strip <think>/<thinking> blocks (model reasoning)
-        let cleaned = content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+        // Strip thinking/reasoning first — never speak CoT, only the reply
+        let cleaned = stripThinkingForSpeech(content);
+        if (!cleaned) return '';
 
         // Strip markdown horizontal rules (same rule as markdown.js)
         cleaned = cleaned.replace(/^(?:---|\*\*\*|___)\s*$/gm, '');
@@ -206,8 +239,9 @@ class AITTSManager {
         const temp = document.createElement('div');
         temp.innerHTML = cleaned;
 
-        // Remove code blocks and rendered horizontal rules
-        temp.querySelectorAll('pre, code, hr').forEach(el => el.remove());
+        // Remove code blocks, rendered horizontal rules, and any thinking UI
+        // that leaked in via body textContent fallbacks
+        temp.querySelectorAll('pre, code, hr, .thinking-section').forEach(el => el.remove());
 
         // Get text content
         let text = temp.textContent || temp.innerText || '';
@@ -825,7 +859,13 @@ AITTSManager.SILENT_AUDIO = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABA
 window.aiTTSManager = new AITTSManager();
 
 function _messageTtsText(messageElement) {
-    return messageElement.dataset.raw || messageElement.querySelector('.body')?.textContent || '';
+    if (messageElement.dataset.raw) return messageElement.dataset.raw;
+    const body = messageElement.querySelector('.body');
+    if (!body) return '';
+    // Exclude collapsible thinking UI — textContent would otherwise include it
+    const clone = body.cloneNode(true);
+    clone.querySelectorAll('.thinking-section').forEach((el) => el.remove());
+    return clone.textContent || '';
 }
 
 /** Add read-aloud buttons to all assistant messages missing one. */

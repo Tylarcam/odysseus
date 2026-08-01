@@ -36,6 +36,10 @@ DEFAULT_SETTINGS = {
     "vision_enabled": True,
     # Ordered fallback chain for the Vision model (image analysis, OCR, tagging).
     "vision_model_fallbacks": [],
+    # Local PaddleOCR transcription, tried ahead of the Vision-Language
+    # description fallback for text-only chat models (src/ocr_processor.py).
+    "ocr_enabled": True,
+    "ocr_lang": "en",
     # Public base URL used to build clickable deep-links in outgoing alerts
     # (e.g., urgency alert email). Example: "https://chat.example.com"
     "app_public_url": "",
@@ -265,6 +269,7 @@ def is_setting_overridden(key: str) -> bool:
 # resolved by FastAPI deps; an empty/None owner falls through to the global.
 _PER_USER_KEYS = {
     "vision_model", "vision_enabled", "vision_model_fallbacks",
+    "ocr_enabled", "ocr_lang",
     "image_model", "image_gen_enabled", "image_quality",
     # Default chat endpoint / model — without per-user resolution every new
     # account inherited whatever the most-recent admin picked, which then

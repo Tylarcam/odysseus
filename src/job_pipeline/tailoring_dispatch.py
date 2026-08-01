@@ -121,6 +121,22 @@ def dispatch_tailoring(job_id: str, *, owner: Optional[str] = None, relay: bool 
                 relay_note_id,
             )
 
+    # Lineage: job → handoff note (fail-soft; never blocks dispatch).
+    handoff_target_id = relay_note_id or doc.id
+    if handoff_target_id:
+        try:
+            from core.lineage import record_lineage_edge
+
+            record_lineage_edge(
+                source_kind="job",
+                source_id=job_id,
+                target_kind="handoff",
+                target_id=str(handoff_target_id),
+                relation="materialized",
+            )
+        except Exception as exc:
+            logger.warning("lineage: job→handoff write failed for job %s: %s", job_id, exc)
+
     return {
         "handoff_doc_id": doc.id,
         "title": doc_title,

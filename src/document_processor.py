@@ -9,6 +9,7 @@ import tempfile
 from typing import List, Dict, Any
 
 from src.llm_core import llm_call
+from src.settings import get_setting
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,18 @@ def _process_text_file(path: str) -> str:
         return result
 
 
+def _analyze_image_ocr_then_vl(image_path: str, owner: str | None = None) -> str:
+    """Transcribe an image via local OCR first (fast, free, accurate for text);
+    fall back to the Vision-Language description path when OCR is disabled,
+    unavailable, or returns nothing usable."""
+    if get_setting("ocr_enabled", True):
+        from src.ocr_processor import analyze_image_with_ocr, is_ocr_text_usable
+        ocr_result = analyze_image_with_ocr(image_path, lang=get_setting("ocr_lang", "en") or "en")
+        if is_ocr_text_usable(ocr_result):
+            return ocr_result["text"]
+    return analyze_image_with_vl(image_path, owner=owner)
+
+
 def _process_pdf(path: str, owner: str | None = None) -> str:
     """Process PDF file with text extraction (pypdf). Uses VL model for image-heavy pages."""
     try:
@@ -133,7 +146,7 @@ def _process_pdf(path: str, owner: str | None = None) -> str:
                             temp_img_path = tmp.name
                         try:
                             img.image.save(temp_img_path, "PNG")  # pypdf -> PIL image
-                            ocr_text = analyze_image_with_vl(temp_img_path, owner=owner)
+                            ocr_text = _analyze_image_ocr_then_vl(temp_img_path, owner=owner)
                             if ocr_text and "unavailable" not in ocr_text.lower():
                                 pdf_text += f"\n\n[Page {page_num + 1} image {img_index + 1} text]: {ocr_text}"
                         finally:

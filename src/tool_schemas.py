@@ -1018,7 +1018,8 @@ FUNCTION_TOOL_SCHEMAS = [
             "description": (
                 "Job search pipeline: ingest postings, evaluate fit (rubric gate >= 4.0), "
                 "dispatch Cursor tailoring handoffs, build apply packages, mark applied after "
-                "Handshake submit, or schedule follow-ups. Does NOT auto-submit to Handshake."
+                "Handshake submit, archive (user decline / pause — not the same as applied), "
+                "or schedule follow-ups. Does NOT auto-submit to Handshake."
             ),
             "parameters": {
                 "type": "object",
@@ -1036,12 +1037,14 @@ FUNCTION_TOOL_SCHEMAS = [
                             "ready_to_apply",
                             "apply_package",
                             "mark_applied",
+                            "archive",
                             "schedule_followup",
                             "list",
                             "get",
                         ],
                         "description": (
                             "evaluate=run rubric gate; tailor=dispatch handoff (requires evaluated 4.0+); "
+                            "archive=user declines / pause pipeline (terminal archived, no follow-up); "
                             "status/get=job+events; list=recent jobs"
                         ),
                     },
@@ -1054,6 +1057,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "status": {"type": "string", "description": "For list: filter by pipeline status"},
                     "limit": {"type": "integer", "description": "For list: max rows (default 50)"},
                     "followup_days": {"type": "integer", "description": "Days until follow-up (default 7)"},
+                    "reason": {"type": "string", "description": "For archive: why the job is being archived"},
                 },
                 "required": ["action"],
             },
@@ -1312,7 +1316,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Control the user's already-running Chrome via DevTools. Read-only (no consent): tabs = list open tabs; snapshot = interactive elements of a tab with stable refs. Mutating (per-session consent, like desktop_act): navigate a URL, click/type by selector or snapshot ref, evaluate a JS expression. Requires Chrome started with --remote-debugging-port=9222.",
+            "description": "Control the user's already-running Chrome via DevTools (Path B, OPERATOR_CDP_PORT=9222). Read-only (no consent): tabs = list open tabs; snapshot = interactive elements of a tab with stable refs. Mutating (per-session consent, like desktop_act): navigate a URL, click/type by selector or snapshot ref, evaluate a JS expression. For Handshake/Comet or screenshot→click_at_xy flows, do NOT use this tool — use the external browser-harness CLI with BU_CDP_URL=http://127.0.0.1:9333 (Path A; see docs/grounded-build-spec-browser-harness-handoff.md). Never use Docker MCP Playwright for Handshake.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -544,3 +544,38 @@ def mark_applied(job_id: str, *, owner: Optional[str] = None, notion_client: Any
     if record:
         notify_applied(record)
     return result
+
+
+def archive_job(
+    job_id: str,
+    *,
+    owner: Optional[str] = None,
+    reason: Optional[str] = None,
+) -> dict[str, Any]:
+    """User-initiated archive — terminal archived without implying an application.
+
+    Idempotent when already archived. Allowed from any status (including
+    applied) so mistaken mark_applied rows can be cleaned up. Does not
+    schedule follow-up tasks.
+    """
+    record = get_job_record(job_id)
+    if not record:
+        raise ValueError(f"job record not found: {job_id}")
+    if owner and record.owner and record.owner != owner:
+        raise ValueError("access denied")
+    if record.status == "archived":
+        return job_record_to_dict(record)
+
+    from_status = record.status
+    msg = (reason or "").strip() or "User archived job"
+    _transition(
+        job_id,
+        from_status=from_status,
+        to_status="archived",
+        stage="user_archive",
+        message=msg,
+        detail={"reason": reason or "user_declined", "prior_status": from_status},
+        terminal_status="archived",
+    )
+    record = get_job_record(job_id)
+    return job_record_to_dict(record) if record else {"id": job_id, "status": "archived"}

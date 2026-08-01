@@ -44,6 +44,9 @@ _VISION_MODEL_KEYWORDS = (
     # hosted
     "gpt-4o", "gpt-4.1", "gpt-4.5", "gpt-4-turbo", "gpt-4-vision",
     "claude-sonnet", "claude-opus", "claude-haiku", "gemini",
+    # MiniMax M-series (M3+ natively multimodal — image/video input)
+    "minimax",
+
     # open / local
     "vision", "multimodal", "llava", "bakllava", "moondream", "pixtral", "minicpm",
     "internvl", "cogvlm", "qwen-vl", "qwen2-vl", "qwen3-vl", "qwen3vl",

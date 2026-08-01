@@ -104,7 +104,17 @@ def test_tts_ai_strips_horizontal_rules():
     extract_idx = tts_ai.index("extractPlainText(content)")
     section = tts_ai[extract_idx:extract_idx + 1200]
     assert "/^(?:---|\\*\\*\\*|___)\\s*$/gm" in section
-    assert "querySelectorAll('pre, code, hr')" in section
+    assert "querySelectorAll('pre, code, hr, .thinking-section')" in section
+
+
+def test_tts_ai_strips_thinking_for_speech():
+    """TTS must never speak reasoning — including <think time="…"> from chat.js."""
+    assert "stripThinkingForSpeech" in tts_ai
+    assert "extractThinkingBlocks" in tts_ai
+    assert "hasUnclosedThinkTag" in tts_ai
+    # Body fallback must exclude the thinking UI chrome
+    assert ".thinking-section" in tts_ai
+    assert "cloneNode(true)" in tts_ai
 
 
 # --- voiceDebugPanel.js (optional file) ---

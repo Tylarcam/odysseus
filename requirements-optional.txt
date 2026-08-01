@@ -34,3 +34,25 @@ PyMuPDF
 # [all]/Azure/audio extras (cloud + heavy). Pinned to a release >30 days old per
 # the dependency-age discussion in issue #485.
 markitdown[docx,pptx,xlsx,xls]==0.1.5
+
+# Local, offline OCR (PaddleOCR, Apache-2.0) for chat image attachments and
+# scanned PDF pages, so a text-only chat model still gets an accurate
+# transcription instead of a lossy "describe this image" call to a
+# Vision-Language model. Lazy-imported via src/ocr_processor.py; without it,
+# image attachments fall straight back to the existing VL-description path.
+# CPU-only wheel — no CUDA/GPU dependency. Model weights download to
+# data/ocr_models/ (via PADDLE_PDX_CACHE_HOME) on first use, which needs
+# one-time network access even though inference itself then runs offline.
+#
+# Verified by an actual install on this Python 3.13 (win_amd64) venv:
+# paddleocr 2.9.1 (the initially-targeted version) hard-pins numpy<2.0, which
+# has no Python 3.13 wheels and conflicts with numpy>=2 already required
+# elsewhere in this app's stack (fastembed/chromadb) — it cannot be installed
+# here. paddleocr>=3.7.0 resolves cleanly against numpy 2.x instead, but note
+# it's a much heavier install than 2.x: it now wraps the PaddleX inference
+# framework and pulls in paddlex, modelscope, pandas, aiohttp, etc. (~150MB+
+# of extra packages beyond paddlepaddle itself). Its old `use_angle_cls` /
+# `.ocr()` API is deprecated in favor of `use_textline_orientation` /
+# `.predict()`, which src/ocr_processor.py targets directly.
+paddlepaddle==3.2.2
+paddleocr==3.7.0

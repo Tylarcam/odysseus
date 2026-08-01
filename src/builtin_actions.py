@@ -1760,6 +1760,70 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
         return str(e), False
 
 
+def create_urgent_email_reminder_note(
+    *,
+    owner: str,
+    title: str,
+    body: str,
+    urgent_keys: list,
+) -> str | None:
+    """Create a reminder note for urgent emails and record lineage edges.
+
+    Primary note create can raise; lineage writes are fail-soft and never
+    undo a successful note insert. Returns the new note id, or None on
+    note-create failure.
+    """
+    import uuid as _uuid
+    from core.database import SessionLocal as _SL, Note as _N
+
+    note_id = str(_uuid.uuid4())
+    db = _SL()
+    try:
+        note = _N(
+            id=note_id,
+            owner=owner or None,
+            title=(title or "Urgent email")[:200],
+            content=body or "",
+            note_type="todo",
+            label="urgent-email",
+            source="email_urgency",
+            pinned=False,
+        )
+        db.add(note)
+        db.commit()
+    except Exception as exc:
+        logger.warning("urgency: reminder note create failed: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+    try:
+        from core.lineage import record_lineage_edge
+
+        for key in urgent_keys or []:
+            sid = str(key or "").strip()
+            if not sid:
+                continue
+            record_lineage_edge(
+                source_kind="email",
+                source_id=sid,
+                target_kind="note",
+                target_id=note_id,
+                relation="reminded",
+            )
+    except Exception as exc:
+        logger.warning("urgency: lineage write failed for note %s: %s", note_id, exc)
+
+    return note_id
+
+
 async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
     """Scan unread emails across all accounts, LLM-triage new ones, cache
     per-UID verdicts, tag the inbox, and fire a reminder when a previously
@@ -2235,6 +2299,17 @@ async def action_check_email_urgency(owner: str, **kwargs) -> Tuple[str, bool]:
                     delivered = bool(dispatch_result.get("webhook_sent"))
                 if delivered:
                     newly_notified.update(new_urgent)
+                    # Persist a reminder note + lineage edges (email → note).
+                    # Fail-soft: note/lineage failure must not undo delivery.
+                    try:
+                        create_urgent_email_reminder_note(
+                            owner=owner or "",
+                            title=title,
+                            body=body,
+                            urgent_keys=list(new_urgent),
+                        )
+                    except Exception as note_exc:
+                        logger.warning(f"urgency: reminder note/lineage failed: {note_exc}")
                 else:
                     notify_failed.update(new_urgent)
                     logger.warning(f"urgency: reminder dispatch returned no successful delivery path: {dispatch_result}")

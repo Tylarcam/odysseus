@@ -55,12 +55,47 @@ const STATE_RGB = {
 
 const NODE_TONES = {
   bright: { fill: '238,255,241', glow: '198,255,205', alpha: 0.95 },
-  urgent: { fill: '255,107,107', glow: '255,80,80', alpha: 0.92 },
-  scheduled: { fill: '255,140,120', glow: '255,107,107', alpha: 0.85 },
+  urgent: { fill: '255,92,73', glow: '255,92,73', alpha: 0.95 },
+  scheduled: { fill: '255,179,71', glow: '255,179,71', alpha: 0.92 },
   agent: { fill: '255,210,80', glow: '255,230,120', alpha: 0.9 },
   memory: { fill: '120,220,255', glow: '80,200,240', alpha: 0.82 },
   idle: { fill: '120,255,145', glow: '120,255,145', alpha: 0.6 },
 };
+
+/** Attention triad (calm / due / overdue) — drives status encoding on data nodes. */
+const ATTENTION = {
+  calm: {
+    fill: '120,255,145',
+    glow: '120,255,145',
+    hex: '#78ff91',
+    label: 'CALM',
+    alpha: 0.88,
+    sizeMul: 1.0,
+    glowBlur: 12,
+  },
+  due: {
+    fill: '255,179,71',
+    glow: '255,179,71',
+    hex: '#ffb347',
+    label: 'DUE SOON',
+    alpha: 0.92,
+    sizeMul: 1.14,
+    glowBlur: 17,
+  },
+  overdue: {
+    fill: '255,92,73',
+    glow: '255,92,73',
+    hex: '#ff5c49',
+    label: 'OVERDUE',
+    alpha: 0.95,
+    sizeMul: 1.26,
+    glowBlur: 22,
+  },
+};
+
+const HIGHLIGHT_MS_DEFAULT = 3000;
+const HIGHLIGHT_MS_MIN = 2000;
+const HIGHLIGHT_MS_MAX = 4000;
 
 let _canvas = null;
 let _ctx = null;
@@ -71,6 +106,8 @@ let _resizeObserver = null;
 let _onNodeClick = null;
 let _inProgress = 0;
 let _tooltip = null;
+let _legend = null;
+let _highlight = { ids: null, branch: null, status: null, until: 0 };
 
 let _w = 0;
 let _h = 0;
@@ -115,6 +152,68 @@ function _stateRgb(state) {
 
 function _toneRgb(tone) {
   return NODE_TONES[tone] || NODE_TONES.idle;
+}
+
+/**
+ * Resolve calm|due|overdue for status encoding.
+ * Prefers explicit node.status / tone; falls back to kind (urgent→overdue).
+ * Agent run statuses (running/idle/…) are ignored so they keep specialty tones.
+ */
+function _attentionStatus(node) {
+  if (!node) return null;
+  const raw = String(node.status || '').toLowerCase();
+  if (raw === 'calm') return 'calm';
+  if (raw === 'due' || raw === 'soon') return 'due';
+  if (raw === 'overdue' || raw === 'urgent') return 'overdue';
+
+  const tone = String(node.tone || '').toLowerCase();
+  if (tone === 'urgent') return 'overdue';
+  if (tone === 'scheduled') return 'due';
+  // Explicit calm only — do not coerce specialty tones (bright/agent/memory).
+  if (tone === 'calm') return 'calm';
+
+  const kind = String(node.kind || '').toLowerCase();
+  if (kind === 'urgent') return 'overdue';
+  if (kind === 'scheduled') return 'due';
+  return null;
+}
+
+function _attentionStyle(node) {
+  const key = _attentionStatus(node);
+  return key ? ATTENTION[key] : null;
+}
+
+function _statusChipText(node) {
+  const attn = _attentionStatus(node);
+  if (node?.due_label) return String(node.due_label).toUpperCase();
+  if (attn) return ATTENTION[attn].label;
+  return '';
+}
+
+function _ctaLabel(node) {
+  const attn = _attentionStatus(node);
+  if (attn === 'overdue') return 'RESOLVE \u25B6';
+  if (attn === 'due') return 'REVIEW \u25B6';
+  if (node?.kind === 'agent') return 'OPEN RUN \u25B6';
+  if (node?.kind === 'project') return 'OPEN PROJECT \u25B6';
+  if (node?.kind === 'scheduled') return 'OPEN \u25B6';
+  return 'OPEN \u25B6';
+}
+
+function _nodeMatchesHighlight(node) {
+  if (!_highlight.until || performance.now() > _highlight.until) return false;
+  const hasIds = _highlight.ids && _highlight.ids.size > 0;
+  const hasBranch = !!_highlight.branch;
+  const hasStatus = !!_highlight.status;
+  if (!hasIds && !hasBranch && !hasStatus) return false;
+  if (hasIds && !_highlight.ids.has(String(node.id))) return false;
+  if (hasBranch && node.branch !== _highlight.branch) return false;
+  if (hasStatus) {
+    const attn = _attentionStatus(node);
+    const raw = String(node.status || '').toLowerCase();
+    if (attn !== _highlight.status && raw !== _highlight.status) return false;
+  }
+  return true;
 }
 
 function _globeRotation(t) {
@@ -202,11 +301,19 @@ function _buildBranches(branchHealth) {
 
 function _buildGlobeGraph(globeGraph) {
   const g = globeGraph || {};
-  _dataNodes = (g.nodes || []).map((n) => ({
-    ...n,
-    phase: (_stableHash(n.id) % 1000) * 0.001,
-    pulse: n.kind === 'agent' ? 1.4 : n.kind === 'project' ? 1.1 : 1.0,
-  }));
+  _dataNodes = (g.nodes || []).map((n) => {
+    const attn = _attentionStatus(n);
+    const baseSize = n.size || 2.5;
+    const sizeMul = attn ? ATTENTION[attn].sizeMul : 1;
+    return {
+      ...n,
+      // Persist derived attention so highlight/status filters stay stable.
+      attention: attn,
+      phase: (_stableHash(n.id) % 1000) * 0.001,
+      pulse: n.kind === 'agent' ? 1.4 : n.kind === 'project' ? 1.1 : attn === 'overdue' ? 1.35 : attn === 'due' ? 1.2 : 1.0,
+      size: baseSize * sizeMul,
+    };
+  });
   _dataEdges = Array.isArray(g.edges) ? g.edges : [];
   _nodeById = Object.fromEntries(_dataNodes.map((n) => [n.id, n]));
 }
@@ -306,9 +413,10 @@ function _drawDataEdges(t) {
     if (!a || !b || a.z < -0.12 || b.z < -0.12) continue;
     const intensity = _edgeIntensity(edge.kind);
     let rgb = '110,255,136';
-    if (edge.kind === 'attention' || edge.kind === 'due') rgb = '255,107,107';
+    if (edge.kind === 'attention' || edge.kind === 'due') rgb = '255,92,73';
     else if (edge.kind === 'activity' || edge.kind === 'run') rgb = '255,210,80';
     else if (edge.kind === 'tunnel' || edge.kind === 'memory') rgb = '80,200,240';
+    else if (edge.kind === 'scheduled') rgb = '255,179,71';
     _drawArc(a, b, intensity, rgb);
   }
 }
@@ -323,25 +431,47 @@ function _drawDataNodes(t) {
   for (const node of sorted) {
     const p = _projectDataNode(node, t);
     if (p.z < -0.15) continue;
-    const rgb = _toneRgb(node.tone);
-    const pulse = node.kind === 'agent' && node.status === 'running'
-      ? 1 + Math.sin(t * 0.005 + node.phase) * 0.18
-      : node.kind === 'project'
-        ? 1 + Math.sin(t * 0.0018 + node.phase) * 0.08
-        : 1;
-    const r = Math.max(1.8, p.size * pulse);
+    const attn = _attentionStyle(node);
+    const rgb = attn || _toneRgb(node.tone);
+    const hi = _nodeMatchesHighlight(node);
+    let pulse = 1;
+    if (node.kind === 'agent' && node.status === 'running') {
+      pulse = _prefersReducedMotion ? 1 : 1 + Math.sin(t * 0.005 + node.phase) * 0.18;
+    } else if (node.kind === 'project') {
+      pulse = _prefersReducedMotion ? 1 : 1 + Math.sin(t * 0.0018 + node.phase) * 0.08;
+    } else if (attn && (node.attention === 'due' || node.attention === 'overdue')) {
+      // Mild urgency pulse — skipped under prefers-reduced-motion.
+      if (!_prefersReducedMotion) {
+        const amp = node.attention === 'overdue' ? 0.16 : 0.1;
+        pulse = 1 + Math.sin(t * 0.004 + node.phase) * amp;
+      }
+    }
+    if (hi && !_prefersReducedMotion) {
+      pulse *= 1 + Math.sin(t * 0.01 + node.phase) * 0.32;
+    } else if (hi) {
+      pulse *= 1.18; // static boost when motion is reduced
+    }
+    const r = Math.max(1.8, p.size * pulse * (hi ? 1.12 : 1));
     const alpha = p.z > 0 ? rgb.alpha : rgb.alpha * 0.55;
-    _ctx.shadowBlur = node.kind === 'project' ? 20 : node.tone === 'urgent' ? 16 : 12;
-    _ctx.shadowColor = `rgba(${rgb.glow},0.9)`;
+    let blur = attn
+      ? attn.glowBlur
+      : node.kind === 'project'
+        ? 20
+        : node.tone === 'urgent'
+          ? 16
+          : 12;
+    if (hi) blur += 10;
+    _ctx.shadowBlur = blur;
+    _ctx.shadowColor = `rgba(${rgb.glow},${hi ? 1 : 0.9})`;
     _ctx.fillStyle = `rgba(${rgb.fill},${alpha})`;
     _ctx.beginPath();
     _ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     _ctx.fill();
-    if (node.kind === 'project') {
-      _ctx.strokeStyle = `rgba(${rgb.glow},0.45)`;
-      _ctx.lineWidth = 1;
+    if (node.kind === 'project' || hi || node.attention === 'overdue') {
+      _ctx.strokeStyle = `rgba(${rgb.glow},${hi ? 0.7 : 0.45})`;
+      _ctx.lineWidth = hi ? 1.4 : 1;
       _ctx.beginPath();
-      _ctx.arc(p.x, p.y, r + 2.5, 0, Math.PI * 2);
+      _ctx.arc(p.x, p.y, r + (hi ? 3.5 : 2.5), 0, Math.PI * 2);
       _ctx.stroke();
     }
   }
@@ -660,10 +790,23 @@ function _showTooltip(node, x, y) {
   if (!_tooltip || !node) return;
   const label = node.label || node.id || '';
   const summary = node.summary || '';
-  _tooltip.textContent = summary ? `${label} — ${summary}` : label;
+  const chip = _statusChipText(node);
+  const parts = [];
+  if (chip) parts.push(chip);
+  if (label) parts.push(label);
+  if (summary && summary !== label) parts.push(summary);
+  _tooltip.textContent = parts.join(' — ') || label;
   _tooltip.style.left = `${Math.min(x + 12, _w - 220)}px`;
   _tooltip.style.top = `${Math.max(y - 28, 8)}px`;
   _tooltip.style.opacity = '1';
+  const attn = _attentionStyle(node);
+  if (attn) {
+    _tooltip.style.borderColor = `rgba(${attn.glow},0.45)`;
+    _tooltip.style.boxShadow = `0 4px 16px rgba(0,0,0,0.45), 0 0 8px rgba(${attn.glow},0.25)`;
+  } else {
+    _tooltip.style.borderColor = '';
+    _tooltip.style.boxShadow = '';
+  }
 }
 
 function _hideTooltip() {
@@ -678,6 +821,7 @@ function _ensurePopup() {
   el.setAttribute('aria-hidden', 'true');
   el.innerHTML =
     '<div class="cmd-scene-popup-h"></div>' +
+    '<div class="cmd-scene-popup-chip" style="display:none;font-size:9px;letter-spacing:0.16em;text-transform:uppercase;padding:2px 6px;margin:0 0 6px;border:1px solid;width:fit-content;"></div>' +
     '<div class="cmd-scene-popup-line cmd-scene-popup-label"></div>' +
     '<div class="cmd-scene-popup-line cmd-scene-popup-summary"></div>' +
     '<div class="cmd-scene-popup-line cmd-scene-popup-meta"></div>' +
@@ -699,13 +843,43 @@ function _showPopup(node, x, y, t) {
   const header = _popupHeader(node);
   const label = node.label || node.id || '';
   const summary = node.summary || '';
-  const meta = `${node.branch || ''}${node.tone ? ' · ' + node.tone : ''}`.trim();
+  const chipText = _statusChipText(node);
+  const attn = _attentionStyle(node);
+  const metaParts = [];
+  if (node.branch) metaParts.push(node.branch);
+  if (attn) metaParts.push(attn.label.toLowerCase());
+  else if (node.tone) metaParts.push(node.tone);
+  const meta = metaParts.join(' · ');
   _popup.querySelector('.cmd-scene-popup-h').textContent = header;
   _popup.querySelector('.cmd-scene-popup-label').textContent = label;
   _popup.querySelector('.cmd-scene-popup-summary').textContent = summary;
   _popup.querySelector('.cmd-scene-popup-meta').textContent = meta;
+  const chip = _popup.querySelector('.cmd-scene-popup-chip');
+  if (chip) {
+    if (chipText && attn) {
+      chip.textContent = chipText;
+      chip.style.display = '';
+      chip.style.color = attn.hex;
+      chip.style.borderColor = `rgba(${attn.glow},0.55)`;
+      chip.style.background = `rgba(${attn.glow},0.1)`;
+      chip.style.textShadow = `0 0 6px rgba(${attn.glow},0.45)`;
+    } else {
+      chip.style.display = 'none';
+      chip.textContent = '';
+    }
+  }
   const cta = _popup.querySelector('.cmd-scene-popup-cta');
-  if (cta) cta.style.display = node.action ? '' : 'none';
+  if (cta) {
+    cta.style.display = node.action ? '' : 'none';
+    cta.innerHTML = _ctaLabel(node);
+    if (attn) {
+      cta.style.color = attn.hex;
+      cta.style.borderColor = `rgba(${attn.glow},0.55)`;
+    } else {
+      cta.style.color = '';
+      cta.style.borderColor = '';
+    }
+  }
   // Anchor beside the node, clamped to the mount.
   _popup.style.opacity = '1';
   _popup.setAttribute('aria-hidden', 'false');
@@ -882,6 +1056,52 @@ function _ensureTooltip() {
   _mount.appendChild(_tooltip);
 }
 
+function _ensureLegend() {
+  if (_legend || !_mount) return;
+  const el = document.createElement('div');
+  el.className = 'cmd-scene-legend';
+  el.setAttribute('aria-label', 'Node status legend');
+  Object.assign(el.style, {
+    position: 'absolute',
+    left: '10px',
+    bottom: '10px',
+    zIndex: '5',
+    pointerEvents: 'none',
+    font: "10px/1.45 'JetBrains Mono', 'Consolas', monospace",
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
+    color: '#9fb89f',
+    background: 'rgba(6,14,8,0.78)',
+    border: '1px solid rgba(127,255,0,0.28)',
+    boxShadow: '0 0 12px rgba(0,0,0,0.4), 0 0 8px rgba(127,255,0,0.1)',
+    padding: '7px 9px',
+    userSelect: 'none',
+  });
+  const row = (key) => {
+    const a = ATTENTION[key];
+    return (
+      `<div style="display:flex;align-items:center;gap:7px;margin-top:3px;">` +
+      `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;` +
+      `background:${a.hex};box-shadow:0 0 6px rgba(${a.glow},0.85);"></span>` +
+      `<span style="color:${a.hex};text-shadow:0 0 5px rgba(${a.glow},0.35);">${a.label}</span>` +
+      `</div>`
+    );
+  };
+  el.innerHTML =
+    `<div style="color:#7fff00;letter-spacing:0.18em;font-size:9px;margin-bottom:2px;` +
+    `border-bottom:1px solid rgba(127,255,0,0.22);padding-bottom:4px;">STATUS</div>` +
+    row('calm') +
+    row('due') +
+    row('overdue');
+  _mount.appendChild(el);
+  _legend = el;
+}
+
+function _destroyLegend() {
+  if (_legend?.parentNode) _legend.parentNode.removeChild(_legend);
+  _legend = null;
+}
+
 export function initCmdCenterScene(mountEl, { branchHealth, inProgress = 0, globeGraph, onNodeClick, onPopupOpen } = {}) {
   disposeCmdCenterScene();
   if (!mountEl) return false;
@@ -911,6 +1131,7 @@ export function initCmdCenterScene(mountEl, { branchHealth, inProgress = 0, glob
   _buildGlobeGraph(globeGraph);
   _buildParticles(inProgress);
   _ensureTooltip();
+  _ensureLegend();
 
   _resizeObserver = new ResizeObserver(_resize);
   _resizeObserver.observe(mountEl);
@@ -947,6 +1168,29 @@ export function updateCmdCenterScene(branchHealth, inProgress = 0, globeGraph = 
   _buildBranches(branchHealth);
   if (globeGraph) _buildGlobeGraph(globeGraph);
   _buildParticles(inProgress);
+}
+
+/**
+ * Temporarily boost glow/pulse on matching data nodes (Brief Me sync).
+ * Filters AND together when multiple are provided.
+ * @param {{ branch?: string, status?: 'calm'|'due'|'overdue'|string, ids?: string[] }} opts
+ * @param {number} [durationMs=3000] clamped to 2000–4000
+ */
+export function highlightNodes(opts = {}, durationMs = HIGHLIGHT_MS_DEFAULT) {
+  const { branch, status, ids } = opts || {};
+  const dur = Math.max(HIGHLIGHT_MS_MIN, Math.min(HIGHLIGHT_MS_MAX, Number(durationMs) || HIGHLIGHT_MS_DEFAULT));
+  const idList = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+  _highlight = {
+    ids: idList.length ? new Set(idList) : null,
+    branch: branch ? String(branch) : null,
+    status: status ? String(status).toLowerCase() : null,
+    until: performance.now() + dur,
+  };
+}
+
+/** Clear any active highlight pulse immediately. */
+export function clearHighlights() {
+  _highlight = { ids: null, branch: null, status: null, until: 0 };
 }
 
 export function pauseCmdCenterScene() {
@@ -994,6 +1238,7 @@ export function disposeCmdCenterScene() {
   if (_tooltip?.parentNode) {
     _tooltip.parentNode.removeChild(_tooltip);
   }
+  _destroyLegend();
   if (_canvas?.parentNode) {
     _canvas.parentNode.removeChild(_canvas);
   }
@@ -1003,6 +1248,7 @@ export function disposeCmdCenterScene() {
   _onNodeClick = null;
   _onPopupOpen = null;
   _tooltip = null;
+  clearHighlights();
   if (_popup?.parentNode) _popup.parentNode.removeChild(_popup);
   _popup = null;
   _popupNode = null;

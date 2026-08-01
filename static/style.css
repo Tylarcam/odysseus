@@ -2117,7 +2117,7 @@ body.bg-pattern-sparkles {
     @media (max-width: 768px) {
       .home-dashboard {
         margin-top: 16px;
-        width: 96vw;
+        width: 100%;
       }
       .home-dashboard-cards {
         min-height: 160px;
@@ -11444,6 +11444,266 @@ textarea.memory-add-input {
   border-color: color-mix(in srgb, var(--orange, #ff9800) 40%, transparent);
   background: color-mix(in srgb, var(--orange, #ff9800) 12%, transparent);
 }
+
+/* ---- Tasks Activity log rows (.task-log-*) ----
+   Markup lives in tasks.js (_renderActivityEntry). Cards give each run a
+   clear boundary; --cat-hue (set inline) drives the left accent stripe. */
+#tasks-activity-list.tasks-activity-list {
+  gap: 10px;
+}
+.task-log-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border-left: 3px solid hsl(var(--cat-hue, 210) 55% 45%);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.task-log-row:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 16%, transparent);
+}
+.task-log-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.3;
+}
+.task-log-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--fg) 35%, transparent);
+}
+.task-log-status-ok,
+.task-log-status-success {
+  background: var(--green, #50fa7b);
+}
+.task-log-status-error {
+  background: var(--red, #ff5555);
+}
+.task-log-status-info,
+.task-log-status-skipped {
+  background: color-mix(in srgb, var(--fg) 35%, transparent);
+}
+.task-log-status-running,
+.task-log-status-queued {
+  background: var(--accent, var(--orange, #ffb86c));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, var(--orange, #ffb86c)) 25%, transparent);
+}
+.task-log-status-aborted {
+  background: var(--orange, #ffb86c);
+}
+.task-log-task-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.task-log-task-icon svg {
+  width: 12px;
+  height: 12px;
+}
+.task-log-name {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: hsl(var(--cat-hue, 210) 45% 42%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.task-log-row .task-ai-mark {
+  flex-shrink: 0;
+  opacity: 0.55;
+  margin-left: 2px;
+}
+.task-log-repeat {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--fg) 65%, transparent);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.task-log-time {
+  font-size: 11px;
+  opacity: 0.5;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.task-log-skipped-reason {
+  font-size: 11.5px;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.task-log-row-body {
+  font-size: 12.5px;
+  line-height: 1.45;
+  opacity: 0.88;
+  min-width: 0;
+  word-break: break-word;
+}
+.task-log-row-body > :first-child {
+  margin-top: 0;
+}
+.task-log-row-body > :last-child {
+  margin-bottom: 0;
+}
+.task-log-row-body p {
+  margin: 0 0 0.4em;
+}
+.task-log-row-body pre {
+  margin: 0.35em 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  overflow-x: auto;
+  font-size: 11.5px;
+}
+.task-log-account-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: hsl(var(--cat-hue, 210) 50% 38%);
+  background: color-mix(in srgb, hsl(var(--cat-hue, 210) 55% 45%) 18%, transparent);
+  border: 1px solid color-mix(in srgb, hsl(var(--cat-hue, 210) 55% 45%) 30%, transparent);
+  vertical-align: baseline;
+  margin-right: 2px;
+}
+.task-log-prompt {
+  font-size: 11.5px;
+  opacity: 0.75;
+}
+.task-log-prompt summary {
+  cursor: pointer;
+  user-select: none;
+}
+.task-log-prompt pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.task-log-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.task-log-row-actions:empty {
+  display: none;
+}
+.task-log-row-actions button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  color: color-mix(in srgb, var(--fg) 75%, transparent);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+.task-log-row-actions button:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+  color: var(--fg);
+}
+.task-log-row.is-skipped {
+  opacity: 0.62;
+  padding: 5px 10px 5px 11px;
+  gap: 0;
+  cursor: default;
+  background: transparent;
+}
+.task-log-row.is-skipped:hover {
+  opacity: 0.85;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.task-log-row.is-skipped .task-log-row-actions {
+  display: none;
+}
+.task-log-row.is-long:not(.expanded) .task-log-row-body {
+  max-height: 7.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
+.task-log-row.is-long.expanded .task-log-row-body {
+  max-height: none;
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+.task-log-row.is-long.expanded .task-log-row-toggle {
+  font-size: 0;
+  letter-spacing: 0;
+}
+.task-log-row.is-long.expanded .task-log-row-toggle::before {
+  content: 'Show less';
+  font-size: 11px;
+  letter-spacing: normal;
+}
+.task-log-row.is-running {
+  border-color: color-mix(in srgb, var(--accent, var(--orange, #ffb86c)) 35%, var(--border));
+}
+.task-log-running-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.task-log-running-label {
+  font-weight: 600;
+  color: var(--accent, var(--orange, #ffb86c));
+}
+.task-log-running-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.task-log-force-run,
+.task-log-stop {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: inherit;
+}
+.task-log-force-run:hover,
+.task-log-stop:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+
 .memory-item {
   display: flex;
   align-items: flex-start;
@@ -31883,11 +32143,11 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   background: color-mix(in srgb, var(--fg) 3%, transparent);
   border: 1px solid var(--border);
   border-radius: 8px;
-  /* Extra right padding so the corner buttons (pin / edit / copy / done)
-     never collide with the title, and a min-height so an empty/short
-     note is still tall enough to fit that row of corner controls. */
+  /* Extra right/bottom padding so corner buttons (pin / done / archive /
+     copy) never collide with the title or label chips. */
   padding: 10px 14px;
   padding-right: 30px;
+  padding-bottom: 12px;
   min-height: 64px;
   cursor: default;
   transition: background 0.15s;
@@ -32085,6 +32345,56 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     border-color: color-mix(in srgb, var(--fg) 18%, transparent);
   }
 }
+/* Archive corner — bottom-right of every active note card. Quiet dismiss
+   (no confetti); Done at top-right is the celebratory "finished" path.
+   Hover-reveal on desktop, faintly visible on touch. */
+.note-card-corner-archive {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  opacity: 0;
+  touch-action: manipulation;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+  z-index: 2;
+}
+.note-card-corner-archive svg { opacity: 0.85; transition: opacity 0.15s; }
+.note-card:hover .note-card-corner-archive {
+  opacity: 0.7;
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+}
+.note-card-corner-archive:hover,
+.note-card-corner-archive:focus-visible {
+  opacity: 1 !important;
+  background: color-mix(in srgb, #b48a4a 22%, var(--panel)) !important;
+  border-color: color-mix(in srgb, #b48a4a 55%, var(--border)) !important;
+  color: #b48a4a;
+}
+.note-card-corner-archive:hover svg,
+.note-card-corner-archive:focus-visible svg { opacity: 1; }
+@media (hover: none) {
+  .note-card-corner-archive {
+    opacity: 0.6;
+    background: var(--panel);
+    border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+  }
+}
+/* Checklist cards also carry a copy corner — park it left of archive. */
+.note-card:has(.note-card-corner-archive) .note-card-copy-corner {
+  right: 36px;
+}
+.note-card-selectmode .note-card-corner-archive { display: none !important; }
 /* Pin button on mobile — show in drag mode; pinned notes always visible above */
 body.notes-mobile-mode.notes-drag-mode .note-card:not(.note-card-pinned) .note-card-pin {
   display: flex !important;
@@ -32184,9 +32494,9 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   .note-card-corner-copy { visibility: visible; }
   .note-card-corner-copy svg { opacity: 0.7; }
 }
-/* Copy stays on every active card regardless of body shape — Edit + Done
-   live at the top-right pair, so the bottom-right copy slot is always
-   free. Hidden only in select mode. */
+/* Copy stays on checklist cards; archive owns the bottom-right slot and
+   copy shifts left via :has(.note-card-corner-archive). Hidden only in
+   select mode. */
 .note-card-selectmode .note-card-corner-copy { display: none !important; }
 
 /* ── Archive view corners — trash (top-left) + unarchive (top-right) ── */
@@ -33043,6 +33353,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 2px;
+  /* Keep chips clear of the bottom-right archive/copy corners. */
+  padding-right: 30px;
 }
 .note-card-label-chip {
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));

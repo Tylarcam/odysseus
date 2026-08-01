@@ -1,4 +1,19 @@
-"""Subprocess bridge to MemPalace for CMD Center globe memory nodes."""
+"""Subprocess bridge to MemPalace for CMD Center globe memory nodes.
+
+Callable from the Odysseus backend today
+----------------------------------------
+- ``mempalace status`` — wing/room/drawer inventory (structure)
+- ``mempalace search`` — real content hits (snippets + wing/room) — preferred signal
+
+Deferred (MCP-only; do not partially fake)
+------------------------------------------
+MemPalace graph tools ``kg_query`` / ``traverse`` / ``graph_stats`` /
+``find_tunnels`` are exposed only over the MCP stdio protocol. They are not
+importable as a Python library and have no CLI/HTTP equivalent in MemPalace
+3.4.0. Wiring them into this backend process is explicitly deferred pending an
+upstream queryable interface — see design.md Decision D5 / Open Questions and
+``openspec/.../specs/cmd-center-mycelia-system/spec.md``.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +30,9 @@ _cache: Dict[str, Any] = {"ts": 0.0, "nodes": [], "edges": [], "status": "skippe
 
 _WING_RE = re.compile(r"^\s*WING:\s*(.+?)\s*$")
 _ROOM_RE = re.compile(r"^\s*ROOM:\s+(\S+)\s+(\d+)\s+drawers")
+_SEARCH_HIT_RE = re.compile(r"^\s*\[(\d+)\]\s+(.+?)\s*/\s+(.+?)\s*$")
+_SEARCH_SOURCE_RE = re.compile(r"^\s*Source:\s+(.+?)\s*$")
+_SEARCH_MATCH_RE = re.compile(r"^\s*Match:\s+(.+?)\s*$")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -41,6 +59,17 @@ def mempalace_node_limit() -> int:
         return 12
 
 
+def mempalace_search_query() -> str:
+    return (os.environ.get("MEMPALACE_SEARCH_QUERY") or "memory").strip() or "memory"
+
+
+def mempalace_search_results() -> int:
+    try:
+        return max(1, min(12, int(os.environ.get("MEMPALACE_SEARCH_RESULTS", "8"))))
+    except ValueError:
+        return 8
+
+
 def _parse_status_output(text: str) -> List[Dict[str, Any]]:
     wings: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
@@ -61,18 +90,80 @@ def _parse_status_output(text: str) -> List[Dict[str, Any]]:
     return wings
 
 
-def _run_status() -> str:
-    palace = mempalace_palace_path()
-    cmd = [
+def _parse_search_output(text: str) -> List[Dict[str, Any]]:
+    """Parse ``mempalace search`` text into content hits.
+
+    Expected block shape (verified against MemPalace 3.4.0)::
+
+        [1] WingName / room
+            Source: path
+            Match: cosine=...  bm25=...
+
+            <snippet lines...>
+    """
+    hits: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    snippet_lines: List[str] = []
+
+    def _flush() -> None:
+        nonlocal current, snippet_lines
+        if current is None:
+            return
+        snippet = " ".join(" ".join(snippet_lines).split()).strip()
+        current["snippet"] = snippet[:180]
+        hits.append(current)
+        current = None
+        snippet_lines = []
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        hit_match = _SEARCH_HIT_RE.match(line)
+        if hit_match:
+            _flush()
+            current = {
+                "rank": int(hit_match.group(1)),
+                "wing": hit_match.group(2).strip(),
+                "room": hit_match.group(3).strip(),
+                "source": "",
+                "match": "",
+                "snippet": "",
+            }
+            snippet_lines = []
+            continue
+        if current is None:
+            continue
+        source_match = _SEARCH_SOURCE_RE.match(line)
+        if source_match:
+            current["source"] = source_match.group(1).strip()
+            continue
+        match_match = _SEARCH_MATCH_RE.match(line)
+        if match_match:
+            current["match"] = match_match.group(1).strip()
+            continue
+        if line.strip().startswith("─"):
+            continue
+        if line.strip().startswith("="):
+            continue
+        if line.strip():
+            snippet_lines.append(line.strip())
+
+    _flush()
+    return hits
+
+
+def _cli_base() -> List[str]:
+    return [
         "mempalace",
         "--palace",
-        palace,
+        mempalace_palace_path(),
         "--backend",
         "sqlite_exact",
-        "status",
     ]
+
+
+def _run_status() -> str:
     result = subprocess.run(
-        cmd,
+        _cli_base() + ["status"],
         capture_output=True,
         text=True,
         timeout=2.0,
@@ -83,7 +174,82 @@ def _run_status() -> str:
     return result.stdout or ""
 
 
+def _run_search(query: str, *, results: int) -> str:
+    result = subprocess.run(
+        _cli_base() + ["search", query, "--results", str(results)],
+        capture_output=True,
+        text=True,
+        timeout=4.0,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "mempalace search failed").strip())
+    return result.stdout or ""
+
+
+def _build_nodes_from_search(
+    hits: List[Dict[str, Any]], limit: int
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Content-signal nodes from search hits (not drawer-count decoration)."""
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, str]] = []
+    wing_ids: Dict[str, str] = {}
+
+    for hit in hits:
+        if len(nodes) >= limit:
+            break
+        wing = str(hit.get("wing") or "Wing")
+        room = str(hit.get("room") or "room")
+        source = str(hit.get("source") or "drawer")
+        wing_slug = _slug(wing)
+        wing_id = f"memory:wing:{wing_slug}"
+        if wing_id not in wing_ids:
+            if len(nodes) >= limit:
+                break
+            wing_ids[wing_id] = wing
+            nodes.append(
+                _make_node(
+                    node_id=wing_id,
+                    kind="memory",
+                    label=wing,
+                    branch="mem",
+                    size=3.0,
+                    tone="memory",
+                    action="notes",
+                    target_id=None,
+                    summary="MemPalace wing (search)",
+                    outward=0.2,
+                )
+            )
+
+        hit_id = f"memory:hit:{wing_slug}:{_slug(room)}:{_slug(source)}:{hit.get('rank', 0)}"
+        snippet = str(hit.get("snippet") or "").strip()
+        summary = snippet or str(hit.get("match") or f"{room} · {source}")
+        nodes.append(
+            _make_node(
+                node_id=hit_id,
+                kind="memory",
+                label=f"{wing} · {source}" if source else f"{wing} · {room}",
+                branch="mem",
+                size=2.4,
+                tone="memory",
+                action="notes",
+                target_id=None,
+                summary=summary[:120],
+                outward=0.1,
+            )
+        )
+        edges.append({"source": wing_id, "target": hit_id, "kind": "hosts"})
+
+    hit_nodes = [n for n in nodes if str(n.get("id") or "").startswith("memory:hit:")]
+    for a, b in zip(hit_nodes, hit_nodes[1:]):
+        edges.append({"source": a["id"], "target": b["id"], "kind": "related"})
+
+    return nodes, edges
+
+
 def _build_nodes_and_edges(wings: List[Dict[str, Any]], limit: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Fallback: status-derived wing/room topology when search yields nothing."""
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, str]] = []
     ranked_wings = sorted(
@@ -146,7 +312,12 @@ def _build_nodes_and_edges(wings: List[Dict[str, Any]], limit: int) -> Tuple[Lis
 
 
 def fetch_mempalace_globe_graph(*, force: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]], str]:
-    """Return memory nodes, tunnel edges, and status string."""
+    """Return memory nodes, edges, and status string.
+
+    Prefers ``mempalace search`` content hits. Falls back to ``status`` wing/room
+    inventory when search is empty/unavailable. Never claims MCP graph-tool
+    parity (``kg_query`` / ``traverse``) — see module docstring.
+    """
     if not mempalace_enabled():
         return [], [], "disabled"
 
@@ -154,18 +325,32 @@ def fetch_mempalace_globe_graph(*, force: bool = False) -> Tuple[List[Dict[str, 
     if not force and now - float(_cache.get("ts") or 0) < _CACHE_TTL_SEC:
         return _cache["nodes"], _cache["edges"], _cache["status"]
 
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, str]] = []
+    status = "unavailable"
+
     try:
-        output = _run_status()
-        wings = _parse_status_output(output)
-        if not wings:
-            status = "empty"
-            nodes, edges = [], []
-        else:
-            nodes, edges = _build_nodes_and_edges(wings, mempalace_node_limit())
+        search_out = _run_search(mempalace_search_query(), results=mempalace_search_results())
+        hits = _parse_search_output(search_out)
+        if hits:
+            nodes, edges = _build_nodes_from_search(hits, mempalace_node_limit())
             status = "ok"
     except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
-        status = "unavailable"
-        nodes, edges = [], []
+        hits = []
+
+    if not nodes:
+        try:
+            output = _run_status()
+            wings = _parse_status_output(output)
+            if not wings:
+                status = "empty"
+                nodes, edges = [], []
+            else:
+                nodes, edges = _build_nodes_and_edges(wings, mempalace_node_limit())
+                status = "ok"
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
+            status = "unavailable"
+            nodes, edges = [], []
 
     _cache.update({"ts": now, "nodes": nodes, "edges": edges, "status": status})
     return nodes, edges, status

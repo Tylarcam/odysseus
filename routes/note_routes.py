@@ -26,6 +26,24 @@ from sqlalchemy.orm.attributes import flag_modified
 
 logger = logging.getLogger(__name__)
 
+# PROD board column values (nullable on the row). Empty string clears.
+TASK_STATUS_VALUES = frozenset({"queued", "in_progress", "blocked", "done"})
+
+
+def _normalize_task_status(value: Optional[str]) -> Optional[str]:
+    """Return a valid task_status or None (clear). Raises HTTPException on bad input."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text not in TASK_STATUS_VALUES:
+        raise HTTPException(
+            400,
+            f"task_status must be one of {sorted(TASK_STATUS_VALUES)} (or empty to clear)",
+        )
+    return text
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -45,6 +63,10 @@ class NoteCreate(BaseModel):
     image_url: Optional[str] = None
     repeat: Optional[str] = "none"
     sort_order: Optional[int] = None
+    # PROD "+ new task" / promote-from-note: optional source note id for lineage.
+    promoted_from: Optional[str] = None
+    # PROD orbital board column (queued|in_progress|blocked|done).
+    task_status: Optional[str] = None
 
 
 class NoteUpdate(BaseModel):
@@ -64,6 +86,8 @@ class NoteUpdate(BaseModel):
     handoff_doc_id: Optional[str] = None
     handoff_target: Optional[str] = None
     handoff_at: Optional[str] = None
+    # PROD orbital board — queued|in_progress|blocked|done (null/"" clears).
+    task_status: Optional[str] = None
 
 
 class NoteHandoffRequest(BaseModel):
@@ -124,6 +148,8 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
         "handoff_relay_session_id": getattr(note, "handoff_relay_session_id", None),
         "handoff_relay_started_at": getattr(note, "handoff_relay_started_at", None),
         "handoff_relay_completed_at": getattr(note, "handoff_relay_completed_at", None),
+        "task_status": getattr(note, "task_status", None),
+        "task_status_at": getattr(note, "task_status_at", None),
         "created_at": note.created_at.isoformat() if note.created_at else None,
         "updated_at": note.updated_at.isoformat() if note.updated_at else None,
     }
@@ -718,6 +744,12 @@ def setup_note_routes(task_scheduler=None):
         user = _owner(request)
         db = SessionLocal()
         try:
+            initial_status = _normalize_task_status(body.task_status)
+            status_at = (
+                datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if initial_status
+                else None
+            )
             note = Note(
                 id=str(uuid.uuid4()),
                 owner=user,
@@ -734,11 +766,34 @@ def setup_note_routes(task_scheduler=None):
                 image_url=body.image_url,
                 repeat=body.repeat or "none",
                 sort_order=body.sort_order if body.sort_order is not None else 0,
+                task_status=initial_status,
+                task_status_at=status_at,
             )
             db.add(note)
             db.commit()
             db.refresh(note)
-            return _note_to_dict(note)
+            result = _note_to_dict(note)
+            promoted_from = (body.promoted_from or "").strip()
+            if promoted_from:
+                # Lineage write is fail-soft — never undo the primary create.
+                try:
+                    from core.lineage import record_lineage_edge
+
+                    record_lineage_edge(
+                        source_kind="note",
+                        source_id=promoted_from,
+                        target_kind="note",
+                        target_id=note.id,
+                        relation="promoted",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "lineage: promoted edge failed note %s from %s: %s",
+                        note.id,
+                        promoted_from,
+                        exc,
+                    )
+            return result
         finally:
             db.close()
 
@@ -806,6 +861,15 @@ def setup_note_routes(task_scheduler=None):
                 note.handoff_target = body.handoff_target
             if body.handoff_at is not None:
                 note.handoff_at = body.handoff_at
+            # Explicit null/"" clears; any valid value stamps task_status_at.
+            if "task_status" in body.model_fields_set:
+                normalized = _normalize_task_status(body.task_status)
+                note.task_status = normalized
+                note.task_status_at = (
+                    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    if normalized
+                    else None
+                )
 
             db.commit()
             db.refresh(note)

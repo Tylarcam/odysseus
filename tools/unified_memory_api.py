@@ -5,21 +5,25 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import uuid
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-
-import urllib.error
-import urllib.request
 
 from tools.agent_memory import search_agent_memory, store_agent_memory
 from tools.memory_stack_env import load_memory_stack_env, resolve_path
 from tools.mempalace_search import search_notes_index
 
 logger = logging.getLogger("unified_memory_api")
+
+# Comet CDP default — avoids Lenovo Vantage on :9222. See
+# docs/grounded-build-spec-browser-harness-handoff.md (Path A).
+DEFAULT_BU_CDP_URL = "http://127.0.0.1:9333"
 
 PixelRagSearchFn = Callable[[str, int], List[Dict[str, Any]]]
 
@@ -252,6 +256,22 @@ def is_openable_url(url: str) -> bool:
     return stripped.startswith("http://") or stripped.startswith("https://")
 
 
+def browser_harness_env() -> Dict[str, str]:
+    """Env for browser-harness subprocess — always pins BU_CDP_URL for Comet.
+
+    Preference: process env → memory_stack.env → DEFAULT_BU_CDP_URL (:9333).
+    """
+    env = {k: str(v) for k, v in os.environ.items()}
+    stack: Dict[str, str] = {}
+    try:
+        stack = load_memory_stack_env() or {}
+    except Exception:
+        pass
+    url = (env.get("BU_CDP_URL") or stack.get("BU_CDP_URL") or DEFAULT_BU_CDP_URL).strip()
+    env["BU_CDP_URL"] = url or DEFAULT_BU_CDP_URL
+    return env
+
+
 def open_url_via_browser_harness(url: str) -> None:
     """Open url in a new browser tab via browser-harness CLI stdin."""
     harness = shutil.which("browser-harness")
@@ -267,6 +287,7 @@ def open_url_via_browser_harness(url: str) -> None:
             capture_output=True,
             timeout=30,
             check=True,
+            env=browser_harness_env(),
         )
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(

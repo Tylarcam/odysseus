@@ -92,13 +92,13 @@ export function initSidebarLayout(Storage, opts) {
     });
   }
 
-  // New chat buttons — same as clicking brand
+  // New chat buttons — same as rail new-session (brand opens CMD Center)
   const chatNewBtn = document.getElementById('chat-new-btn');
   const sidebarNewChat = document.getElementById('sidebar-new-chat-btn');
   [chatNewBtn, sidebarNewChat].forEach(btn => {
     if (btn) btn.addEventListener('click', () => {
-      const brandBtn = document.getElementById('sidebar-brand-btn');
-      if (brandBtn) brandBtn.click();
+      const railNew = document.getElementById('rail-new-session');
+      if (railNew) railNew.click();
     });
   });
 

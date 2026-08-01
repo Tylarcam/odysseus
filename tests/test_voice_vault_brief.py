@@ -3,10 +3,71 @@
 from pathlib import Path
 
 from services.voice.realtime_gateway import RealtimeVoiceGateway
-from services.voice.vault_brief import MAX_BRIEF_CHARS, format_vault_brief
+from services.voice.vault_brief import MAX_BRIEF_CHARS, build_brief_script, format_vault_brief
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_build_brief_script_covers_overdue_priority_agents_calendar():
+    script = build_brief_script(
+        hero={"label": "Prod", "title": "Clear overdues", "unit": "OVERDUE", "value": 5, "branch": "prod"},
+        priority_queue=[
+            {
+                "title": "RSVP Thesis Defence",
+                "status": "overdue",
+                "overdue_days": 4,
+                "branch": "prod",
+                "kind": "note",
+            },
+            {"title": "Alkira cover letter", "status": "due", "branch": "agency", "kind": "job"},
+        ],
+        counts={"handoffs_in_progress": 2, "handoffs_attention": 1},
+        agenda={
+            "overdue": [{"title": "RSVP Thesis Defence"}],
+            "next_event": {"title": "Aether standup", "start": "2099-01-15T18:00:00+00:00"},
+            "due_soon": [],
+        },
+        overdue_count=5,
+    )
+    assert 3 <= len(script) <= 6
+    for line in script:
+        assert "text" in line and line["text"].strip()
+        assert "highlight" in line
+        assert line["highlight"]["type"] in ("overdue", "domain", "all")
+        if line["highlight"]["type"] == "domain":
+            assert line["highlight"].get("domain")
+
+    blob = " ".join(line["text"] for line in script)
+    assert "5 items need" in blob or "attention" in blob.lower()
+    assert "RSVP Thesis Defence" in blob
+    assert "in flight" in blob.lower()
+    assert "Aether standup" in blob
+    # Speech-friendly: no ISO timestamps in spoken text.
+    assert "2099-01-15" not in blob
+    assert "T18:" not in blob
+    assert script[0]["highlight"]["type"] == "overdue"
+    assert script[-1]["highlight"]["type"] == "all"
+
+
+def test_build_brief_script_empty_deck_still_speaks():
+    script = build_brief_script()
+    assert 3 <= len(script) <= 6
+    blob = " ".join(line["text"] for line in script).lower()
+    assert "overdue" in blob or "clear" in blob
+    assert "zero agents" in blob or "in flight" in blob
+    assert script[-1]["highlight"]["type"] == "all"
+
+
+def test_build_brief_script_domain_highlight_from_branch():
+    script = build_brief_script(
+        priority_queue=[{"title": "Pick up handoff", "status": "due", "branch": "relay", "kind": "handoff"}],
+        counts={"handoffs_in_progress": 0},
+        overdue_count=0,
+    )
+    priority_line = next(l for l in script if "Pick up handoff" in l["text"])
+    assert priority_line["highlight"]["type"] == "domain"
+    assert priority_line["highlight"]["domain"] == "RELAY"
 
 
 def test_format_vault_brief_includes_hero_and_branches():

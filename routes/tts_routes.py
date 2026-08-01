@@ -36,9 +36,18 @@ def setup_tts_routes(tts_service):
                     status_code=503,
                     detail={"message": "TTS service not available"}
                 )
+
+            # Never speak model reasoning — strip <think>/Thinking Process/etc.
+            from src.text_helpers import strip_think
+            speak_text = strip_think(request.text or "").strip()
+            if not speak_text:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "No speakable text after removing thinking content"}
+                )
             
             if request.format == "base64":
-                audio_b64 = tts_service.synthesize_to_base64(request.text)
+                audio_b64 = tts_service.synthesize_to_base64(speak_text)
                 if not audio_b64:
                     raise HTTPException(
                         status_code=500,
@@ -47,7 +56,7 @@ def setup_tts_routes(tts_service):
                 return {"audio": audio_b64}
             
             else:  # audio format
-                audio_data = tts_service.synthesize(request.text)
+                audio_data = tts_service.synthesize(speak_text)
                 if not audio_data:
                     raise HTTPException(
                         status_code=500,

@@ -807,6 +807,35 @@ from contextlib import contextmanager
 # defined. Keyed so we can swap them out in tests.
 _POOL_HOOKS: dict = {"connect": None, "release": None}
 
+# Registered by setup_email_routes() — lets CMD Center list inbox rows without
+# importing the route closure or duplicating IMAP logic.
+_LIST_EMAILS_SYNC = None
+
+
+def register_list_emails_sync(fn) -> None:
+    global _LIST_EMAILS_SYNC
+    _LIST_EMAILS_SYNC = fn
+
+
+def list_emails_sync(
+    folder: str = "INBOX",
+    limit: int = 50,
+    offset: int = 0,
+    filter_: str = "all",
+    account_id: str | None = None,
+    from_addr: str | None = None,
+    has_attachments_only: bool = False,
+    owner: str = "",
+) -> dict:
+    """Sync inbox list via the email route handler (pool + cache when loaded)."""
+    fn = _LIST_EMAILS_SYNC
+    if not fn:
+        return {"emails": [], "total": 0, "folder": folder}
+    try:
+        return fn(folder, limit, offset, filter_, account_id, from_addr, has_attachments_only, owner)
+    except Exception:
+        return {"emails": [], "total": 0, "folder": folder, "error": "list failed"}
+
 
 @contextmanager
 def _imap(account_id: str | None = None, owner: str = ""):

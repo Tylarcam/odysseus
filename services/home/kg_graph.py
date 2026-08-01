@@ -7,6 +7,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+from core.lineage import lineage_for
+
 MAX_GLOBE_NODES = 50
 
 # Branch anchor positions on the sphere (phi, theta radians) — mirrors cmdCenterScene.js.
@@ -346,6 +348,9 @@ def build_globe_graph(
     for mp_edge in mempalace_edges or []:
         _add_edge(edges, mp_edge["source"], mp_edge["target"], mp_edge.get("kind") or "tunnel")
 
+    # --- Cross-object lineage edges (cmd-center-core-system) -------------------
+    _add_lineage_edges(edges, seen_ids)
+
     return {
         "nodes": nodes,
         "edges": edges,
@@ -355,3 +360,52 @@ def build_globe_graph(
             "mempalace": mempalace_status,
         },
     }
+
+
+def _parse_globe_node_pair(node_id: str) -> Optional[Tuple[str, str]]:
+    """Map a rendered globe node id (``kind:id``) to a lineage (kind, id) pair."""
+    if not node_id or ":" not in node_id:
+        return None
+    kind, oid = node_id.split(":", 1)
+    kind = (kind or "").strip()
+    oid = (oid or "").strip()
+    # Branch anchors and synthetic project/mem nodes are not lineage objects.
+    if not kind or not oid or kind in ("branch", "project", "agent", "event", "mem"):
+        return None
+    return (kind, oid)
+
+
+def _add_lineage_edges(edges: List[Dict[str, str]], seen_ids: Set[str]) -> None:
+    """Add edges between two rendered non-branch nodes when a lineage edge links them."""
+    pairs: List[Tuple[str, str]] = []
+    node_by_pair: Dict[Tuple[str, str], str] = {}
+    for nid in seen_ids:
+        pair = _parse_globe_node_pair(nid)
+        if not pair:
+            continue
+        if pair not in node_by_pair:
+            pairs.append(pair)
+            node_by_pair[pair] = nid
+
+    if not pairs:
+        return
+
+    related = lineage_for(pairs)
+    for pair, neighbors in related.items():
+        src_node = node_by_pair.get(pair)
+        if not src_node:
+            continue
+        for n in neighbors or []:
+            nkind = str(n.get("kind") or "").strip()
+            nid = str(n.get("id") or "").strip()
+            if not nkind or not nid:
+                continue
+            tgt_node = node_by_pair.get((nkind, nid))
+            if not tgt_node or tgt_node == src_node:
+                continue
+            # lineage_for is bidirectional — emit one undirected edge per pair.
+            if src_node > tgt_node:
+                continue
+            # Prefer the stored relation; fall back to a generic lineage kind.
+            edge_kind = str(n.get("relation") or "").strip() or "lineage"
+            _add_edge(edges, src_node, tgt_node, edge_kind)
