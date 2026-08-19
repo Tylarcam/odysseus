@@ -1,6 +1,7 @@
 /**
  * V.A.U.L.T. Directive Triage — swipeable needs-attention stack.
  * Swipe left / Delegate → Relay handoff. Swipe right / Done → mark finished.
+ * Double-tap (mobile) / double-click → peek the next card without acting.
  */
 
 import { createHandoffDocument, notifyHandoffPickup } from './handoff.js';
@@ -12,6 +13,8 @@ const TARGET_KEY = 'odysseus-cmd-handoff-target';
 const VALID_TARGETS = ['cursor', 'claude', 'hermes', 'odysseus'];
 const SWIPE_PX = 80;
 const SWIPE_V = 0.35;
+const DOUBLE_TAP_MS = 500;
+const DOUBLE_TAP_PX = 40;
 const REAL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 let _root = null;
@@ -22,6 +25,7 @@ let _onRefresh = null;
 let _onOpenItem = null;
 let _target = 'cursor';
 let _escBound = null;
+let _suppressClickUntil = 0;
 
 function _esc(text) {
   return String(text ?? '')
@@ -84,7 +88,16 @@ function _ensureStyles() {
 .cmd-triage-card {
   position: relative; border: 1px solid rgba(166,226,46,0.28); background: rgba(6,14,8,0.95);
   padding: 16px 14px 14px; min-height: 180px; will-change: transform;
-  transition: box-shadow .15s;
+  transition: box-shadow .15s; -webkit-user-select: none; user-select: none;
+}
+.cmd-triage-card.peek-in { animation: cmd-triage-peek .22s ease; }
+@keyframes cmd-triage-peek {
+  from { opacity: .4; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.cmd-triage-peek {
+  display: none; margin-top: 12px; font-size: 8px; letter-spacing: 0.16em;
+  text-transform: uppercase; opacity: 0.38;
 }
 .cmd-triage-card.dragging { transition: none; }
 .cmd-triage-card[data-intent="left"] { box-shadow: -10px 0 28px rgba(255,179,71,.25); border-color: #ffb347; }
@@ -131,9 +144,19 @@ function _ensureStyles() {
 @media (max-width: 720px) {
   .cmd-triage-backdrop { align-items: flex-end; padding: 0; }
   .cmd-triage-modal { width: 100%; max-height: 85vh; border-radius: 10px 10px 0 0; }
+  .cmd-triage-peek { display: block; }
 }
 `;
   document.head.appendChild(style);
+}
+
+/** Next card index when peeking the deck (wraps; no-op on empty). */
+export function nextPeekIndex(index, length) {
+  const n = Math.max(0, Number(length) || 0);
+  if (n <= 0) return 0;
+  const i = Number(index);
+  const cur = Number.isFinite(i) ? i : 0;
+  return ((cur % n) + n + 1) % n;
 }
 
 function _current() {
@@ -159,15 +182,18 @@ function _renderCard(item) {
       <div class="cmd-triage-title">${_esc(item.title || 'Untitled')}</div>
       <div class="cmd-triage-meta">${chip}${branch}</div>
       <div class="cmd-triage-preview">${_esc(item.preview || item.subtitle || '')}</div>
+      ${_stack.length > 1 ? '<div class="cmd-triage-peek">double tap to peek next</div>' : ''}
       ${item.kind === 'handoff' ? '' : `<div class="cmd-triage-targets">${targets}</div>`}
     </div>`;
 }
 
-function _paintCard() {
+function _paintCard(opts = {}) {
   const stage = _root?.querySelector('.cmd-triage-stage');
   if (!stage) return;
   stage.innerHTML = _renderCard(_current());
-  _wireCardSwipe(stage.querySelector('#cmd-triage-card'));
+  const card = stage.querySelector('#cmd-triage-card');
+  _wireCardSwipe(card);
+  if (opts.peek && card) card.classList.add('peek-in');
   const item = _current();
   const delBtn = _root.querySelector('[data-triage-act="delegate"]');
   const doneBtn = _root.querySelector('[data-triage-act="done"]');
@@ -192,6 +218,13 @@ async function _advance() {
   }
   _paintCard();
   try { await _onRefresh?.(); } catch { /* ignore */ }
+}
+
+function _cyclePeek() {
+  if (_busy || !_stack.length) return;
+  _suppressClickUntil = Date.now() + 500;
+  if (_stack.length > 1) _index = nextPeekIndex(_index, _stack.length);
+  _paintCard({ peek: true });
 }
 
 function _itemId(item) {
@@ -363,6 +396,9 @@ function _wireCardSwipe(card) {
   let velocity = 0;
   let dragging = false;
   let cancelled = false;
+  let lastTapT = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
 
   const reset = () => {
     card.classList.remove('dragging');
@@ -412,32 +448,77 @@ function _wireCardSwipe(card) {
     card.dataset.intent = dx < -40 ? 'left' : dx > 40 ? 'right' : '';
   }, { passive: false });
 
-  const end = () => {
-    if (!dragging) return;
-    dragging = false;
-    const dx = lastX - startX;
-    const goLeft = dx < -SWIPE_PX || (dx < -24 && velocity < -SWIPE_V);
-    const goRight = dx > SWIPE_PX || (dx > 24 && velocity > SWIPE_V);
-    if (goLeft) {
-      card.style.transition = 'transform 0.2s ease';
-      card.style.transform = 'translateX(-120%) rotate(-8deg)';
-      setTimeout(() => { reset(); _delegate(); }, 160);
+  const end = (e) => {
+    const t = e?.changedTouches?.[0];
+    const endX = t ? t.clientX : lastX;
+    const endY = t ? t.clientY : startY;
+
+    if (dragging) {
+      dragging = false;
+      lastTapT = 0;
+      const dx = lastX - startX;
+      const goLeft = dx < -SWIPE_PX || (dx < -24 && velocity < -SWIPE_V);
+      const goRight = dx > SWIPE_PX || (dx > 24 && velocity > SWIPE_V);
+      if (goLeft) {
+        card.style.transition = 'transform 0.2s ease';
+        card.style.transform = 'translateX(-120%) rotate(-8deg)';
+        setTimeout(() => { reset(); _delegate(); }, 160);
+        return;
+      }
+      if (goRight) {
+        card.style.transition = 'transform 0.2s ease';
+        card.style.transform = 'translateX(120%) rotate(8deg)';
+        setTimeout(() => { reset(); _finish(); }, 160);
+        return;
+      }
+      reset();
       return;
     }
-    if (goRight) {
-      card.style.transition = 'transform 0.2s ease';
-      card.style.transform = 'translateX(120%) rotate(8deg)';
-      setTimeout(() => { reset(); _finish(); }, 160);
+
+    if (cancelled || _busy) {
+      lastTapT = 0;
       return;
     }
-    reset();
+    if (e?.target?.closest?.('button')) {
+      lastTapT = 0;
+      return;
+    }
+
+    const now = Date.now();
+    if (lastTapT && (now - lastTapT) < DOUBLE_TAP_MS
+        && Math.hypot(endX - lastTapX, endY - lastTapY) < DOUBLE_TAP_PX) {
+      lastTapT = 0;
+      _cyclePeek();
+      return;
+    }
+    lastTapT = now;
+    lastTapX = endX;
+    lastTapY = endY;
   };
 
   card.addEventListener('touchend', end, { passive: true });
-  card.addEventListener('touchcancel', () => { dragging = false; reset(); }, { passive: true });
+  card.addEventListener('touchcancel', () => {
+    dragging = false;
+    lastTapT = 0;
+    reset();
+  }, { passive: true });
+  card.addEventListener('dblclick', (e) => {
+    if (_busy || e.target.closest('button')) return;
+    if (Date.now() < _suppressClickUntil) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    _cyclePeek();
+  });
 }
 
 function _onRootClick(e) {
+  if (Date.now() < _suppressClickUntil) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   const close = e.target.closest('[data-triage-act="close"]');
   if (close) {
     e.preventDefault();
@@ -511,6 +592,10 @@ export function openDirectiveTriage({
   host.appendChild(el);
   _root = el;
   el.addEventListener('click', (e) => {
+    if (Date.now() < _suppressClickUntil) {
+      e.preventDefault();
+      return;
+    }
     if (e.target === el) closeDirectiveTriage();
     else _onRootClick(e);
   });
@@ -536,6 +621,7 @@ export function closeDirectiveTriage() {
   _stack = [];
   _index = 0;
   _busy = false;
+  _suppressClickUntil = 0;
 }
 
 export function isDirectiveTriageOpen() {
@@ -546,4 +632,5 @@ export default {
   openDirectiveTriage,
   closeDirectiveTriage,
   isDirectiveTriageOpen,
+  nextPeekIndex,
 };

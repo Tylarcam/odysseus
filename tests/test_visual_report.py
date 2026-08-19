@@ -104,10 +104,19 @@ def test_visual_report_listen_modal_transport_controls():
     assert soup.find(id="listen-btn-play") is not None
     assert soup.find(id="listen-btn-pause") is not None
     assert soup.find(id="listen-btn-stop") is not None
+    assert soup.find(id="listen-btn-download") is not None
+    assert soup.find(id="listen-rate") is not None
+    rate = soup.find(id="listen-rate")
+    assert [opt.get("value") for opt in rate.find_all("option")] == [
+        "0.75", "1", "1.25", "1.5", "2"
+    ]
     assert soup.find(id="listen-segments") is not None
     assert soup.find(id="listen-elapsed") is not None
     assert soup.find(id="listen-total") is not None
     assert "IDLE" in html and "PLAYING" in html and "PAUSED" in html
+    assert "ody-listen-rate" in html
+    assert "OfflineAudioContext" in html
+    assert "__encodeWav" in html
     assert "pointer-events: none" in html  # floating dock wrapper
     assert "orientation: portrait" in html  # mobile portrait media query
     assert "listen-dock-open" in html

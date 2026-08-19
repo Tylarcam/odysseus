@@ -101,6 +101,13 @@
       if (t && t.density && t.density !== 'comfortable') {
         document.documentElement.classList.add('density-' + t.density);
       }
+      // Mobile sidebar edge — apply on <html> before body paints so the
+      // hamburger isn't on the wrong side for a frame.
+      try {
+        if (localStorage.getItem('mobile-sidebar-side') === 'left') {
+          document.documentElement.classList.add('mobile-sidebar-left');
+        }
+      } catch (e) {}
       // Apply background pattern on body once available
       if (t && t.bgPattern && t.bgPattern !== 'none') {
         document.addEventListener('DOMContentLoaded', function() {
@@ -685,6 +692,7 @@
     <button class="icon-rail-btn" id="rail-email" title="Email"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></button>
     <button class="icon-rail-btn" id="rail-formflow" title="FormFlow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/><path d="M7 6h.01"/><path d="M12 6h5"/></svg></button>
     <button class="icon-rail-btn" id="rail-gallery" title="Gallery"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></button>
+    <button class="icon-rail-btn" id="rail-story-canvas" title="Story Canvas"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17.5h7M17.5 14v7"/></svg></button>
     <button class="icon-rail-btn" id="rail-archive" title="Library"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/></svg></button>
     <button class="icon-rail-btn" id="rail-memory" title="Brain"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/></svg></button>
     <button class="icon-rail-btn" id="rail-notes" title="Notes"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5"/><path d="M8 17.5 15.5 10l2.5 2.5L10.5 20H8z"/></svg></button>
@@ -706,9 +714,13 @@
       </div>
     </div>
     <div class="sidebar-inner">
-      <div class="list-item" id="sidebar-new-chat-btn" title="New chat">
-        <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <span class="grow" style="position:relative;left:-3px;">New Chat</span>
+      <div class="list-item" id="sidebar-home-btn" title="Home" role="button" tabindex="0">
+        <svg class="sidebar-action-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><path d="M3 9l9-7 9 7"/><path d="M9 22V12h6v10"/><path d="M21 9v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9"/></svg>
+        <span class="grow" style="position:relative;left:-3px;">Home</span>
+      </div>
+      <div class="list-item" id="tool-cmd-center-btn" title="CMD Center">
+        <svg class="sidebar-action-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:relative;left:-2px;"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" opacity="0.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+        <span class="grow" style="position:relative;left:-3px;">CMD Center</span>
       </div>
       <div class="list-item" id="sidebar-search-btn" title="Search conversations (Ctrl+K)">
         <svg class="sidebar-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -721,7 +733,7 @@
 
       <div class="section" id="sessions-section">
         <div class="section-header-flex">
-          <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
+          <span class="section-title" id="chats-section-title"><svg class="section-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="chats-section-label" class="section-title-label">Chats</span><button type="button" class="chats-new-chat-btn list-item-plus-btn" id="sidebar-new-chat-btn" title="New chat" aria-label="New chat"><svg class="list-item-plus-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button><span id="chats-notif-dot" class="sidebar-notif-dot" style="display:none"></span></span>
           <div style="position:relative; display:inline-block; display:flex; gap:4px; align-items:center;">
             <button type="button" class="section-header-btn chats-manage-btn" id="chats-library-btn" title="Manage Chats (Library)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -888,6 +900,17 @@
           </svg>
           <span class="grow">Gallery</span>
         </div>
+        <div class="list-item" id="tool-story-canvas-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="flex-shrink:0;opacity:0.5;">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <path d="M14 17.5h7M17.5 14v7"/>
+          </svg>
+          <span class="grow">Story Canvas</span>
+        </div>
         <div class="list-item" id="tool-library-btn">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.5;">
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M9 7h6M9 11h4"/>
@@ -943,16 +966,6 @@
           </svg>
           <span class="grow">Agent Bin</span>
           <span class="tool-agent-bin-dot sidebar-notif-dot" style="display:none" aria-hidden="true"></span>
-        </div>
-        <div class="list-item" id="tool-cmd-center-btn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-            style="flex-shrink:0;opacity:0.5;">
-            <circle cx="12" cy="12" r="3"/>
-            <circle cx="12" cy="12" r="8" opacity="0.5"/>
-            <path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>
-          </svg>
-          <span class="grow">CMD Center</span>
         </div>
 
         <div class="list-item" id="tool-theme-btn">
@@ -1059,7 +1072,7 @@
     <div class="chat-input-bar">
       <div class="chat-input-top">
         <div id="message-ghost" class="ghost-text-overlay" aria-hidden="true"></div>
-        <textarea id="message" placeholder="Message Odysseus..." required autocomplete="off" aria-label="Message input" rows="1"></textarea>
+        <textarea id="message" placeholder="Message Odysseus..." required autocomplete="off" aria-label="Message input" rows="1" spellcheck="true" lang="en"></textarea>
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
@@ -1932,20 +1945,38 @@
           <div class="admin-card" style="padding-bottom:6px;">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Sidebar</h2>
             <div class="vis-toggles">
+              <div class="vis-row vis-row-choice">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg></span>
+                <span class="vis-label">Mobile panel <span class="vis-hint">Swipe edge to open</span></span>
+                <div class="mode-toggle vis-side-toggle side-right" id="set-mobileSidebarSide" role="group" aria-label="Mobile side panel edge">
+                  <button type="button" class="mode-toggle-btn" data-side="left" aria-pressed="false">Left</button>
+                  <button type="button" class="mode-toggle-btn active" data-side="right" aria-pressed="true">Right</button>
+                </div>
+              </div>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M8 12l2.5 2.5L16 9"/></svg></span>
                 <span class="vis-label">Odysseus <span class="vis-hint">Brand name</span></span>
                 <input type="checkbox" checked data-ui-key="sidebar-brand"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span>
-                <span class="vis-label">Search</span>
-                <input type="checkbox" checked data-ui-key="sidebar-search"><span class="vis-switch"></span>
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7"/><path d="M9 22V12h6v10"/><path d="M21 9v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9"/></svg></span>
+                <span class="vis-label">Home</span>
+                <input type="checkbox" checked data-ui-key="sidebar-home"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
-                <span class="vis-label">New Chat</span>
+                <span class="vis-label">New Chat <span class="vis-hint">+ beside Chats</span></span>
                 <input type="checkbox" checked data-ui-key="sidebar-new-chat"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" opacity="0.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg></span>
+                <span class="vis-label">CMD Center <span class="vis-hint">V.A.U.L.T. dashboard</span></span>
+                <input type="checkbox" checked data-ui-key="tool-cmd-center"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M21 21l-4.35-4.35"/></svg></span>
+                <span class="vis-label">Search</span>
+                <input type="checkbox" checked data-ui-key="sidebar-search"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
@@ -1998,6 +2029,11 @@
                 <input type="checkbox" checked data-ui-key="tool-gallery"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
+                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17.5h7M17.5 14v7"/></svg></span>
+                <span class="vis-label">Story Canvas</span>
+                <input type="checkbox" checked data-ui-key="tool-story-canvas"><span class="vis-switch"></span>
+              </label>
+              <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></span>
                 <span class="vis-label">Library</span>
                 <input type="checkbox" checked data-ui-key="tool-library"><span class="vis-switch"></span>
@@ -2016,11 +2052,6 @@
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg></span>
                 <span class="vis-label">Agent Bin <span class="vis-hint">Handoff inbox</span></span>
                 <input type="checkbox" checked data-ui-key="tool-agent-bin"><span class="vis-switch"></span>
-              </label>
-              <label class="vis-row">
-                <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" opacity="0.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg></span>
-                <span class="vis-label">CMD Center <span class="vis-hint">V.A.U.L.T. dashboard</span></span>
-                <input type="checkbox" checked data-ui-key="tool-cmd-center"><span class="vis-switch"></span>
               </label>
               <label class="vis-row">
                 <span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20 5 5 0 0 0 5-5 3 3 0 0 0-3-3h-2a3 3 0 0 1-3-3 5 5 0 0 1 5-5"/></svg></span>
@@ -2655,6 +2686,7 @@
 <script type="module" src="/static/js/settings.js"></script>
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
+<script type="module" src="/static/js/writingAssist.js"></script>
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>

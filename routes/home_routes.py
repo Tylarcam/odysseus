@@ -267,60 +267,62 @@ def setup_home_routes() -> APIRouter:
         finally:
             db.close()
 
+    def _ceo_brief_payload(db, user: Optional[str], *, compiled=None, result: Optional[str] = None, ok: bool = True) -> Dict[str, Any]:
+        from services.documents.audio_brief import get_brief_state
+        from services.documents.ceo_brief_store import load_ceo_brief_snapshot
+
+        snap = load_ceo_brief_snapshot(db, user)
+        state = get_brief_state(snap["id"]) or {} if snap.get("id") else {}
+        out = dict(snap)
+        out["ok"] = bool(ok)
+        out["result"] = result
+        out["audio_status"] = state.get("status") or ("pending" if snap.get("id") else "pending")
+        out["chunk_count"] = int(state.get("chunk_count") or 0)
+        out["mime"] = state.get("mime")
+        out["error"] = state.get("error")
+        out["generated_at"] = state.get("generated_at")
+        if compiled is not None:
+            out["compiled"] = bool(compiled)
+        return out
+
     @router.post("/ceo-brief")
     async def ceo_brief_run(request: Request) -> Dict[str, Any]:
-        """Manually trigger the CEO Brief gather + audio kickoff.
-        Runs the same action as the daily chron task so the button produces a
-        fresh voice rundown on demand. Returns the doc id + audio status."""
+        """Open today's CEO Brief, compiling only when missing or stale.
+
+        Returns the document body for inline MEM display. Does not require
+        the editor — the Library doc is storage only.
+        """
         from src.builtin_actions import action_ceo_brief
         user = effective_user(request)
+        db = SessionLocal()
+        try:
+            existing = _ceo_brief_payload(db, user, compiled=False)
+            if existing.get("status") == "ready":
+                existing["result"] = "Today's CEO brief is ready."
+                existing["ok"] = True
+                return existing
+        finally:
+            db.close()
+
         result, ok = await action_ceo_brief(owner=user)
-        # Locate the doc id the action just wrote.
-        from datetime import datetime as _dt
-        doc_id = f"ceo-brief-{_dt.now().strftime('%Y-%m-%d')}"
-        from services.documents.audio_brief import get_brief_state
-        state = get_brief_state(doc_id) or {}
-        return {
-            "ok": bool(ok),
-            "doc_id": doc_id,
-            "result": result,
-            "audio_status": state.get("status") or "generating",
-        }
+        db = SessionLocal()
+        try:
+            payload = _ceo_brief_payload(db, user, compiled=True, result=result, ok=ok)
+            if not payload.get("doc_id"):
+                payload["result"] = result or "CEO brief compiled but document was not found."
+            return payload
+        finally:
+            db.close()
 
     @router.get("/ceo-brief/latest")
     def ceo_brief_latest(request: Request) -> Dict[str, Any]:
-        """Latest CEO Brief document + its audio-brief playback state.
-        The CMD Center button polls this while playing."""
-        from datetime import datetime as _dt
-        from src.auth_helpers import owner_filter
-        from services.documents.audio_brief import get_brief_state
-
+        """Latest CEO Brief (UUID or legacy id) + body + audio state for MEM."""
         user = effective_user(request)
-        doc_id = f"ceo-brief-{_dt.now().strftime('%Y-%m-%d')}"
-        title = f"CEO Brief — {_dt.now().strftime('%Y-%m-%d')}"
         db = SessionLocal()
         try:
-            doc = db.query(Document).filter(Document.id == doc_id).first()
-            if doc is None:
-                # Fall back to the most recent CEO Brief doc for this owner.
-                q = db.query(Document).filter(Document.id.like("ceo-brief-%"))
-                if user:
-                    q = owner_filter(q, Document, user)
-                doc = q.order_by(Document.updated_at.desc()).first()
-            if doc is None:
-                return {"ok": False, "doc_id": None, "title": title, "audio_status": "pending"}
-            state = get_brief_state(doc.id) or {}
-            return {
-                "ok": True,
-                "doc_id": doc.id,
-                "title": doc.title or title,
-                "audio_status": state.get("status") or "pending",
-                "chunk_count": int(state.get("chunk_count") or 0),
-                "mime": state.get("mime"),
-                "error": state.get("error"),
-                "generated_at": state.get("generated_at"),
-                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
-            }
+            payload = _ceo_brief_payload(db, user)
+            payload["ok"] = payload.get("status") != "missing"
+            return payload
         finally:
             db.close()
 

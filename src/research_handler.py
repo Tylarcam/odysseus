@@ -13,7 +13,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Any, Dict, List, Optional
 
 from src.research_utils import strip_thinking, is_low_quality
 from src.constants import DEEP_RESEARCH_DIR
@@ -60,6 +60,189 @@ def _research_json_path(session_id: str) -> Optional[Path]:
     except ValueError:
         return None
     return path
+
+
+_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
+_SKIP_HEADINGS = {
+    "sources", "references", "citations", "appendix", "contents",
+    "table of contents", "toc", "footnotes",
+}
+
+
+def research_report_url(session_id: str) -> str:
+    return f"/api/research/report/{session_id}"
+
+
+def extract_report_title(query: str = "", report_md: str = "") -> str:
+    """First markdown heading, else the research query."""
+    for match in _HEADING_RE.finditer(report_md or ""):
+        title = (match.group(1) or "").strip()
+        if title and title.lower() not in _SKIP_HEADINGS:
+            return title[:200]
+    fallback = (query or "").strip()
+    return fallback[:200] if fallback else "Research report"
+
+
+def extract_finding_bullets(
+    report_md: str = "",
+    raw_findings: Optional[list] = None,
+    n: int = 3,
+) -> List[str]:
+    """Cheap 2–3 bullets from headings or first findings. Never raises."""
+    bullets: List[str] = []
+    headings: List[str] = []
+    try:
+        for match in _HEADING_RE.finditer(report_md or ""):
+            text = (match.group(1) or "").strip()
+            if text and text.lower() not in _SKIP_HEADINGS:
+                headings.append(text[:160])
+        if headings:
+            # Skip the title heading when more sections exist.
+            rest = headings[1:] if len(headings) > 1 else headings
+            bullets.extend(rest[:n])
+    except Exception:
+        headings = []
+    if len(bullets) < n:
+        for finding in raw_findings or []:
+            if not isinstance(finding, dict):
+                continue
+            summary = str(finding.get("summary") or finding.get("title") or "").strip()
+            if not summary:
+                continue
+            line = summary.split("\n", 1)[0].strip()[:160]
+            if line and line not in bullets:
+                bullets.append(line)
+            if len(bullets) >= n:
+                break
+    return bullets[:n]
+
+
+def _completed_iso(value: Any) -> Optional[str]:
+    try:
+        ts = float(value or 0)
+    except (TypeError, ValueError):
+        return None
+    if ts <= 0:
+        return None
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def list_recent_research_reports(
+    *,
+    owner: str = "",
+    limit: int = 8,
+    include_excerpt: bool = False,
+) -> List[Dict[str, Any]]:
+    """Newest non-archived deep_research JSON reports for INTEL / briefs."""
+    items: List[Dict[str, Any]] = []
+    try:
+        if not RESEARCH_DATA_DIR.exists():
+            return []
+        want = (owner or "").strip()
+        for path in RESEARCH_DATA_DIR.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("archived"):
+                continue
+            data_owner = str(data.get("owner") or "")
+            if want and data_owner != want:
+                continue
+            status = str(data.get("status") or "done")
+            query = str(data.get("query") or "")
+            report_md = str(data.get("raw_report") or data.get("result") or "")
+            title = extract_report_title(query, report_md)
+            row: Dict[str, Any] = {
+                "id": path.stem,
+                "query": query,
+                "title": title,
+                "status": status,
+                "completed_at": data.get("completed_at") or 0,
+                "completed_at_iso": _completed_iso(data.get("completed_at")),
+                "url": research_report_url(path.stem),
+                "owner": data_owner,
+            }
+            if include_excerpt:
+                row["bullets"] = extract_finding_bullets(
+                    report_md, data.get("raw_findings") or [], n=3,
+                )
+            items.append(row)
+    except Exception:
+        logger.debug("list_recent_research_reports failed", exc_info=True)
+        return []
+    items.sort(key=lambda r: float(r.get("completed_at") or 0), reverse=True)
+    return items[: max(0, int(limit or 0))]
+
+
+def create_research_followup_note(session_id: str, data: Dict[str, Any]) -> Optional[str]:
+    """Fail-soft note so vault INTEL/queue can see a finished rp-* report."""
+    if not isinstance(session_id, str) or not _RESEARCH_SESSION_ID_RE.fullmatch(session_id):
+        return None
+    if str((data or {}).get("status") or "") != "done":
+        return None
+    import uuid as _uuid
+    from core.database import SessionLocal as _SL, Note as _N
+    from src.note_label import normalize_note_label
+
+    query = str((data or {}).get("query") or "")
+    report_md = str((data or {}).get("raw_report") or (data or {}).get("result") or "")
+    title = extract_report_title(query, report_md)
+    url = research_report_url(session_id)
+    bullets = extract_finding_bullets(report_md, (data or {}).get("raw_findings") or [], n=3)
+    lines = [
+        f"Research finished: {title}.",
+        "",
+        f"Open: {url}",
+    ]
+    if bullets:
+        lines.append("")
+        lines.extend(f"- {b}" for b in bullets)
+    body = "\n".join(lines)
+    owner = str((data or {}).get("owner") or "") or None
+
+    db = _SL()
+    try:
+        existing = (
+            db.query(_N)
+            .filter(
+                _N.session_id == session_id,
+                _N.source == "research",
+                _N.archived == False,  # noqa: E712
+            )
+            .first()
+        )
+        if existing:
+            return existing.id
+        note = _N(
+            id=str(_uuid.uuid4()),
+            owner=owner,
+            title=title[:200],
+            content=body,
+            note_type="note",
+            label=normalize_note_label("research brief"),
+            pinned=False,
+            source="research",
+            session_id=session_id,
+        )
+        db.add(note)
+        db.commit()
+        return note.id
+    except Exception as exc:
+        logger.debug("research follow-up note create failed: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 class ResearchHandler:
@@ -638,6 +821,11 @@ class ResearchHandler:
                 fire_event("research_completed", entry.get("owner") or None)
             except Exception:
                 logger.debug("research_completed event dispatch failed", exc_info=True)
+            if data.get("status") == "done":
+                try:
+                    create_research_followup_note(session_id, data)
+                except Exception:
+                    logger.debug("research follow-up note failed", exc_info=True)
         except Exception as e:
             logger.error(f"Failed to save research result: {e}")
 

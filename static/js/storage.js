@@ -8,6 +8,7 @@ export const KEYS = {
   SIDEBAR_COLLAPSED: 'sidebar-collapsed',
   SIDEBAR_WIDTH: 'sidebar-width',
   SIDEBAR_SIDE: 'sidebar-side',
+  MOBILE_SIDEBAR_SIDE: 'mobile-sidebar-side',
   CURRENT_SESSION: 'currentSessionId',
   COMPARE_SAVE: 'compare-save-results',
   COMPARE_CHAT: 'compare-continue-chat',

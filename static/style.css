@@ -66,6 +66,10 @@
   /* Warm accent — used by the Goals/Today UI in Notes. Lives as a token so
      themes can override without touching the goal CSS. */
   --accent-warm: #d19a66;
+
+  /* Sidebar nav rows (Home, CMD Center, Search, and Tools items).
+     Distinct from default .list-item padding (3px 8px) used by session rows. */
+  --sidebar-nav-item-padding: 8px 8px;
 }
 
 :root.light {
@@ -149,11 +153,11 @@ html {
 
 /* ── Density Overrides ── */
 
-:root.density-compact { font-size: 13px; }
+:root.density-compact { font-size: 13px; --sidebar-nav-item-padding: 4px 8px; }
 :root.density-compact .msg { padding: 6px 10px; margin-bottom: 4px; }
 :root.density-compact .list-item { padding: 4px 8px; }
 :root.density-compact .sidebar .section { padding: 0; }
-:root.density-spacious { font-size: 16px; }
+:root.density-spacious { font-size: 16px; --sidebar-nav-item-padding: 8px 12px; }
 :root.density-spacious .msg { padding: 14px 18px; margin-bottom: 12px; }
 :root.density-spacious .list-item { padding: 8px 12px; }
 :root.density-spacious .sidebar .section { padding: 0; }
@@ -574,19 +578,18 @@ body.bg-pattern-sparkles {
     .sidebar-sep {
       display: none;
     }
-    #sidebar-search-btn,
-    #sidebar-new-chat-btn {
-      margin: 0;
-      padding: 8px 8px;
+    /* Home / CMD Center / Search are direct .sidebar-inner children.
+       Match Tools rows (Notes, Tasks, Agent Bin, …) — not the tighter
+       default .list-item padding used by session rows. */
+    .sidebar-inner > .list-item,
+    #tools-section .list-item {
+      padding: var(--sidebar-nav-item-padding);
     }
     #sessions-section {
       margin-top: -1px;
     }
     #tools-section {
       margin-top: 1px;
-    }
-    #tools-section .list-item {
-      padding: 8px 8px;
     }
     .sidebar.right-side .sidebar-header {
       justify-content: flex-start;
@@ -4925,15 +4928,13 @@ body.bg-pattern-sparkles {
       .list-item .grow {
         font-size: 14px !important;
       }
-      /* Search, New Chat & Assistant */
+      /* Search & Assistant — New Chat is an inline plus, not a row */
       #sidebar-search-btn,
-      #sidebar-new-chat-btn,
       .sidebar-assistant-entry {
         padding: 12px 10px !important;
         min-height: 48px !important;
       }
       #sidebar-search-btn .grow,
-      #sidebar-new-chat-btn .grow,
       .sidebar-assistant-entry .grow {
         font-size: 14px !important;
         left: 0 !important;
@@ -4962,7 +4963,7 @@ body.bg-pattern-sparkles {
         padding: 4px 10px;
         font-size: 10px;
       }
-      /* Incognito indicator — right side next to hamburger on mobile */
+      /* Incognito — next to hamburger on mobile */
       .incognito-indicator {
         position: fixed;
         top: 12px;
@@ -4973,6 +4974,10 @@ body.bg-pattern-sparkles {
         height: 32px;
         z-index: 210;
         opacity: 0.8;
+      }
+      html.mobile-sidebar-left .incognito-indicator {
+        right: auto !important;
+        left: 48px !important;
       }
       /* Icon rail on mobile — hidden by default, shown in mini-sidebar state */
       .icon-rail { display: none !important; }
@@ -5055,7 +5060,7 @@ body.bg-pattern-sparkles {
         display: inline-block !important;
         opacity: 0.6;
       }
-      /* Hamburger — always right on mobile */
+      /* Hamburger — follows mobile sidebar side preference (default right) */
       .hamburger-btn {
         width: 44px;
         height: 44px;
@@ -5064,13 +5069,17 @@ body.bg-pattern-sparkles {
         right: 4px !important;
         -webkit-tap-highlight-color: transparent;
       }
+      html.mobile-sidebar-left .hamburger-btn {
+        left: 4px !important;
+        right: auto !important;
+      }
       .hamburger-btn:hover,
       .hamburger-btn:active {
         background: none !important;
         border: none !important;
         box-shadow: none !important;
       }
-      /* New chat — always left on mobile */
+      /* New chat — opposite the hamburger so they don't overlap */
       .mobile-new-chat-btn {
         display: flex;
         position: fixed;
@@ -5087,6 +5096,10 @@ body.bg-pattern-sparkles {
         cursor: pointer;
         opacity: 0.5;
         padding: 0;
+      }
+      html.mobile-sidebar-left .mobile-new-chat-btn {
+        left: auto;
+        right: 8px;
       }
       /* Modal close button — bigger on mobile */
       .close-btn,
@@ -6383,6 +6396,20 @@ body.bg-pattern-sparkles {
     }
     .vis-row:hover {
       background: color-mix(in srgb, var(--fg) 5%, transparent);
+    }
+    .vis-row-choice {
+      cursor: default;
+    }
+    .vis-side-toggle {
+      height: 24px;
+      flex-shrink: 0;
+    }
+    .vis-side-toggle .mode-toggle-btn {
+      padding: 0 9px;
+      font-size: 10px;
+    }
+    .vis-side-toggle.side-right::before {
+      transform: translateX(100%);
     }
     .vis-row input[type="checkbox"] {
       display: none;
@@ -16306,6 +16333,12 @@ body.split-chat-active #split-chat-modal:not(.hidden) {
 }
 .doclib-grid:has(.doclib-card-expanded) > .doclib-card:not(.doclib-card-expanded) {
   display: none;
+}
+/* Don't keep a load-more control in auto-load range while a document is
+   open — clicking it re-renders the grid and dumps the reader back to the list. */
+#doclib-modal:has(.doclib-card-expanded) .doclib-load-more,
+#doclib-modal:has(.doclib-card-expanded) .doclib-inline-load-more {
+  display: none !important;
 }
 /* Hide everything except the grid when a card is expanded */
 .admin-card:has(.doclib-card-expanded) > *:not(.doclib-grid):not(.hwfit-cached-list) {
@@ -31151,6 +31184,59 @@ body.cmd-center-view .chat-container {
   body.formflow-view .ff-scale-btn {
     min-height: 44px;
   }
+
+  /* Story Canvas — same bottom-sheet shell as Notes/FormFlow */
+  body.story-canvas-view .chat-container { flex: 1; min-width: 0; }
+  body.story-canvas-view .notes-pane {
+    position: fixed;
+    inset: 0;
+    max-width: 100%;
+    width: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    z-index: 170;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: sheet-enter 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    transform-origin: bottom center;
+  }
+  body.story-canvas-view .sc-pane-body {
+    flex: 1;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.story-canvas-view .notes-mobile-grabber {
+    display: block;
+    flex-shrink: 0;
+    height: 18px;
+    position: relative;
+    background: var(--bg);
+    touch-action: none;
+    cursor: grab;
+  }
+  body.story-canvas-view .notes-mobile-grabber::before {
+    content: '';
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    background: var(--fg);
+    opacity: 0.25;
+    border-radius: 2px;
+  }
+  body.story-canvas-view .chat-container {
+    display: none;
+  }
+  body.story-canvas-view .mobile-new-chat-btn,
+  body.story-canvas-view .hamburger-btn {
+    display: none !important;
+  }
 }
 /* ── Mobile notes UX ────────────────────────────────────
    Tiles become read-only previews on touch ≤768px wide.
@@ -31159,6 +31245,7 @@ body.cmd-center-view .chat-container {
 body.notes-mobile-mode .note-card-corner,
 body.notes-mobile-mode .note-card-corner-edit,
 body.notes-mobile-mode .note-card-corner-archive,
+body.notes-mobile-mode .note-card-corner-delete,
 body.notes-mobile-mode .note-card-corner-copy,
 body.notes-mobile-mode .note-card-corner-trash,
 body.notes-mobile-mode .note-card-corner-unarchive,
@@ -31329,6 +31416,17 @@ body.notes-mobile-mode .note-card-pinned .note-card-pin svg {
 }
 .note-mobile-quick-menu .nmqm-item:active {
   background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.note-mobile-quick-menu .nmqm-divider {
+  height: 1px;
+  margin: 6px 8px;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+.note-mobile-quick-menu .nmqm-item-danger {
+  color: var(--red, #e06c75);
+}
+.note-mobile-quick-menu .nmqm-item-danger:active {
+  background: color-mix(in srgb, var(--red, #e06c75) 12%, transparent);
 }
 
 /* Mobile swipe-right handoff — radial icon fan at 12 / 9 / 3 */
@@ -31871,6 +31969,12 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+.notes-pane.notes-window-fullscreen {
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
+  max-width: none;
+}
 @keyframes notes-backdrop-fade-in {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -32047,6 +32151,8 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   /* Mobile header is tight — keep Archive / Toggle View icon-only. */
   .notes-header-btn-label { display: none; }
   .notes-header-text-btn { width: 32px !important; padding: 0 !important; }
+  /* Panel already fills the viewport on mobile. */
+  #notes-fullscreen-toggle { display: none !important; }
 }
 .notes-header-btn-label {
   font-size: 11px;
@@ -32067,6 +32173,26 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   flex-direction: column;
   gap: 6px;
   scrollbar-width: thin;
+}
+
+/* Story Canvas — iframe panel (Notes/FormFlow shell) */
+.story-canvas-pane {
+  width: min(1200px, 96vw);
+  height: min(88vh, 900px);
+}
+.sc-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sc-iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  min-height: 0;
+  background: #e8e6e1;
 }
 
 .note-card.note-card-sliding-out {
@@ -32390,11 +32516,53 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
     border-color: color-mix(in srgb, var(--fg) 18%, transparent);
   }
 }
-/* Checklist cards also carry a copy corner — park it left of archive. */
+/* Tiny delete × — left of archive, no chrome until hover so archive stays
+   the primary dismiss. Confirm is still required in JS. */
+.note-card-corner-delete {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  bottom: 8px;
+  right: 34px;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  opacity: 0;
+  touch-action: manipulation;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  z-index: 2;
+}
+.note-card-corner-delete svg { opacity: 0.55; }
+.note-card:hover .note-card-corner-delete { opacity: 0.45; }
+.note-card-corner-delete:hover,
+.note-card-corner-delete:focus-visible {
+  opacity: 1 !important;
+  background: color-mix(in srgb, var(--red, #e06c75) 16%, var(--panel));
+  color: var(--red, #e06c75);
+}
+.note-card-corner-delete:hover svg,
+.note-card-corner-delete:focus-visible svg { opacity: 1; }
+@media (hover: none) {
+  .note-card-corner-delete { opacity: 0.4; }
+}
+/* Checklist copy sits left of the delete+archive cluster. */
 .note-card:has(.note-card-corner-archive) .note-card-copy-corner {
   right: 36px;
 }
-.note-card-selectmode .note-card-corner-archive { display: none !important; }
+.note-card:has(.note-card-corner-delete) .note-card-copy-corner {
+  right: 56px;
+}
+.note-card-selectmode .note-card-corner-archive,
+.note-card-selectmode .note-card-corner-delete { display: none !important; }
 /* Pin button on mobile — show in drag mode; pinned notes always visible above */
 body.notes-mobile-mode.notes-drag-mode .note-card:not(.note-card-pinned) .note-card-pin {
   display: flex !important;

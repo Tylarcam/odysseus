@@ -429,7 +429,14 @@ body.listen-dock-open {{
   opacity: 0.7;
   font-size: 0.72rem;
 }}
-.listen-modal-close {{
+.listen-modal-head-actions {{
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}}
+.listen-modal-close,
+.listen-modal-download {{
   border: none;
   background: transparent;
   color: inherit;
@@ -440,8 +447,36 @@ body.listen-dock-open {{
   opacity: 0.7;
   min-width: 2.5rem;
   min-height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }}
-.listen-modal-close:hover {{ opacity: 1; }}
+.listen-modal-close:hover,
+.listen-modal-download:hover:not(:disabled) {{ opacity: 1; }}
+.listen-modal-download:disabled {{
+  opacity: 0.35;
+  cursor: not-allowed;
+}}
+.listen-rate {{
+  min-width: 4.4rem;
+  height: 2.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg, #fff);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0 0.55rem;
+  touch-action: manipulation;
+}}
+.listen-rate:hover {{
+  border-color: var(--accent, #6366f1);
+}}
+.listen-rate:disabled {{
+  opacity: 0.4;
+  cursor: not-allowed;
+}}
 .listen-time-row {{
   display: flex;
   align-items: center;
@@ -567,6 +602,10 @@ body.listen-dock-open {{
   .listen-transport button.primary {{
     min-width: 3.4rem;
     height: 3.4rem;
+  }}
+  .listen-rate {{
+    height: 3rem;
+    font-size: 0.78rem;
   }}
   .listen-segments {{ max-height: 9.5rem; }}
   .listen-segments li {{ padding: 0.55rem 0.5rem; }}
@@ -1074,7 +1113,12 @@ body.listen-dock-open {{
         <div class="listen-modal-title" id="listen-modal-title">Audio brief</div>
         <div class="listen-modal-sub" id="listen-modal-sub">Preparing…</div>
       </div>
-      <button type="button" class="listen-modal-close" id="listen-modal-close" title="Close player" aria-label="Close player">&times;</button>
+      <div class="listen-modal-head-actions">
+        <button type="button" class="listen-modal-download" id="listen-btn-download" title="Download audio" aria-label="Download audio" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        </button>
+        <button type="button" class="listen-modal-close" id="listen-modal-close" title="Close player" aria-label="Close player">&times;</button>
+      </div>
     </div>
     <div class="listen-time-row">
       <span id="listen-elapsed">0:00</span>
@@ -1092,6 +1136,15 @@ body.listen-dock-open {{
       <button type="button" id="listen-btn-pause" title="Pause" aria-label="Pause" disabled>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
       </button>
+      <label class="listen-rate-wrap">
+        <select class="listen-rate" id="listen-rate" title="Playback speed" aria-label="Playback speed">
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
     </div>
     <ul class="listen-segments" id="listen-segments" aria-label="Segments by duration"></ul>
   </div>
@@ -1203,8 +1256,12 @@ body.listen-dock-open {{
   var listenBtnPause = document.getElementById('listen-btn-pause');
   var listenBtnStop = document.getElementById('listen-btn-stop');
   var listenBtnClose = document.getElementById('listen-modal-close');
+  var listenBtnDownload = document.getElementById('listen-btn-download');
+  var listenRateEl = document.getElementById('listen-rate');
   var listenIconDefault = listenBtn ? listenBtn.innerHTML : '';
   var listenIconLoad = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg> Preparing…';
+  var LISTEN_RATE_KEY = 'ody-listen-rate';
+  var LISTEN_RATES = [0.75, 1, 1.25, 1.5, 2];
   var LS = {{ IDLE: 'IDLE', PLAYING: 'PLAYING', PAUSED: 'PAUSED', STOPPED: 'STOPPED' }};
   var __listen = {{
     state: LS.IDLE,
@@ -1216,7 +1273,12 @@ body.listen-dock-open {{
     tickTimer: null,
     audio: null,
     objectUrl: null,
-    prepared: false
+    prepared: false,
+    exporting: false,
+    chunkBlobs: [],
+    audioCtx: null,
+    playGen: 0,
+    rateDirty: false
   }};
 
   function __listenToast(msg) {{
@@ -1237,6 +1299,43 @@ body.listen-dock-open {{
     var m = Math.floor(sec / 60);
     var s = sec % 60;
     return m + ':' + String(s).padStart(2, '0');
+  }}
+
+  function __listenGetRate() {{
+    var v = listenRateEl ? parseFloat(listenRateEl.value) : 1;
+    return (v > 0 && isFinite(v)) ? v : 1;
+  }}
+
+  function __listenLoadRate() {{
+    if (!listenRateEl) return;
+    try {{
+      var raw = localStorage.getItem(LISTEN_RATE_KEY);
+      var v = parseFloat(raw);
+      if (LISTEN_RATES.indexOf(v) === -1) v = 1;
+      listenRateEl.value = String(v);
+    }} catch (e) {{}}
+  }}
+
+  function __listenSaveRate() {{
+    try {{ localStorage.setItem(LISTEN_RATE_KEY, String(__listenGetRate())); }} catch (e) {{}}
+  }}
+
+  function __listenApplyLiveRate() {{
+    var rate = __listenGetRate();
+    __listenSaveRate();
+    if (__listen.audio) {{
+      try {{ __listen.audio.playbackRate = rate; }} catch (e) {{}}
+    }}
+    if (__listen.mode !== 'tts') return;
+    if (__listen.state === LS.PLAYING) {{
+      var idx = __listen.segIdx;
+      __hardStopMedia();
+      __listen.segIdx = idx;
+      if (__listen.segments[idx]) __listen.elapsedSec = __listen.segments[idx].startSec;
+      __playTtsFrom(idx);
+    }} else if (__listen.state === LS.PAUSED) {{
+      __listen.rateDirty = true;
+    }}
   }}
 
   function __estimateSec(text) {{
@@ -1291,6 +1390,7 @@ body.listen-dock-open {{
     if (listenBtnPlay) listenBtnPlay.disabled = !__listen.prepared || playing;
     if (listenBtnPause) listenBtnPause.disabled = !playing;
     if (listenBtnStop) listenBtnStop.disabled = !(playing || paused);
+    if (listenBtnDownload) listenBtnDownload.disabled = !__listen.prepared || __listen.exporting;
     if (listenBtn) {{
       listenBtn.classList.toggle('playing', playing || paused);
       if (!listenBtn.classList.contains('loading')) {{
@@ -1346,7 +1446,7 @@ body.listen-dock-open {{
         var base = (__listen.segments[__listen.segIdx] && __listen.segments[__listen.segIdx].startSec) || 0;
         __listen.elapsedSec = base + __listen.audio.currentTime;
       }} else {{
-        __listen.elapsedSec = Math.min(__listen.totalSec, __listen.elapsedSec + 0.25);
+        __listen.elapsedSec = Math.min(__listen.totalSec, __listen.elapsedSec + 0.25 * __listenGetRate());
         var seg = __listen.segments[__listen.segIdx];
         if (seg && __listen.elapsedSec >= seg.startSec + seg.durationSec && __listen.segIdx < __listen.segments.length - 1) {{
           // keep segIdx in sync for TTS estimate clock
@@ -1368,6 +1468,7 @@ body.listen-dock-open {{
   }}
 
   function __hardStopMedia() {{
+    __listen.playGen++;
     __clearListenTick();
     __revokeAudio();
     if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -1429,19 +1530,20 @@ body.listen-dock-open {{
     }});
   }}
 
-  function __speakSegment(idx) {{
+  function __speakSegment(idx, gen) {{
     return new Promise(function(resolve, reject) {{
       if (!window.speechSynthesis) {{ reject(new Error('Browser speech not available')); return; }}
-      if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
+      if (__listen.playGen !== gen || __listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
       var seg = __listen.segments[idx];
       if (!seg) {{ resolve(); return; }}
       __listen.segIdx = idx;
       __listen.elapsedSec = seg.startSec;
       __updateListenClock();
       var u = new SpeechSynthesisUtterance(seg.text);
+      u.rate = __listenGetRate();
       u.onend = function() {{ resolve(); }};
       u.onerror = function(e) {{
-        if (__listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
+        if (__listen.playGen !== gen || __listen.state === LS.STOPPED || __listen.state === LS.IDLE) {{ resolve(); return; }}
         reject(new Error(e.error || 'speech error'));
       }};
       window.speechSynthesis.speak(u);
@@ -1449,6 +1551,7 @@ body.listen-dock-open {{
   }}
 
   function __playTtsFrom(idx) {{
+    var gen = ++__listen.playGen;
     __listen.mode = 'tts';
     __setListenState(LS.PLAYING);
     __startListenTick();
@@ -1456,8 +1559,8 @@ body.listen-dock-open {{
     for (var i = idx; i < __listen.segments.length; i++) {{
       (function(segIndex) {{
         chain = chain.then(function() {{
-          if (__listen.state !== LS.PLAYING) return;
-          return __speakSegment(segIndex);
+          if (__listen.playGen !== gen || __listen.state !== LS.PLAYING) return;
+          return __speakSegment(segIndex, gen);
         }});
       }})(i);
     }}
@@ -1471,14 +1574,22 @@ body.listen-dock-open {{
     }});
   }}
 
-  function __playChunk(index) {{
+  function __fetchChunkBlob(index) {{
+    if (__listen.chunkBlobs[index]) return Promise.resolve(__listen.chunkBlobs[index]);
     return fetch('/api/research/' + encodeURIComponent(__sessionId) + '/audio-brief/chunk/' + index, {{
       credentials: 'same-origin'
     }}).then(function(r) {{
       if (!r.ok) throw new Error('Chunk ' + index + ' unavailable');
       return r.blob();
     }}).then(function(blob) {{
-      if (__listen.state !== LS.PLAYING) return;
+      __listen.chunkBlobs[index] = blob;
+      return blob;
+    }});
+  }}
+
+  function __playChunk(index, gen) {{
+    return __fetchChunkBlob(index).then(function(blob) {{
+      if (__listen.playGen !== gen || __listen.state !== LS.PLAYING) return;
       return new Promise(function(resolve, reject) {{
         __revokeAudio();
         var url = URL.createObjectURL(blob);
@@ -1487,7 +1598,10 @@ body.listen-dock-open {{
         __listen.audio = audio;
         __listen.segIdx = index;
         __updateListenClock();
+        audio.playbackRate = __listenGetRate();
         audio.onloadedmetadata = function() {{
+          if (__listen.playGen !== gen) return;
+          audio.playbackRate = __listenGetRate();
           if (__listen.segments[index] && isFinite(audio.duration) && audio.duration > 0) {{
             var oldDur = __listen.segments[index].durationSec;
             __listen.segments[index].durationSec = audio.duration;
@@ -1498,18 +1612,26 @@ body.listen-dock-open {{
           }}
         }};
         audio.ontimeupdate = function() {{
+          if (__listen.playGen !== gen) return;
           var base = (__listen.segments[index] && __listen.segments[index].startSec) || 0;
           __listen.elapsedSec = base + (audio.currentTime || 0);
           __updateListenClock();
         }};
         audio.onended = function() {{ resolve(); }};
-        audio.onerror = function() {{ reject(new Error('Playback error')); }};
-        audio.play().catch(reject);
+        audio.onerror = function() {{
+          if (__listen.playGen !== gen || __listen.state !== LS.PLAYING) {{ resolve(); return; }}
+          reject(new Error('Playback error'));
+        }};
+        audio.play().catch(function(err) {{
+          if (__listen.playGen !== gen || __listen.state !== LS.PLAYING) {{ resolve(); return; }}
+          reject(err);
+        }});
       }});
     }});
   }}
 
   function __playChunksFrom(idx) {{
+    var gen = ++__listen.playGen;
     __listen.mode = 'chunks';
     __setListenState(LS.PLAYING);
     __startListenTick();
@@ -1517,8 +1639,8 @@ body.listen-dock-open {{
     for (var i = idx; i < __listen.segments.length; i++) {{
       (function(segIndex) {{
         chain = chain.then(function() {{
-          if (__listen.state !== LS.PLAYING) return;
-          return __playChunk(segIndex);
+          if (__listen.playGen !== gen || __listen.state !== LS.PLAYING) return;
+          return __playChunk(segIndex, gen);
         }});
       }})(i);
     }}
@@ -1536,6 +1658,13 @@ body.listen-dock-open {{
     if (!__listen.prepared) return;
     if (__listen.state === LS.PAUSED) {{
       if (__listen.mode === 'tts' && window.speechSynthesis) {{
+        if (__listen.rateDirty) {{
+          __listen.rateDirty = false;
+          var idx = __listen.segIdx;
+          __hardStopMedia();
+          __playTtsFrom(idx);
+          return;
+        }}
         window.speechSynthesis.resume();
         __setListenState(LS.PLAYING);
         __startListenTick();
@@ -1588,9 +1717,15 @@ body.listen-dock-open {{
     __hardStopMedia();
     __listen.segIdx = idx;
     __listen.elapsedSec = __listen.segments[idx].startSec;
+    __listen.rateDirty = false;
     __updateListenClock();
-    __setListenState(LS.STOPPED);
-    __listenPlay();
+    var p = __listen.mode === 'chunks' ? __playChunksFrom(idx) : __playTtsFrom(idx);
+    p.catch(function(err) {{
+      console.warn('Listen jump failed', err);
+      __listenToast(err.message || 'Playback failed');
+      __setListenState(LS.STOPPED);
+      __hardStopMedia();
+    }});
   }}
 
   function __prepareFromTranscript(script, subLabel) {{
@@ -1682,6 +1817,215 @@ body.listen-dock-open {{
     }});
   }}
 
+  function __listenAudioCtx() {{
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio is not available');
+    if (!__listen.audioCtx) __listen.audioCtx = new AC();
+    if (__listen.audioCtx.state === 'suspended' && __listen.audioCtx.resume) {{
+      __listen.audioCtx.resume();
+    }}
+    return __listen.audioCtx;
+  }}
+
+  function __decodeAudioBlob(blob) {{
+    var ctx = __listenAudioCtx();
+    return blob.arrayBuffer().then(function(ab) {{
+      return ctx.decodeAudioData(ab.slice(0));
+    }});
+  }}
+
+  function __concatAudioBuffers(buffers) {{
+    if (!buffers.length) throw new Error('No audio to export');
+    var ctx = __listenAudioCtx();
+    var sr = buffers[0].sampleRate;
+    var nCh = 1;
+    var total = 0;
+    buffers.forEach(function(b) {{
+      nCh = Math.max(nCh, b.numberOfChannels);
+      total += (b.sampleRate === sr) ? b.length : Math.round(b.length * sr / b.sampleRate);
+    }});
+    var out = ctx.createBuffer(nCh, Math.max(1, total), sr);
+    var offset = 0;
+    buffers.forEach(function(b) {{
+      var frames = (b.sampleRate === sr) ? b.length : Math.round(b.length * sr / b.sampleRate);
+      for (var c = 0; c < nCh; c++) {{
+        var src = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+        var dest = out.getChannelData(c);
+        if (b.sampleRate === sr) {{
+          dest.set(src, offset);
+        }} else {{
+          var ratio = src.length / frames;
+          for (var i = 0; i < frames; i++) dest[offset + i] = src[Math.min(src.length - 1, Math.floor(i * ratio))];
+        }}
+      }}
+      offset += frames;
+    }});
+    return out;
+  }}
+
+  function __stretchAudioBuffer(buffer, rate) {{
+    if (!rate || Math.abs(rate - 1) < 0.001) return Promise.resolve(buffer);
+    var Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!Offline) throw new Error('Offline audio export is not available');
+    var frames = Math.max(1, Math.ceil(buffer.length / rate));
+    var ctx = new Offline(buffer.numberOfChannels, frames, buffer.sampleRate);
+    var src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.playbackRate.value = rate;
+    src.connect(ctx.destination);
+    src.start(0);
+    return ctx.startRendering();
+  }}
+
+  function __encodeWav(buffer) {{
+    var nCh = buffer.numberOfChannels;
+    var sr = buffer.sampleRate;
+    var nFrames = buffer.length;
+    var dataSize = nFrames * nCh * 2;
+    var buf = new ArrayBuffer(44 + dataSize);
+    var view = new DataView(buf);
+    function wstr(off, s) {{
+      for (var i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    }}
+    wstr(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    wstr(8, 'WAVE');
+    wstr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, nCh, true);
+    view.setUint32(24, sr, true);
+    view.setUint32(28, sr * nCh * 2, true);
+    view.setUint16(32, nCh * 2, true);
+    view.setUint16(34, 16, true);
+    wstr(36, 'data');
+    view.setUint32(40, dataSize, true);
+    var chans = [];
+    for (var c = 0; c < nCh; c++) chans.push(buffer.getChannelData(c));
+    var offset = 44;
+    for (var i = 0; i < nFrames; i++) {{
+      for (var c = 0; c < nCh; c++) {{
+        var s = Math.max(-1, Math.min(1, chans[c][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+      }}
+    }}
+    return new Blob([buf], {{ type: 'audio/wav' }});
+  }}
+
+  function __listenDownloadName(rate) {{
+    var base = String(__sessionId || document.title || 'audio-brief')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .substring(0, 60) || 'audio-brief';
+    var rateTag = (Math.abs(rate - 1) < 0.001) ? '' : ('.' + String(rate) + 'x');
+    return base + '.brief' + rateTag + '.wav';
+  }}
+
+  function __listenFetchAllChunkBlobs() {{
+    var n = __listen.segments.length;
+    if (!n) return Promise.reject(new Error('No audio segments'));
+    var acc = Promise.resolve([]);
+    for (var i = 0; i < n; i++) {{
+      (function(idx) {{
+        acc = acc.then(function(blobs) {{
+          return __fetchChunkBlob(idx).then(function(blob) {{
+            blobs.push(blob);
+            return blobs;
+          }});
+        }});
+      }})(i);
+    }}
+    return acc;
+  }}
+
+  function __listenSynthesizeSegmentBlobs() {{
+    var segs = __listen.segments;
+    if (!segs.length) return Promise.reject(new Error('No transcript to export'));
+    var acc = Promise.resolve([]);
+    segs.forEach(function(seg) {{
+      acc = acc.then(function(blobs) {{
+        var text = String((seg && seg.text) || '').trim();
+        if (!text) return blobs;
+        return fetch('/api/tts/synthesize', {{
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ text: text, format: 'audio' }})
+        }}).then(function(r) {{
+          if (!r.ok) throw new Error('TTS export unavailable');
+          return r.blob();
+        }}).then(function(blob) {{
+          blobs.push(blob);
+          return blobs;
+        }});
+      }});
+    }});
+    return acc.then(function(blobs) {{
+      if (!blobs.length) throw new Error('TTS export produced no audio');
+      return blobs;
+    }});
+  }}
+
+  function __listenGatherExportBlobs() {{
+    if (__listen.mode === 'chunks') return __listenFetchAllChunkBlobs();
+    return __listenSynthesizeSegmentBlobs().catch(function(err) {{
+      if (!__sessionId) throw err;
+      return __listenFetchAllChunkBlobs().catch(function() {{ throw err; }});
+    }});
+  }}
+
+  function __listenTriggerDownload(blob, filename) {{
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function() {{ try {{ URL.revokeObjectURL(url); }} catch (e) {{}} }}, 4000);
+  }}
+
+  function __listenDownload() {{
+    if (!__listen.prepared || __listen.exporting) return;
+    var rate = __listenGetRate();
+    __listen.exporting = true;
+    if (listenBtnDownload) listenBtnDownload.disabled = true;
+    var prevSub = listenSub ? listenSub.textContent : '';
+    if (listenSub) listenSub.textContent = 'Exporting audio at ' + rate + '×…';
+    __listenGatherExportBlobs().then(function(blobs) {{
+      var decoded = Promise.resolve([]);
+      blobs.forEach(function(blob) {{
+        decoded = decoded.then(function(bufs) {{
+          return __decodeAudioBlob(blob).then(function(buf) {{
+            bufs.push(buf);
+            return bufs;
+          }});
+        }});
+      }});
+      return decoded;
+    }}).then(function(buffers) {{
+      return __stretchAudioBuffer(__concatAudioBuffers(buffers), rate);
+    }}).then(function(stretched) {{
+      var wav = __encodeWav(stretched);
+      __listenTriggerDownload(wav, __listenDownloadName(rate));
+      __listenToast('Downloaded ' + __listenDownloadName(rate));
+    }}).catch(function(err) {{
+      console.warn('Listen download failed', err);
+      var msg = (err && err.message) || 'Download failed';
+      if (__listen.mode === 'tts' && /unavailable|503|TTS/i.test(msg)) {{
+        msg = 'Download needs server audio (browser voice cannot be saved). Play at the selected speed instead.';
+      }}
+      __listenToast(msg);
+    }}).then(function() {{
+      __listen.exporting = false;
+      if (listenBtnDownload) listenBtnDownload.disabled = !__listen.prepared;
+      if (listenSub) listenSub.textContent = prevSub;
+    }});
+  }}
+
+  __listenLoadRate();
+
   if (listenBtn) {{
     listenBtn.addEventListener('click', function(e) {{
       e.stopPropagation();
@@ -1698,6 +2042,8 @@ body.listen-dock-open {{
   if (listenBtnPause) listenBtnPause.addEventListener('click', function(e) {{ e.stopPropagation(); __listenPause(); }});
   if (listenBtnStop) listenBtnStop.addEventListener('click', function(e) {{ e.stopPropagation(); __listenStopTransport(); }});
   if (listenBtnClose) listenBtnClose.addEventListener('click', function(e) {{ e.stopPropagation(); __listenCloseModal(); }});
+  if (listenBtnDownload) listenBtnDownload.addEventListener('click', function(e) {{ e.stopPropagation(); __listenDownload(); }});
+  if (listenRateEl) listenRateEl.addEventListener('change', function(e) {{ e.stopPropagation(); __listenApplyLiveRate(); }});
   // No outside-click dismiss — dock floats while scrolling; close only via X / Esc
   if (listenModal) listenModal.addEventListener('click', function(e) {{ e.stopPropagation(); }});
 

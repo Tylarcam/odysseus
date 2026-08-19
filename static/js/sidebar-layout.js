@@ -2,7 +2,10 @@
 // Sidebar Layout — icon rail, hamburger cycling, mobile backdrop & swipe
 // ============================================
 
+import StorageMod from './storage.js';
+
 let _syncRailSideFn = null;
+let _documentModuleRef = null;
 
 /**
  * Get the current syncRailSide function reference.
@@ -10,6 +13,45 @@ let _syncRailSideFn = null;
  */
 export function syncRailSide() {
   if (_syncRailSideFn) _syncRailSideFn();
+}
+
+/** Mobile overlay edge. Independent of the desktop SIDEBAR_SIDE pref. Default right. */
+export function getMobileSidebarSide() {
+  try {
+    return StorageMod.get(StorageMod.KEYS.MOBILE_SIDEBAR_SIDE) === 'left' ? 'left' : 'right';
+  } catch (_) {
+    return 'right';
+  }
+}
+
+/**
+ * Persist + apply the mobile sidebar edge. On a phone-sized viewport this
+ * docks the overlay (without writing the desktop SIDEBAR_SIDE pref).
+ */
+export function applyMobileSidebarSide(side, { persist = true } = {}) {
+  const resolved = side === 'left' ? 'left' : 'right';
+  if (persist) {
+    try { StorageMod.set(StorageMod.KEYS.MOBILE_SIDEBAR_SIDE, resolved); } catch (_) {}
+  }
+  document.documentElement.classList.toggle('mobile-sidebar-left', resolved === 'left');
+  document.documentElement.classList.toggle('mobile-sidebar-right', resolved === 'right');
+  if (document.body) {
+    document.body.classList.toggle('mobile-sidebar-left', resolved === 'left');
+    document.body.classList.toggle('mobile-sidebar-right', resolved === 'right');
+  }
+  if (window.innerWidth < 768) {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+      const wantRight = resolved === 'right';
+      if (sidebar.classList.contains('right-side') !== wantRight) {
+        sidebar.classList.toggle('right-side', wantRight);
+        if (_documentModuleRef && _documentModuleRef.swapSide) {
+          try { _documentModuleRef.swapSide(); } catch (_) {}
+        }
+      }
+    }
+    try { syncRailSide(); } catch (_) {}
+  }
 }
 
 /**
@@ -30,6 +72,7 @@ export function initSidebarLayout(Storage, opts) {
     documentModule, _closeCompareIfActive, _deactivateIncognito,
     presetsModule, sessionModule, el, _defaultChat, _syncResearchIndicator
   } = opts;
+  _documentModuleRef = documentModule;
 
   // ── Icon rail + sidebar toggle ──
   const iconRail = document.getElementById('icon-rail');
@@ -78,10 +121,12 @@ export function initSidebarLayout(Storage, opts) {
   _syncRailSideFn = _syncRailSideCore;
   window.syncRailSide = syncRailSide;
 
-  // Restore sidebar side preference
+  // Restore desktop sidebar side preference
   if (Storage.get(Storage.KEYS.SIDEBAR_SIDE) === 'right') {
     document.getElementById('sidebar').classList.add('right-side');
   }
+  // Mobile overlay side is independent — override on phone-sized viewports.
+  applyMobileSidebarSide(getMobileSidebarSide(), { persist: false });
   syncRailSide();
 
   // In-sidebar toggle button — same behavior as hamburger
@@ -96,7 +141,8 @@ export function initSidebarLayout(Storage, opts) {
   const chatNewBtn = document.getElementById('chat-new-btn');
   const sidebarNewChat = document.getElementById('sidebar-new-chat-btn');
   [chatNewBtn, sidebarNewChat].forEach(btn => {
-    if (btn) btn.addEventListener('click', () => {
+    if (btn) btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const railNew = document.getElementById('rail-new-session');
       if (railNew) railNew.click();
     });
@@ -122,13 +168,14 @@ export function initSidebarLayout(Storage, opts) {
     if (window.innerWidth < 768 && cc && cc.classList.contains('compare-active')) return;
     _userToggledSidebar = true;
     // Optionally place the sidebar on a specific edge (the swipe gesture passes
-    // the direction). Persist it + re-anchor the doc panel, same as a
-    // shift-click on the hamburger.
+    // the direction). Desktop persists SIDEBAR_SIDE; mobile uses its own pref.
     if (side === 'left' || side === 'right') {
       const wantRight = side === 'right';
       if (sidebar.classList.contains('right-side') !== wantRight) {
         sidebar.classList.toggle('right-side', wantRight);
-        try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
+        if (window.innerWidth >= 768) {
+          try { Storage.set(Storage.KEYS.SIDEBAR_SIDE, side); } catch (_) {}
+        }
         if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
       }
     }
@@ -164,12 +211,9 @@ export function initSidebarLayout(Storage, opts) {
           sidebar.classList.add('hidden');
           if (backdrop) backdrop.classList.remove('visible');
         } else {
-          // Mobile: the hamburger always opens the sidebar from the RIGHT.
-          // (Not persisted — keeps the desktop side preference untouched.)
-          if (!sidebar.classList.contains('right-side')) {
-            sidebar.classList.add('right-side');
-            if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
-          }
+          // Mobile: open from the user's preferred edge (Settings → Appearance).
+          // Not written to SIDEBAR_SIDE — keeps the desktop pref untouched.
+          applyMobileSidebarSide(getMobileSidebarSide(), { persist: false });
           // Opening sidebar — blur keyboard first, then open after layout settles
           if (document.activeElement && document.activeElement !== document.body
               && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
@@ -257,6 +301,21 @@ export function initSidebarLayout(Storage, opts) {
 
   window.addEventListener('resize', () => {
     _userToggledSidebar = false; // allow auto-collapse on actual resize
+    if (window.innerWidth < 768) {
+      applyMobileSidebarSide(getMobileSidebarSide(), { persist: false });
+    } else {
+      const sb = document.getElementById('sidebar');
+      if (sb) {
+        const wantRight = Storage.get(Storage.KEYS.SIDEBAR_SIDE) === 'right';
+        if (sb.classList.contains('right-side') !== wantRight) {
+          sb.classList.toggle('right-side', wantRight);
+          if (documentModule && documentModule.swapSide) {
+            try { documentModule.swapSide(); } catch (_) {}
+          }
+        }
+        syncRailSide();
+      }
+    }
     requestAnimationFrame(checkSidebarAutoCollapse);
   });
   // Also re-check when doc panel toggles
@@ -487,12 +546,12 @@ export function initSidebarLayout(Storage, opts) {
 // horizontal — without that, Firefox (and others) treat the horizontal swipe
 // as their own scroll/navigation gesture and our handler never gets to act.
 //
-// Intentionally narrow: only a LEFTWARD swipe that starts in a thin RIGHT
-// edge zone opens the sidebar (on the right, matching the mobile hamburger).
-// Mid-screen / left-edge / rightward swipes used to pop the nav constantly.
+// Edge + direction follow Settings → Appearance → Mobile panel (default
+// right: swipe left from the right edge). Mid-screen swipes are ignored.
 function _initChatSwipeToOpenSidebar() {
   if (window.__odySwipeWired) return;
   window.__odySwipeWired = true;
+  applyMobileSidebarSide(getMobileSidebarSide(), { persist: false });
 
   // Areas where a horizontal drag means something else (their own scroll/drag).
   const EXCLUDE = [
@@ -502,14 +561,14 @@ function _initChatSwipeToOpenSidebar() {
     'input', 'textarea', 'select',
   ].join(', ');
 
-  // Thin right-edge hit zone (px). Keep smaller than a thumb-width so casual
+  // Thin edge hit zone (px). Keep smaller than a thumb-width so casual
   // scrolling near the margin doesn't claim the gesture.
   const EDGE_ZONE_PX = 24;
-  // Require a clear leftward pull before opening (reduces false opens).
+  // Require a clear inward pull before opening (reduces false opens).
   const OPEN_DX_PX = 56;
   const HORIZ_RATIO = 1.5; // adx must beat ady by this factor
 
-  let sx = 0, sy = 0, track = false, decided = false;
+  let sx = 0, sy = 0, track = false, decided = false, openSide = 'right';
 
   const reset = () => { track = false; decided = false; };
 
@@ -523,7 +582,8 @@ function _initChatSwipeToOpenSidebar() {
     // Only in the chat / empty-chat view. Not when a document or PDF is open
     // (body.doc-view), notes is open (body.notes-view), or a tool modal is up.
     if (document.body.classList.contains('doc-view') ||
-        document.body.classList.contains('notes-view')) return;
+        document.body.classList.contains('notes-view') ||
+        document.body.classList.contains('story-canvas-view')) return;
     // Not while Compare is running — it takes over #chat-container with its own
     // panes/scroll, and the swipe-to-open-sidebar gesture gets in the way there.
     const cc = document.getElementById('chat-container');
@@ -535,11 +595,16 @@ function _initChatSwipeToOpenSidebar() {
     if (t && t.closest && t.closest(EXCLUDE)) return;
     // The gesture must start within the chat area itself.
     if (!(t && t.closest && t.closest('#chat-container'))) return;
+    openSide = getMobileSidebarSide();
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;
-    // Only accept starts in the right edge — left-edge / mid-screen swipes
-    // were opening the nav far too often on phones.
-    if (sx < window.innerWidth - EDGE_ZONE_PX) return;
+    // Only accept starts in the chosen edge — mid-screen swipes used to
+    // open the nav far too often on phones.
+    if (openSide === 'left') {
+      if (sx > EDGE_ZONE_PX) return;
+    } else if (sx < window.innerWidth - EDGE_ZONE_PX) {
+      return;
+    }
     track = true;
   }, { passive: true, capture: true });
 
@@ -552,27 +617,25 @@ function _initChatSwipeToOpenSidebar() {
     const adx = Math.abs(dx), ady = Math.abs(dy);
     if (!decided) {
       if (adx < 12 && ady < 12) return;          // not enough travel to judge
-      // Must be clearly horizontal-left; vertical or diagonal scrolls pass through.
+      // Must be clearly horizontal; vertical or diagonal scrolls pass through.
       if (ady * HORIZ_RATIO >= adx) { track = false; return; }
-      // Left-swipe only (finger moves left). Rightward swipes never open the nav.
-      if (dx >= 0) { track = false; return; }
-      decided = true;                             // locked into a leftward swipe
+      // Inward swipe only: right-edge → leftward, left-edge → rightward.
+      if (openSide === 'left' ? dx <= 0 : dx >= 0) { track = false; return; }
+      decided = true;
     }
     // Claim the gesture from the browser so it doesn't scroll/navigate instead.
     if (e.cancelable) e.preventDefault();
     if (adx >= OPEN_DX_PX) {
       track = false;
-      // Mobile hamburger always opens from the right — keep swipe consistent.
-      const side = 'right';
       // Use the deliberate-open helper (sets _userToggledSidebar so the
       // auto-collapse observer doesn't instantly re-hide it). Fall back to a
       // plain unhide if the helper isn't wired yet.
       if (typeof window._odyOpenSidebar === 'function') {
-        window._odyOpenSidebar(side);
+        window._odyOpenSidebar(openSide);
       } else {
+        applyMobileSidebarSide(openSide, { persist: false });
         const sb = document.getElementById('sidebar');
         if (sb) {
-          sb.classList.add('right-side');
           sb.classList.remove('hidden');
           try { syncRailSide(); } catch (_) {}
         }

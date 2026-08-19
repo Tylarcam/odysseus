@@ -51,6 +51,21 @@ On desktop viewports, the triage modal SHALL expose Delegate, Done, and Open con
 - **WHEN** the operator activates Open on a card
 - **THEN** the system SHALL open the item via the existing CMD Center action map and MUST leave the card in the stack until Done or Delegate succeeds
 
+### Requirement: Double-tap peeks the next card
+On a mobile viewport, a double-tap on the active triage card (without a qualifying horizontal swipe) SHALL show the next stack item without delegating or marking it finished. The peeked-past item MUST remain in the stack. After the last card, the next peek SHALL wrap to the first card.
+
+#### Scenario: Peek without finishing
+- **WHEN** the operator double-taps a card and the gesture is not a horizontal swipe
+- **THEN** the system SHALL show the next card and MUST NOT create a handoff or call a finish API
+
+#### Scenario: Wrap the deck
+- **WHEN** the operator peeks the last card in a stack of two or more
+- **THEN** the system SHALL show the first card again with that item still in the stack
+
+#### Scenario: Swipe still wins
+- **WHEN** a touch sequence is a horizontal swipe past threshold
+- **THEN** the system SHALL delegate or finish as today and MUST NOT treat that sequence as a peek
+
 ### Requirement: Post-action refresh
 After a successful Delegate or Done action, the vault SHALL refresh CMD Center data so hero counts, `attention_stack`, and related HUD panels reflect the new state.
 

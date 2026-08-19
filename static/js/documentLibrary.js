@@ -181,7 +181,12 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     });
     card.addEventListener('pointermove', (e) => {
       if (!start) return;
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) cancel();
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10) {
+        // Scroll/drag — don't treat the trailing click as a tap-to-collapse.
+        card._suppressNextClick = true;
+        setTimeout(() => { card._suppressNextClick = false; }, 400);
+        cancel();
+      }
     });
     card.addEventListener('pointerup', cancel);
     card.addEventListener('pointercancel', cancel);
@@ -504,6 +509,9 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const _maybeAutoLoad = () => {
       _tick = false;
       if (!_libraryOpen) return;
+      // An open document/chat/research reader owns the scroll surface.
+      // Auto-loading would re-render the grid and kick the user back to the list.
+      if (document.querySelector('#doclib-modal .doclib-card-expanded')) return;
       for (const btn of document.querySelectorAll('.doclib-inline-load-more')) {
         if (btn.dataset.autoLoaded) continue;
         if (!btn.offsetParent) continue;   // inactive tab (hidden)
@@ -847,6 +855,7 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     // Preview — hidden by default, shown on expand
     const preview = document.createElement('div');
     preview.className = 'doclib-card-preview';
+    preview.setAttribute('data-no-swipe-dismiss', '');
     const pre = document.createElement('pre');
     const code = document.createElement('code');
     try {
@@ -965,6 +974,14 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
         '.memory-select-cb', 'button', 'a', 'input', 'textarea', 'select', 'label',
       ].join(','))) return;
       if (e.target.closest('pre.editing, code.editing')) return;
+      // An open document stays open through in-card clicks (reading, selecting,
+      // scrolling). Esc synthesizes a click on the card itself; the chevron
+      // is the in-chrome back control. Everything else stays in the reader.
+      if (card.classList.contains('doclib-card-expanded')) {
+        const isExplicitBack = e.target === card
+          || e.target.closest('.doclib-card-collapse-chevron, .doclib-card-chevron');
+        if (!isExplicitBack) return;
+      }
       if (_librarySelectMode) {
         const cb = card.querySelector('.memory-select-cb');
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); }
@@ -3983,8 +4000,16 @@ let _libraryArchivedView = false;   // Documents tab showing archived docs?
     const bulkCancelBtn = document.getElementById('doclib-bulk-cancel');
     if (bulkCancelBtn) bulkCancelBtn.addEventListener('click', libraryExitSelectMode);
 
-    // Close on click outside modal content
+    // Click outside the open document returns to the library list.
+    // Click on the modal backdrop (outside the window) closes the library
+    // once no document is open.
     modal.addEventListener('click', (e) => {
+      if (e.target.closest('#doclib-close, .close-btn, .modal-close-btn')) return;
+      const expanded = modal.querySelector('.doclib-card-expanded');
+      if (expanded && !expanded.contains(e.target)) {
+        _collapseExpandedCard(expanded, { force: true });
+        return;
+      }
       if (uiModule.isTouchInsideModal()) return;
       if (e.target === modal) closeLibrary();
     });

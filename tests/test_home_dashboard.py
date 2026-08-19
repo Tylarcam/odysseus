@@ -261,6 +261,43 @@ def test_build_cmd_center_maps_live_odysseus_surfaces():
     assert "handoff:h1" in urgent_ids
 
 
+def test_cmd_center_intel_includes_research_on_wire(monkeypatch):
+    reports = [{
+        "id": "rp-abc",
+        "title": "Visual Storytelling Canvas",
+        "query": "visual storytelling canvas",
+        "status": "done",
+        "completed_at_iso": "2026-08-18T12:00:00+00:00",
+        "url": "/api/research/report/rp-abc",
+        "bullets": ["Story beats beat decks"],
+    }]
+    monkeypatch.setattr(
+        "services.home.cmd_center.list_recent_research_reports",
+        lambda **_k: reports,
+    )
+    data = build_cmd_center(
+        notes=[],
+        documents=[{
+            "id": "d1",
+            "title": "Spec.md",
+            "content": "x",
+            "language": "markdown",
+            "archived": False,
+            "updated_at": "2026-08-18T10:00:00",
+        }],
+        tasks=[],
+        sessions=[],
+        include_globe=False,
+    )
+    intel = next(b for b in data["branch_health"] if b["id"] == "intel")
+    assert intel["count"] >= 2
+    assert "report" in (intel["summary"] or "").lower()
+    assert any(w["text"].startswith("RESEARCH ·") for w in data["wire"])
+    assert any("Visual Storytelling Canvas" in (w["text"] or "") for w in data["wire"])
+    blob = " ".join(line.get("text") or "" for line in (data.get("brief_script") or []))
+    assert "Visual Storytelling Canvas" in blob
+
+
 def test_signal_registry_assigns_one_primary_slot_per_item():
     """vault-signal-priority: exactly one CTA slot per directive item."""
     notes = [

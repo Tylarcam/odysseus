@@ -123,9 +123,14 @@ def build_brief_script(
     counts: Optional[Dict[str, Any]] = None,
     agenda: Optional[Dict[str, Any]] = None,
     overdue_count: Optional[int] = None,
+    research: Optional[List[Dict[str, Any]]] = None,
+    failed_runs: Optional[List[Dict[str, Any]]] = None,
+    jobs: Optional[Dict[str, Any]] = None,
+    handoffs: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build a 3–6 line BRIEF ME script with synced highlight cues.
+    """Build a 3–6 line BRIEF ME script matching the CEO brief contract.
 
+    Sections: Headline · What changed · Needs you · Can wait.
     Each line is ``{text, highlight: {type: overdue|domain|all, domain?}}``.
     Speech-friendly: no ISO dates.
     """
@@ -133,6 +138,10 @@ def build_brief_script(
     priority_queue = list(priority_queue or [])
     counts = counts or {}
     agenda = agenda or {}
+    research = list(research or [])
+    failed_runs = list(failed_runs or [])
+    jobs = jobs or {}
+    handoffs = handoffs or {}
 
     queue_overdue = sum(1 for i in priority_queue if i.get("status") == "overdue")
     agenda_overdue = len(agenda.get("overdue") or [])
@@ -158,72 +167,114 @@ def build_brief_script(
             except (TypeError, ValueError):
                 pass
 
+    jobs_review = 0
+    try:
+        jobs_review = int(counts.get("jobs_review") or jobs.get("needs_review_count") or 0)
+    except (TypeError, ValueError):
+        jobs_review = 0
+    handoff_wait = 0
+    try:
+        handoff_wait = int(
+            counts.get("handoffs_attention")
+            or len(handoffs.get("needs_attention") or [])
+            or 0
+        )
+    except (TypeError, ValueError):
+        handoff_wait = 0
+
+    latest = research[0] if research else None
+    latest_title = _clip(str((latest or {}).get("title") or (latest or {}).get("query") or ""), 80)
+    color = "Red" if (overdue_n or failed_runs or handoff_wait) else (
+        "Amber" if jobs_review or (
+            latest and str((latest or {}).get("status") or "done") != "done"
+        ) else "Green"
+    )
+
     lines: List[Dict[str, Any]] = []
 
-    # 1 — overdue / attention
+    # 1 — Headline (one breath)
     if overdue_n > 0:
+        extra = f" Latest research: {latest_title}." if latest_title else ""
         lines.append(
             {
                 "text": (
-                    f"Good morning. {_speech_num(overdue_n, 'item needs', 'items need')} "
-                    f"your attention — overdue."
+                    f"{color}. {_speech_num(overdue_n, 'item needs', 'items need')} "
+                    f"your attention — overdue.{extra}"
                 ),
                 "highlight": _hl_overdue(),
             }
         )
+    elif failed_runs:
+        fail_name = _clip(str(failed_runs[0].get("task_name") or failed_runs[0].get("name") or "a job"), 60)
+        extra = f" Latest research: {latest_title}." if latest_title else ""
+        lines.append(
+            {
+                "text": f"{color}. Chron exception: {fail_name} failed.{extra}",
+                "highlight": _hl_domain("prod"),
+            }
+        )
+    elif latest_title:
+        lines.append(
+            {
+                "text": f"{color}. Latest research: {latest_title}.",
+                "highlight": _hl_domain("mem"),
+            }
+        )
     else:
         lines.append(
             {
-                "text": "Good morning. Nothing is overdue — the deck looks clear.",
+                "text": f"{color}. Nothing is overdue — the deck looks clear.",
                 "highlight": _hl_all(),
             }
         )
 
-    # 2 — top priority
+    # 2 — What changed (research + inflight; collapse all-green cron)
+    changed_bits: List[str] = []
+    if latest_title:
+        changed_bits.append(f"Research: {latest_title}")
+    if inflight > 0:
+        changed_bits.append(
+            f"{_speech_num(inflight, 'agent is', 'agents are')} in flight on the relay"
+        )
+    if failed_runs and overdue_n > 0:
+        fail_name = _clip(str(failed_runs[0].get("task_name") or failed_runs[0].get("name") or "a job"), 50)
+        changed_bits.append(f"{fail_name} failed")
+    if changed_bits:
+        lines.append(
+            {
+                "text": "What changed: " + "; ".join(changed_bits) + ".",
+                "highlight": _hl_domain("mem" if latest_title else ("relay" if inflight else "prod")),
+            }
+        )
+
+    # 3 — Needs you
     top = priority_queue[0] if priority_queue else None
+    need_bits: List[str] = []
     if top:
         title = _clip(str(top.get("title") or top.get("label") or "priority item"), 90)
         age = _speech_overdue_age(top.get("overdue_days"))
-        if top.get("status") == "overdue":
-            text = f"Top priority: {title}. {age}." if age else f"Top priority: {title}."
-            lines.append({"text": text, "highlight": _hl_overdue()})
+        if top.get("status") == "overdue" and age:
+            need_bits.append(f"{title}, {age}")
         else:
-            branch = top.get("branch") or hero.get("branch")
-            lines.append(
-                {
-                    "text": f"Top priority: {title}.",
-                    "highlight": _hl_domain(str(branch) if branch else "prod"),
-                }
-            )
+            need_bits.append(title)
     elif hero.get("title"):
-        title = _clip(str(hero.get("title")), 90)
+        need_bits.append(_clip(str(hero.get("title")), 90))
+    if jobs_review:
+        need_bits.append(_speech_num(jobs_review, "job to review", "jobs to review"))
+    if latest_title and str((latest or {}).get("status") or "done") != "done":
+        need_bits.append(f"unfinished research {latest_title}")
+    if need_bits:
+        hl = _hl_overdue() if (top and top.get("status") == "overdue") else _hl_domain(
+            str((top or {}).get("branch") or hero.get("branch") or "prod")
+        )
         lines.append(
             {
-                "text": f"Primary directive: {title}.",
-                "highlight": _hl_domain(str(hero.get("branch") or "core")),
+                "text": "Needs you: " + "; ".join(need_bits[:3]) + ".",
+                "highlight": hl,
             }
         )
 
-    # 3 — in-flight agents
-    if inflight > 0:
-        lines.append(
-            {
-                "text": (
-                    f"{_speech_num(inflight, 'agent is', 'agents are')} in flight "
-                    "on the relay."
-                ),
-                "highlight": _hl_domain("relay"),
-            }
-        )
-    else:
-        lines.append(
-            {
-                "text": "Zero agents in flight.",
-                "highlight": _hl_domain("relay"),
-            }
-        )
-
-    # 4 — calendar / up-next (optional)
+    # 4 — Can wait (calendar / due soon). Skip green-zero inflight noise.
     next_event = agenda.get("next_event") or {}
     if next_event.get("title"):
         when = _speech_when_future(next_event.get("start"))
@@ -231,7 +282,7 @@ def build_brief_script(
         when_bit = f" {when}" if when else ""
         lines.append(
             {
-                "text": f"Up next on the calendar: {title}{when_bit}.",
+                "text": f"Can wait: calendar — {title}{when_bit}.",
                 "highlight": _hl_domain("comms"),
             }
         )
@@ -244,22 +295,10 @@ def build_brief_script(
             when_bit = f" — {when}" if when else ""
             lines.append(
                 {
-                    "text": f"Coming due soon: {title}{when_bit}.",
+                    "text": f"Can wait: {title}{when_bit}.",
                     "highlight": _hl_domain("prod"),
                 }
             )
-        else:
-            next_task = agenda.get("next_task_run") or {}
-            if next_task.get("name") or next_task.get("title"):
-                name = _clip(str(next_task.get("name") or next_task.get("title")), 80)
-                when = _speech_when_future(next_task.get("next_run"))
-                when_bit = f" {when}" if when else ""
-                lines.append(
-                    {
-                        "text": f"Next scheduled task: {name}{when_bit}.",
-                        "highlight": _hl_domain("prod"),
-                    }
-                )
 
     # 5 — close (always, if room)
     if len(lines) < 6:

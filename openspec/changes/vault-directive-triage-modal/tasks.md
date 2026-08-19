@@ -8,6 +8,7 @@
 
 - [x] 2.1 Create `static/js/cmdCenterDirective.js` with open/close, card render, desktop Delegate/Done/Open
 - [x] 2.2 Implement mobile horizontal swipe (left=delegate, right=done) with axis cancel + in-flight lock
+- [x] 2.2b Implement mobile double-tap to peek/cycle the stack without delegate or done (wraps; swipe still wins)
 - [x] 2.3 Persist last handoff target in localStorage; show target chips on card
 
 ## 3. Actions

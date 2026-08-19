@@ -1,0 +1,12 @@
+HOST: Welcome to the briefing. Today we walk the live Story Canvas V.A.U.L.T. Reimagine, seven annotated Command Center tabs, for the Odysseus operator surface.
+ANALYST: Lead with this: a domain tab swaps only the side rails. The center stage is identical on all seven. On RELAY the biggest text still says PRIMARY DIRECTIVE, PROD. A tab is a filter over peripheral vision, not a mode.
+HOST: The board names three failures. Which one should we keep in our head this week?
+ANALYST: Redundancy first: the same fact is drawn up to four times, and about forty text regions compete with no weighting. Panels report state instead of proposing a move. Voice is a sidecar: BRIEF ME is one-way TTS, Jarvis leaves the vault.
+HOST: The canvas also says the voice-sphere seam already exists. What exactly is already built?
+ANALYST: During BRIEF ME, the spoken line lights matching sphere nodes. Click a node and it speaks a summary. Voice to sphere and sphere to voice both work. They are scoped to a thirty-second script instead of being the permanent interaction model. We are un-scoping, not inventing.
+HOST: Then the proposed screen. Sphere is the index, voice is the verb. What remains on screen?
+ANALYST: Three weighted regions instead of forty. A seven-dot domain ring, the sphere finally load-bearing, one TRUE line, one ACT button, and LISTENING always present. Rails are not deleted. They move behind what else.
+HOST: Walk the seven frames fast. CORE through MYCELIA. What does each verb demand?
+ANALYST: CORE triages: one line of truth, sphere lit on offenders. MEM recalls: sphere is the primary input, a feed is not recall. PROD commits: one task defended out loud, not ten identical START buttons. COMMS replies to people waiting, not eleven undifferentiated unread. AGENCY reviews, or dims the ring if nothing is ready. RELAY unblocks: nine numbers, eight zero, Failed one styled like Close rate sixty-seven percent. That is alarm flooding. MYCELIA harvests with six real verbs. Promote that deck everywhere.
+HOST: Close with the open question we should not fake.
+ANALYST: Unresolved: which domain to prototype first. RELAY is the clearest failure. MYCELIA is the clearest success. Next look is the live canvas, then one TRUE, ACT, LISTENING slice, not another dashboard pass.

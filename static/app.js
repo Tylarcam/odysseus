@@ -27,6 +27,7 @@ import voiceVisualizerModule from './js/voiceVisualizer.js';
 import voiceStatusModule from './js/voiceStatus.js';
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
+import { initStoryCanvas } from './js/storyCanvas.js';
 import tasksModule from './js/tasks.js';
 import calendarModule from './js/calendar.js';
 import notesModule from './js/notes.js';
@@ -59,6 +60,7 @@ import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js';
 import { initVoiceKeyboardPtt } from './js/voiceKeyboardPtt.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js';
 import { initSectionCollapse, initSectionDrag } from './js/section-management.js';
+import { wireWritingAssist } from './js/writingAssist.js';
 
 const API_BASE = window.location.origin;
 window.themeModule = themeModule;
@@ -899,6 +901,9 @@ function initializeEventListeners() {
     });
   }
 
+  // Story Canvas (rail + optional tool button)
+  initStoryCanvas();
+
   // Tasks tool button
   const toolTasksBtn = el('tool-tasks-btn');
   if (toolTasksBtn) {
@@ -1054,7 +1059,7 @@ function initializeEventListeners() {
         const btn = document.getElementById('notes-fullscreen-toggle');
         const pane = document.querySelector('.notes-pane');
         if (!pane) return false;
-        if (!pane.classList.contains('notes-pane-fullscreen') && btn) btn.click();
+        if (!pane.classList.contains('notes-window-fullscreen') && btn) btn.click();
         return true;
       };
       if (!_go()) {
@@ -2474,6 +2479,7 @@ function initializeEventListeners() {
   // Selector map: key → CSS selector(s) for targets
   const UI_VIS_MAP = {
     'sidebar-brand':       '.sidebar-brand-title',
+    'sidebar-home':        '#sidebar-home-btn',
     'sidebar-new-chat':    '#sidebar-new-chat-btn',
     'sidebar-search':      '#sidebar-search-btn',
     'sessions-section':    '#sessions-section',
@@ -2487,6 +2493,7 @@ function initializeEventListeners() {
     'tool-cookbook':       '#tool-cookbook-btn',
     'tool-research':       '#tool-research-btn',
     'tool-gallery':        '#tool-gallery-btn',
+    'tool-story-canvas':   '#tool-story-canvas-btn, #rail-story-canvas',
     'tool-library':        '#tool-library-btn',
     'tool-memory':         '#tool-memory-btn',
     'tool-notes':          '#tool-notes-btn',
@@ -3165,9 +3172,39 @@ function initializeEventListeners() {
     });
   }
 
+  // Home → root welcome / Jump Back In dashboard
+  const sidebarHomeBtn = el('sidebar-home-btn');
+  if (sidebarHomeBtn) {
+    const goHome = () => {
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+        return;
+      }
+      if (_closeCompareIfActive()) return;
+      if (cmdCenterModule?.isCmdCenterOpen?.()) {
+        try { cmdCenterModule.minimizeCmdCenter(); } catch (_) {}
+      }
+      if (notesModule?.isPanelOpen?.()) {
+        try { notesModule.closePanel(); } catch (_) {}
+      }
+      _startFreshChat();
+      document.querySelectorAll('.session-item.active, .list-item.active-session').forEach((s) => {
+        s.classList.remove('active', 'active-session');
+      });
+    };
+    sidebarHomeBtn.addEventListener('click', goHome);
+    sidebarHomeBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        goHome();
+      }
+    });
+  }
+
   const sidebarNewChatBtn = el('sidebar-new-chat-btn');
   if (sidebarNewChatBtn) {
-    sidebarNewChatBtn.addEventListener('click', () => {
+    sidebarNewChatBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const railNew = el('rail-new-session');
       if (railNew) railNew.click();
     });
@@ -3234,6 +3271,12 @@ function initializeEventListeners() {
         }
       }
     });
+    // Local Harper writing assist (issue list near composer; native spellcheck stays on)
+    try {
+      wireWritingAssist(textarea, { autoResize: (el) => uiModule.autoResize(el) });
+    } catch (_) {
+      /* silent degrade to native spellcheck */
+    }
   }
 
   // ── Ghost text autocomplete for /new and /create commands ──
@@ -3506,6 +3549,7 @@ function startOdysseusApp() {
     'rail-cookbook':   'tool-cookbook-btn',
     'rail-archive':   'tool-library-btn',
     'rail-gallery':   'tool-gallery-btn',
+    'rail-story-canvas': 'tool-story-canvas-btn',
     'rail-tasks':     'tool-tasks-btn',
     'rail-agent-bin': 'tool-agent-bin-btn',
     'rail-cmd-center': 'tool-cmd-center-btn',

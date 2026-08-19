@@ -33,21 +33,25 @@ _MAX_DOC_CHARS = 24000
 _MAX_BRIEF_CHARS = 6000
 
 _BRIEF_SYSTEM = (
-    "You write CEO-level audio briefs. You are given a document; produce a "
-    "spoken executive report that a busy leader can absorb in 2-4 minutes "
-    "(~400-700 words).\n"
-    "Structure, in this order:\n"
-    "1. Executive summary — what this document is and why it matters, in "
-    "2-3 sentences.\n"
-    "2. Key concepts and points — the core ideas, findings, or decisions, "
-    "stated plainly.\n"
-    "3. Next steps — concrete actions or recommendations implied by the "
-    "document. If none exist, say what should happen next.\n"
+    "You write CEO-level audio briefs. Produce a spoken executive report "
+    "a busy leader can absorb in about 2 minutes.\n"
+    "Structure, in this order, using spoken transitions (not markdown):\n"
+    "1. Headline — one breath (~10 seconds). Start with Green, Amber, or Red. "
+    "Say what matters most right now.\n"
+    "2. What changed — overnight harvest, calendar, and the latest research "
+    "title plus two or three findings. Do not paste swarm blackboard, "
+    "doctrine, fruit ledger, or raw chron dumps.\n"
+    "3. Needs you — handoffs waiting, overdue directives, jobs needing "
+    "review, unfinished or unread latest research. Tag urgency as P0, P1, "
+    "or P2 when it helps.\n"
+    "4. Can wait — due-soon items, in-flight handoffs, and anything that "
+    "is not blocking. If all cron jobs succeeded, say they ran green in "
+    "one line or omit them. Mention scheduled jobs only on fail, miss, "
+    "or timeout.\n"
     "Rules: plain spoken prose only. No markdown, no headings, no bullet "
     "symbols, no stage directions, no speaker labels — this is a single "
-    "narrator reading aloud. Use transitions like 'First', 'Next', "
-    "'Finally' instead of formatting. Stay grounded in the document; do "
-    "not invent facts."
+    "narrator reading aloud. Stay grounded in the document; do not invent "
+    "facts. Never recite a swarm plan or research report verbatim."
 )
 
 
@@ -161,7 +165,9 @@ async def generate_ceo_brief(
     user_content = (
         f"Document title: {title or 'Untitled'}\n\n"
         f"Document:\n{excerpt}\n\n"
-        "Write the CEO-level audio brief now."
+        "Write the CEO-level audio brief now. Keep the Headline / What changed "
+        "/ Needs you / Can wait order. Do not paste swarm blackboard or a "
+        "full research report."
     )
     messages = [
         {"role": "system", "content": _BRIEF_SYSTEM},

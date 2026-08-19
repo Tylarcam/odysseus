@@ -29,7 +29,9 @@ from services.home.swarm_registry import (
     resolve_swarm_docs,
 )
 from services.home.mycelia_feed import build_mycelia_feed, mycelia_priority_queue_items
+from services.documents.ceo_brief_store import select_ceo_brief
 from services.mempalace.bridge import fetch_mempalace_globe_graph
+from src.research_handler import list_recent_research_reports
 
 # Rolling window for COMMS closed-loop conversion (reminded edges).
 COMMS_CONVERSION_WINDOW_DAYS = 7
@@ -1048,8 +1050,18 @@ def _build_branch_health(
     jobs_ready: int,
     jobs_review: int,
     voice_state: str = "standby",
+    research_count: int = 0,
 ) -> List[Dict[str, Any]]:
     pinned = sum(1 for n in notes_list if n.get("pinned"))
+    intel_count = len(docs_list) + int(research_count or 0)
+    if research_count and docs_list:
+        intel_summary = f"{len(docs_list)} documents · {research_count} reports"
+    elif research_count:
+        intel_summary = f"{research_count} research report{'s' if research_count != 1 else ''}"
+    else:
+        intel_summary = f"{len(docs_list)} documents"
+    intel_state = "alive" if research_count else ("online" if docs_list else "idle")
+    intel_action = "research" if research_count else "library"
     return [
         {
             "id": "core",
@@ -1078,10 +1090,10 @@ def _build_branch_health(
         {
             "id": "intel",
             "label": "Intel",
-            "state": "online" if docs_list else "idle",
-            "count": len(docs_list),
-            "summary": f"{len(docs_list)} documents",
-            "action": "library",
+            "state": intel_state,
+            "count": intel_count,
+            "summary": intel_summary,
+            "action": intel_action,
         },
         {
             "id": "comms",
@@ -1433,6 +1445,12 @@ def build_cmd_center(
     handoffs = handoffs or {}
     jobs = jobs or {}
     voice = voice or {}
+    try:
+        recent_research = list_recent_research_reports(
+            owner=owner or "", limit=8, include_excerpt=True,
+        )
+    except Exception:
+        recent_research = []
     if email_urgency is None and owner:
         email_urgency = _load_email_urgency_state(owner)
     email_urgency = email_urgency or {}
@@ -1670,11 +1688,12 @@ def build_cmd_center(
     else:
         plan_subtitle = "Create today's plan"
 
-    # Today's CEO Brief voice rundown — upfront so it's the first card read.
-    ceo_doc = next((d for d in docs_list if str(d.get("id") or "").startswith("ceo-brief-")), None)
+    # Today's CEO Brief — UUID Library docs or legacy ceo-brief-{date} ids.
+    ceo_brief = select_ceo_brief(docs_list)
+    ceo_doc = {"id": ceo_brief.get("id"), "title": ceo_brief.get("title")} if ceo_brief.get("id") else None
     ceo_subtitle = (
-        f"Voice rundown ready · {ceo_doc.get('title') or 'CEO Brief'}"
-        if ceo_doc else "Morning chron wave → voice rundown"
+        f"{'Ready' if ceo_brief.get('status') == 'ready' else 'Stale'} · {ceo_brief.get('title') or 'CEO Brief'}"
+        if ceo_brief.get("id") else "Morning chron wave → voice rundown"
     )
     # Stage cards: one Plan Today, no Vault Sync (header sync + deck cover that).
     stage_cards = [
@@ -1759,6 +1778,16 @@ def build_cmd_center(
                 "text": f"DOC · {doc['title']}",
                 "action": "open_doc",
                 "target_id": doc.get("id"),
+            }
+        )
+    for rp in recent_research[:3]:
+        wire_events.append(
+            {
+                "ts": rp.get("completed_at_iso"),
+                "branch": "intel",
+                "text": f"RESEARCH · {rp.get('title') or rp.get('query') or 'Report'}",
+                "action": "research",
+                "target_id": rp.get("id"),
             }
         )
     for h in (handoffs.get("needs_attention") or [])[:3]:
@@ -1879,6 +1908,7 @@ def build_cmd_center(
         jobs_ready=jobs_ready,
         jobs_review=jobs_review,
         voice_state=voice_state,
+        research_count=len(recent_research),
     )
 
     if swarm_tasks:
@@ -1946,6 +1976,13 @@ def build_cmd_center(
             },
             agenda=agenda,
             overdue_count=overdue_count,
+            research=recent_research,
+            failed_runs=[
+                r for r in runs_list
+                if str(r.get("status") or "").lower() in ("error", "failed", "timeout")
+            ],
+            jobs=jobs,
+            handoffs=handoffs,
         )
     except Exception:  # pragma: no cover - never block HUD on brief builder
         brief_script = []
@@ -1983,6 +2020,7 @@ def build_cmd_center(
         },
         "plan_note_id": plan_note_id,
         "today_plan": today_plan,
+        "ceo_brief": ceo_brief,
         "audio": {
             "tts": voice_state,
             "label": voice.get("label") or "TTS Standby",

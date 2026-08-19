@@ -43,6 +43,7 @@ def test_build_brief_script_covers_overdue_priority_agents_calendar():
     assert "RSVP Thesis Defence" in blob
     assert "in flight" in blob.lower()
     assert "Aether standup" in blob
+    assert "Needs you" in blob
     # Speech-friendly: no ISO timestamps in spoken text.
     assert "2099-01-15" not in blob
     assert "T18:" not in blob
@@ -54,9 +55,29 @@ def test_build_brief_script_empty_deck_still_speaks():
     script = build_brief_script()
     assert 3 <= len(script) <= 6
     blob = " ".join(line["text"] for line in script).lower()
-    assert "overdue" in blob or "clear" in blob
-    assert "zero agents" in blob or "in flight" in blob
+    assert "overdue" in blob or "clear" in blob or "green" in blob
+    assert "vault" in blob
+    assert "zero agents" not in blob
     assert script[-1]["highlight"]["type"] == "all"
+
+
+def test_build_brief_script_mentions_research_not_success_jobs():
+    script = build_brief_script(
+        research=[{
+            "id": "rp-canvas",
+            "title": "Visual Storytelling Canvas",
+            "status": "done",
+            "bullets": ["Story beats beat decks"],
+        }],
+        failed_runs=[{"name": "Email Tags", "status": "error"}],
+        overdue_count=0,
+        counts={"handoffs_in_progress": 0, "jobs_review": 0},
+    )
+    blob = " ".join(line["text"] for line in script)
+    assert "Visual Storytelling Canvas" in blob
+    assert "Email Tags" in blob
+    assert "Chat Sessions Tidy" not in blob
+    assert "doctrine" not in blob.lower()
 
 
 def test_build_brief_script_domain_highlight_from_branch():

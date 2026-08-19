@@ -42,6 +42,12 @@ import {
 } from './cmdCenterLive.js';
 import { openDirectiveTriage, closeDirectiveTriage, isDirectiveTriageOpen } from './cmdCenterDirective.js';
 import { createSpaceHoldTracker } from './cmdCenterHotkeys.js';
+import {
+  captureCmdEditableFocus,
+  cmdEditableOwnsFocus,
+  restoreCmdEditableFocus,
+} from './cmdCenterFocus.js';
+import { mdToHtml } from './markdown.js';
 // DISABLED with /clicky: Docker cannot spawn Windows WPF via /api/clicky/start.
 // import { launchClicky, clickyLaunchToast } from './clickyLaunch.js';
 
@@ -78,6 +84,7 @@ const DATA = {
   wire: [],
   jobs_detail: { ready_to_apply: [], needs_review: [] },
   attention_stack: [],
+  ceo_brief: { status: 'missing', content: '', title: 'CEO Brief' },
   audio: {
     tts: 'standby',
     label: 'TTS Standby',
@@ -98,6 +105,7 @@ let _globalHotkeysWired = false;
 let _spaceHold = null;
 let _visSettingsWired = false;
 let _infoPopoverWired = false;
+let _syncInFlight = false;
 
 const VIS_STORAGE_KEY = 'odysseus-cmd-center-visibility';
 /** @deprecated superseded by CMD_VIEW_KEY — read once for one-time migration only. */
@@ -425,6 +433,29 @@ function _syncLabel() {
   const rel = _formatRelative(_syncedAt);
   if (!rel || rel === 'just now') return 'synced just now';
   return `synced ${rel} ago`;
+}
+
+function _isSyncStale() {
+  return Boolean(_fetchError || (_syncedAt && (Date.now() - new Date(_syncedAt).getTime() > 60000)));
+}
+
+function _paintSyncChrome({ text, stale } = {}) {
+  const label = document.getElementById('cmd-sync-label');
+  const btn = document.getElementById('cmd-vault-sync');
+  const nextStale = stale ?? _isSyncStale();
+  const nextText = text ?? _syncLabel();
+  if (label) {
+    if (!label.matches(':hover')) label.textContent = nextText;
+    label.dataset.stale = nextStale ? 'true' : 'false';
+  }
+  if (btn) btn.dataset.stale = nextStale ? 'true' : 'false';
+}
+
+function _setHeaderSyncBusy(busy) {
+  const btn = document.getElementById('cmd-vault-sync');
+  if (!btn) return;
+  btn.dataset.busy = busy ? 'true' : 'false';
+  btn.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
 function _loadVisPrefs() {
@@ -923,6 +954,25 @@ function _ensureStyles() {
   padding: 8px; cursor: pointer;
 }
 .cmd-mem-brief:hover { background: rgba(255,154,60,0.18); }
+.cmd-mem-brief-kicker {
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #ff9a3c; margin-bottom: 8px;
+}
+.cmd-mem-brief-md {
+  font-size: 11px; line-height: 1.5; color: #c8d0d8;
+  max-height: min(52vh, 420px); overflow: auto;
+  padding: 8px 10px; margin-bottom: 10px;
+  background: rgba(0,0,0,0.25); border: 1px solid #1f2630;
+}
+.cmd-mem-brief-md h1, .cmd-mem-brief-md h2, .cmd-mem-brief-md h3 {
+  font-size: 12px; letter-spacing: 0.06em; margin: 10px 0 6px; color: #e7edf5;
+}
+.cmd-mem-brief-md h1 { font-size: 13px; margin-top: 0; }
+.cmd-mem-brief-md p, .cmd-mem-brief-md li { margin: 0 0 6px; }
+.cmd-mem-brief-md pre, .cmd-mem-brief-md code {
+  font-size: 10px; white-space: pre-wrap; word-break: break-word;
+}
+.cmd-mem-brief-md ul, .cmd-mem-brief-md ol { padding-left: 1.2em; margin: 0 0 8px; }
 .cmd-mem-focus-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
 .cmd-directive-mark {
   font-size: 22px; color: #ff9a3c; font-weight: 600; letter-spacing: 0.12em; line-height: 1.1;
@@ -1480,6 +1530,7 @@ function _ensureStyles() {
   .cmd-brand-sub { display: none; }
   .cmd-clock { font-size: 16px; }
   .cmd-clock-wrap { min-width: 80px; }
+  .cmd-sync-btn, .cmd-settings-btn { width: 28px; height: 28px; }
   .cmd-rail { gap: 8px; }
   .cmd-panel { border-radius: 0; }
   .cmd-cmds { grid-template-columns: 1fr 1fr; }
@@ -1494,14 +1545,20 @@ function _ensureStyles() {
 }
 .cmd-info-btn:hover { opacity: 1; box-shadow: 0 0 8px rgba(127,255,0,0.25); }
 
-.cmd-settings-btn {
+.cmd-settings-btn,
+.cmd-sync-btn {
   position: relative; z-index: 7; flex-shrink: 0;
   width: 32px; height: 32px; border-radius: 6px;
   border: 1px solid rgba(166,226,46,0.28); background: rgba(5,10,5,0.85);
   color: #a6e22e; cursor: pointer; display: flex; align-items: center; justify-content: center;
   font-size: 14px; padding: 0;
 }
-.cmd-settings-btn:hover { box-shadow: 0 0 10px rgba(127,255,0,0.35); color: #7fff00; }
+.cmd-settings-btn:hover,
+.cmd-sync-btn:hover { box-shadow: 0 0 10px rgba(127,255,0,0.35); color: #7fff00; }
+.cmd-sync-btn[data-stale="true"] { color: #ffb347; border-color: rgba(255,179,71,0.55); }
+.cmd-sync-btn[data-busy="true"] { color: #7fff00; }
+.cmd-sync-btn[data-busy="true"] svg { animation: cmdSyncSpin 0.75s linear infinite; }
+@keyframes cmdSyncSpin { to { transform: rotate(360deg); } }
 
 .cmd-vis-backdrop {
   position: absolute; inset: 0; z-index: 20; background: rgba(0,0,0,0.55);
@@ -2112,13 +2169,34 @@ function _renderTaskBoard(data) {
 function _renderMemFocus(data) {
   const notes = data.notes_preview || [];
   const pinned = notes.filter((n) => n.pinned).length;
+  const brief = data.ceo_brief || {};
+  const status = brief.status || 'missing';
+  const content = brief.content || '';
+  let bodyHtml = '';
+  if (content) {
+    try {
+      bodyHtml = mdToHtml(content);
+    } catch (_) {
+      bodyHtml = `<pre>${_esc(content)}</pre>`;
+    }
+  }
+  const kicker = brief.title
+    ? `${brief.title}${status === 'stale' ? ' · stale' : ''}`
+    : 'CEO Brief';
+  const showCompile = status !== 'ready';
   return `<section class="cmd-panel" data-tab="commands" data-cmd-vis="mem_focus">
     ${_panelHeader('Selected', 'mem_focus')}
     <div class="cmd-panel-b" id="cmd-mem-focus">
-      <div class="cmd-mem-focus-copy">
-        Click any note on the left to open it. Pin from Notes · ${pinned} pinned · ${notes.length} recent in rail.
-      </div>
-      <button type="button" class="cmd-mem-brief" data-action="ceo_brief">COMPILE BRIEF</button>
+      ${content ? `
+        <div class="cmd-mem-brief-kicker">${_esc(kicker)}</div>
+        <div class="cmd-mem-brief-md">${bodyHtml}</div>
+      ` : `
+        <div class="cmd-mem-focus-copy">
+          No CEO brief for today yet. Compile gathers chron outputs into one rundown.
+          Pin from Notes · ${pinned} pinned · ${notes.length} recent in rail.
+        </div>
+      `}
+      ${showCompile ? '<button type="button" class="cmd-mem-brief" data-action="ceo_brief">COMPILE BRIEF</button>' : ''}
       <div class="cmd-mem-focus-actions">
         <button type="button" class="cmd-cmd-btn" data-action="notes">Notes</button>
         <button type="button" class="cmd-cmd-btn" data-action="library">Library</button>
@@ -2664,6 +2742,16 @@ function _paintDomainRails(root, data = _data) {
   });
   const select = root.querySelector('#cmd-domain-select');
   if (select && select.value !== _domainTab) select.value = _domainTab;
+
+  // Live sync must not destroy notes search / prod-add while the operator types.
+  if (cmdEditableOwnsFocus()) {
+    _applyVisibilityPrefs(root);
+    _updateMobileEmptyHints(root);
+    _updateDomainTabDots(root, data);
+    return;
+  }
+
+  const focusSnap = captureCmdEditableFocus();
   const left = root.querySelector('.cmd-rail[data-cmd-rail="left"]');
   const right = root.querySelector('.cmd-rail[data-cmd-rail="right"]');
   if (left) {
@@ -2681,6 +2769,7 @@ function _paintDomainRails(root, data = _data) {
   _updateDomainTabDots(root, data);
   _wireNotesSearch(root);
   _wireProdTaskBoard(root);
+  restoreCmdEditableFocus(focusSnap);
 }
 
 function _wireNotesSearch(root) {
@@ -2900,19 +2989,9 @@ function _applyLiveConnectionUi(state) {
   }
   host.innerHTML = renderLiveBanner(state, { lastSyncedAt: _syncedAt });
 
-  const syncEl = document.getElementById('cmd-sync-label');
-  if (syncEl) {
-    if (state === 'offline') {
-      syncEl.textContent = 'offline';
-      syncEl.dataset.stale = 'true';
-    } else if (state === 'stale') {
-      syncEl.textContent = _syncLabel();
-      syncEl.dataset.stale = 'true';
-    } else {
-      syncEl.textContent = _syncLabel();
-      syncEl.dataset.stale = 'false';
-    }
-  }
+  if (state === 'offline') _paintSyncChrome({ text: 'offline', stale: true });
+  else if (state === 'stale') _paintSyncChrome({ stale: true });
+  else _paintSyncChrome({ stale: false });
 }
 
 function _applyLiveUpdate(payload) {
@@ -2927,11 +3006,12 @@ function _applyLiveUpdate(payload) {
 
   const cardsUpdated = _updateStageCardsInPlace(data.stage_cards);
   if (!cardsUpdated) {
+    // Full remount would steal caret from notes search / prod-add — defer.
+    if (cmdEditableOwnsFocus()) return;
     _paint();
     return;
   }
-  const syncEl = document.getElementById('cmd-sync-label');
-  if (syncEl) syncEl.textContent = _syncLabel();
+  _paintSyncChrome();
   _refreshHandoffPanelsInPlace(data);
   updateCmdCenterScene(
     data.branch_health || [],
@@ -2955,8 +3035,7 @@ function _startLiveUpdates() {
       if (data && data.unchanged) {
         // Nothing changed server-side — refresh only the sync label, skip
         // the full stage/rail re-render (see vault-live-sync-efficiency).
-        const syncEl = document.getElementById('cmd-sync-label');
-        if (syncEl) syncEl.textContent = _syncLabel();
+        _paintSyncChrome();
         return;
       }
       _applyLiveUpdate(data || _data);
@@ -3268,6 +3347,9 @@ function _buildHTML(data) {
           <div class="cmd-date" id="cmd-center-date"></div>
           <div class="cmd-sync" id="cmd-sync-label" data-action="refresh" data-stale="${stale ? 'true' : 'false'}">${_esc(_syncLabel())}</div>
         </div>
+        <button type="button" class="cmd-sync-btn" id="cmd-vault-sync" data-action="refresh" data-stale="${stale ? 'true' : 'false'}" title="Vault Sync" aria-label="Vault Sync">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
         <button type="button" class="cmd-settings-btn" id="cmd-center-settings" title="Vault display settings" aria-label="Vault display settings">⚙</button>
         <button type="button" class="modal-minimize-btn cmd-minimize" id="cmd-center-minimize" title="Minimize" aria-label="Minimize vault">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg>
@@ -3323,12 +3405,7 @@ function _tickClock() {
   if (dateEl) {
     dateEl.textContent = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }).toUpperCase();
   }
-  const syncEl = document.getElementById('cmd-sync-label');
-  if (syncEl && !syncEl.matches(':hover')) {
-    syncEl.textContent = _syncLabel();
-    const stale = _syncedAt && (Date.now() - new Date(_syncedAt).getTime() > 60000);
-    syncEl.dataset.stale = stale ? 'true' : 'false';
-  }
+  _paintSyncChrome();
 }
 
 function _animateHero(target) {
@@ -3509,8 +3586,7 @@ async function _refreshAfterTriage() {
     _data.globe_graph,
   );
   _updateCardAnchors();
-  const syncEl = document.getElementById('cmd-sync-label');
-  if (syncEl) syncEl.textContent = _syncLabel();
+  _paintSyncChrome();
 }
 
 function _triageStackFromPayload() {
@@ -3766,9 +3842,17 @@ async function _runAction(action, id) {
   console.debug('[CMD Center]', action, id || '');
 
   if (action === 'refresh') {
-    await _fetchData({ syncCalendar: true });
-    window.dispatchEvent(new CustomEvent('calendar-refresh'));
-    _paint();
+    if (_syncInFlight) return;
+    _syncInFlight = true;
+    _setHeaderSyncBusy(true);
+    try {
+      await _fetchData({ syncCalendar: true });
+      window.dispatchEvent(new CustomEvent('calendar-refresh'));
+      _paint();
+    } finally {
+      _syncInFlight = false;
+      _setHeaderSyncBusy(false);
+    }
     return;
   }
 
@@ -3869,23 +3953,52 @@ async function _runAction(action, id) {
     return;
   }
   if (action === 'ceo_brief') {
-    window.uiModule?.showToast?.('Compiling CEO brief…', 2500);
+    if (_domainTab !== 'MEM') _setDomainTab('MEM');
+    const existing = _data.ceo_brief || {};
+    if (existing.status === 'ready') {
+      try {
+        const res = await fetch(`${API_BASE}/api/home/ceo-brief/latest`, { credentials: 'same-origin' });
+        const payload = await res.json().catch(() => ({}));
+        if (res.ok && payload.content) {
+          _data.ceo_brief = { ...existing, ...payload, status: payload.status || 'ready' };
+        }
+      } catch (_) { /* keep the cmd-center excerpt */ }
+      window.uiModule?.showToast?.("Today's CEO brief is ready", 2500);
+      _setDomainTab('MEM');
+      return;
+    }
+    window.uiModule?.showToast?.(
+      existing.status === 'stale' ? 'Recompiling stale CEO brief…' : 'Compiling CEO brief…',
+      2500,
+    );
     try {
       const res = await fetch(`${API_BASE}/api/home/ceo-brief`, {
         method: 'POST',
         credentials: 'same-origin',
       });
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        window.uiModule?.showToast?.(`CEO brief failed (${res.status})`);
+      if (!res.ok || payload.ok === false) {
+        window.uiModule?.showToast?.(
+          payload.result || `CEO brief failed (${res.status})`,
+        );
         return;
       }
-      const docId = payload.doc_id || id || '';
-      window.uiModule?.showToast?.('CEO brief ready — opening doc', 3500);
-      if (docId && documentModule?.loadDocument) {
-        await documentModule.loadDocument(docId);
-      }
-      setTimeout(async () => { await _fetchData(); _paint(); }, 2000);
+      _data.ceo_brief = {
+        status: payload.status || (payload.content ? 'ready' : 'missing'),
+        id: payload.doc_id || payload.id || '',
+        doc_id: payload.doc_id || payload.id || '',
+        title: payload.title || 'CEO Brief',
+        content: payload.content || '',
+        updated_at: payload.updated_at,
+        is_today: payload.is_today,
+        stale: payload.stale,
+        compiled: payload.compiled,
+      };
+      window.uiModule?.showToast?.(
+        payload.compiled === false ? "Today's CEO brief is ready" : 'CEO brief ready',
+        3500,
+      );
+      _setDomainTab('MEM');
     } catch (err) {
       console.warn('ceo_brief failed', err);
       window.uiModule?.showToast?.('CEO brief failed');
@@ -4261,6 +4374,7 @@ function _wireResizeReconcile() {
 function _paint() {
   const pane = document.getElementById(PANE_ID);
   if (!pane) return;
+  const focusSnap = captureCmdEditableFocus();
   _visSettingsWired = false;
   _infoPopoverWired = false;
   pane.innerHTML = _buildHTML(_data);
@@ -4281,6 +4395,8 @@ function _paint() {
   _mountScene();
   _ensureAudio();
   _setMobileTab(_mobileTab);
+  // Error toasts / status labels must never steal focus — restore caret here.
+  restoreCmdEditableFocus(focusSnap);
 }
 
 function _forceCloseCmdCenter() {

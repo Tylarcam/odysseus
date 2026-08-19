@@ -169,3 +169,11 @@ def test_read_brief_audio_bounds(brief_env):
     assert dab.read_brief_audio("doc-bounds", 0) is not None
     assert dab.read_brief_audio("doc-bounds", 1) is None
     assert dab.read_brief_audio("doc-bounds", -1) is None
+
+
+def test_ceo_audio_brief_prompt_follows_spoken_contract():
+    assert "Headline" in dab._BRIEF_SYSTEM
+    assert "Needs you" in dab._BRIEF_SYSTEM
+    assert "Can wait" in dab._BRIEF_SYSTEM
+    assert "timeout" in dab._BRIEF_SYSTEM.lower()
+    assert "blackboard" in dab._BRIEF_SYSTEM.lower()

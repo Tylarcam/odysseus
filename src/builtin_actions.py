@@ -1143,12 +1143,9 @@ def ceo_brief_morning_harvest_ready(
 
 
 async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
-    """Gather every chron task's latest output into one CEO Brief document,
-    then kick off the CEO-level audio brief pipeline (LLM synopsis → Open
-    Notebook podcast MP3, browser-speech fallback). Designed to run on a
-    daily cron after the morning swarm wave (Sporangium plan, Rhizo research,
-    Herald ledger) so the user gets a single voice rundown of what the
-    background loops produced — no context-switching across Docs/Notes/Research.
+    """Compose a spoken CEO brief (headline / what changed / needs you / can wait)
+    from live harvest — calendar, due notes, jobs, handoffs, latest deep_research,
+    and cron exceptions only — then kick off the audio brief pipeline.
     """
     import json as _json
     from datetime import datetime as _dt, timedelta as _td
@@ -1161,6 +1158,8 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     from src.handoff_bin import bucket_handoff_notes as _bucket_handoffs
     from src.job_pipeline.brief import get_jobs_for_brief as _jobs_for_brief
     from services.documents.audio_brief import kickoff_doc_audio_brief as _kickoff_audio
+    from services.documents.ceo_brief_script import compose_ceo_brief_markdown
+    from src.research_handler import list_recent_research_reports
 
     progress_cb = kwargs.get("progress_cb")
 
@@ -1179,9 +1178,13 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
 
     now = _dt.now()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    date_label = today.strftime("%Y-%m-%d")
-    doc_id = f"ceo-brief-{date_label}"
-    title = f"CEO Brief — {date_label}"
+    from services.documents.ceo_brief_store import (
+        canonical_title as _ceo_title,
+        find_today_row as _find_today_ceo_brief,
+        legacy_id as _ceo_legacy_id,
+    )
+    doc_id = _ceo_legacy_id(now)
+    title = _ceo_title(now)
 
     # Scheduled runs pass task_name; manual CMD Center triggers do not.
     # Only the scheduler may defer — HTTP handlers must not see TaskDeferred.
@@ -1214,20 +1217,14 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
 
     _progress("Gathering chron outputs…")
 
-    def _excerpt(text: str, n: int = 1500) -> str:
-        t = (text or "").strip()
-        return (t[:n] + "…") if len(t) > n else t
-
-    substrate_txt = ""
-    research_txt = ""
-    ledger_txt = ""
     events: list = []
     due_soon: list = []
     overdue: list = []
-    next_run: dict | None = None
     jobs: dict = {}
     handoffs: dict = {"needs_attention": [], "in_progress": []}
     runs: list = []
+    missed_tasks: list = []
+    harvest_flags: dict = {}
 
     db = SessionLocal()
     try:
@@ -1242,13 +1239,15 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
             return q.order_by(Document.updated_at.desc()).first()
 
         substrate = _latest_doc_like(["Swarm Substrate", "Swarm Plan"])
-        research = _latest_doc_like(["Research Brief"])
+        research_doc = _latest_doc_like(["Research Brief"])
         ledger = _latest_doc_like(["Fruit Ledger"])
-        substrate_txt = _excerpt(substrate.current_content if substrate else "")
-        research_txt = _excerpt(research.current_content if research else "")
-        ledger_txt = _excerpt(ledger.current_content if ledger else "", 1000)
+        harvest_flags = {
+            "has_swarm_plan": bool(substrate),
+            "has_research_brief_doc": bool(research_doc),
+            "has_ledger": bool(ledger),
+        }
 
-        # Agenda: calendar (next 48h) + due/overdue notes + next chron run.
+        # Agenda: calendar (next 48h) + due/overdue notes + missed cron.
         try:
             for e in (_get_events(owner=owner, horizon_days=2, limit=12) or []):
                 start = e.get("start") or e.get("dtstart")
@@ -1278,15 +1277,26 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         due_soon.sort(key=lambda x: x["due_date"] or "")
         overdue.sort(key=lambda x: x["due_date"] or "")
 
-        t_q = db.query(ScheduledTask).filter(ScheduledTask.next_run.isnot(None))
+        t_q = db.query(ScheduledTask).filter(
+            ScheduledTask.next_run.isnot(None),
+            (ScheduledTask.status == None) | (ScheduledTask.status != "paused"),  # noqa: E711
+        )
         if owner:
             t_q = t_q.filter(ScheduledTask.owner == owner)
-        nr = t_q.order_by(ScheduledTask.next_run.asc()).first()
-        if nr:
-            next_run = {
-                "name": nr.name,
-                "next_run": nr.next_run.isoformat() if nr.next_run else None,
-            }
+        miss_cutoff = now - _td(hours=1)
+        for t in t_q.all():
+            nr = t.next_run
+            if nr is None:
+                continue
+            try:
+                nr_naive = nr.replace(tzinfo=None) if getattr(nr, "tzinfo", None) else nr
+            except Exception:
+                nr_naive = nr
+            try:
+                if nr_naive < miss_cutoff:
+                    missed_tasks.append({"name": t.name, "status": "missed"})
+            except Exception:
+                continue
 
         try:
             jobs = _jobs_for_brief(owner=owner)
@@ -1321,14 +1331,15 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
             run_q = (
                 db.query(TaskRun, ScheduledTask)
                 .join(ScheduledTask, TaskRun.task_id == ScheduledTask.id)
-                .filter(TaskRun.status == "success")
             )
             if owner:
                 run_q = run_q.filter(ScheduledTask.owner == owner)
-            for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(8).all():
+            for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(24).all():
                 runs.append({
                     "name": t.name,
-                    "result": _excerpt((r.result or "").strip(), 400),
+                    "status": r.status,
+                    "result": (r.result or "").strip()[:240],
+                    "error": (r.error or "").strip()[:240],
                     "at": r.started_at.isoformat() if r.started_at else None,
                 })
         except Exception as e:
@@ -1336,83 +1347,52 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     finally:
         db.close()
 
+    research_reports: list = []
+    try:
+        research_reports = list_recent_research_reports(
+            owner=owner or "", limit=3, include_excerpt=True,
+        )
+    except Exception as e:
+        logger.debug(f"ceo_brief: research gather failed: {e}")
+
     _progress("Composing CEO brief…")
-
-    md: list[str] = [
-        f"# {title}", "",
-        f"_Generated {now.strftime('%H:%M')} from the morning chron wave._", "",
-        "## Top 3 actions that move the needle",
-    ]
-    if substrate_txt:
-        md += ["From the Swarm Plan / blackboard (Sporangium):", "```", substrate_txt, "```"]
-    else:
-        md += ["_No Swarm Plan on the blackboard yet — Sporangium may not have run._"]
-
-    md += ["", "## What's upcoming"]
-    if events:
-        md += ["Calendar (next 48h):"] + [f"- {e['start']} — {e['title']}" for e in events]
-    else:
-        md += ["_Clear day._"]
-    if due_soon:
-        md += ["Due soon:"] + [f"- {d['title']} ({d['due_date']})" for d in due_soon[:5]]
-    if overdue:
-        md += ["Overdue:"] + [f"- {d['title']} ({d['due_date']})" for d in overdue[:5]]
-    if next_run:
-        md += [f"Next chron run: {next_run['name']} @ {next_run['next_run']}"]
-
-    md += ["", "## Job pipeline", jobs.get("headline") or "No job applications need attention."]
-    for j in (jobs.get("ready_to_apply") or [])[:3]:
-        md += [f"- ready: {j.get('company')} — {j.get('role')}"]
-    for j in (jobs.get("needs_review") or [])[:3]:
-        md += [f"- review: {j.get('company')} — {j.get('role')}"]
-
-    md += ["", "## Handoffs in flight"]
-    na = handoffs.get("needs_attention") or []
-    ip = handoffs.get("in_progress") or []
-    if not na and not ip:
-        md += ["_None._"]
-    for h in na[:3]:
-        md += [f"- needs attention: {h.get('title')} → {h.get('handoff_target') or '?'}"]
-    for h in ip[:3]:
-        md += [f"- in progress: {h.get('title')} → {h.get('handoff_target') or '?'}"]
-
-    md += ["", "## Research findings (Rhizo)"]
-    if research_txt:
-        md += ["```", research_txt, "```"]
-    else:
-        md += ["_Rhizo hasn't filed a research brief today._"]
-
-    md += ["", "## Fruit ledger (Herald)"]
-    if ledger_txt:
-        md += ["```", ledger_txt, "```"]
-    else:
-        md += ["_No fruit ledger entry yet._"]
-
-    md += ["", "## Recent chron outputs"]
-    if runs:
-        for r in runs:
-            md += [f"- **{r['name']}** ({r['at']}) — {r['result']}"]
-    else:
-        md += ["_No successful chron runs in the recent window._"]
-
-    content = "\n".join(md)
+    content = compose_ceo_brief_markdown(
+        title=title,
+        generated_at=now.strftime("%H:%M"),
+        events=events,
+        due_soon=due_soon,
+        overdue=overdue,
+        jobs=jobs,
+        handoffs=handoffs,
+        research=research_reports,
+        runs=runs,
+        missed_tasks=missed_tasks,
+        harvest_flags=harvest_flags,
+    )
 
     _progress("Saving CEO brief document…")
+    import uuid as _uuid
     db = SessionLocal()
     try:
-        doc = db.query(Document).filter(Document.id == doc_id).first()
+        doc = _find_today_ceo_brief(db, owner, now=now)
         if doc is None:
+            legacy = db.query(Document).filter(Document.id == doc_id).first()
+            if legacy is not None and (not owner or not legacy.owner or legacy.owner == owner):
+                doc = legacy
+        if doc is None:
+            doc_id = str(_uuid.uuid4())
             db.add(Document(
                 id=doc_id, title=title, language="markdown",
                 current_content=content, is_active=True, archived=False,
                 owner=owner or None, version_count=1,
             ))
         else:
+            doc_id = doc.id
             doc.title = title
             doc.current_content = content
             doc.is_active = True
             doc.archived = False
-            if owner and not doc.owner:
+            if owner:
                 doc.owner = owner
             doc.version_count = (doc.version_count or 1) + 1
         db.commit()

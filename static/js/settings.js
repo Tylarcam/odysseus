@@ -7,6 +7,7 @@ import { makeWindowDraggable } from './windowDrag.js';
 import { clearDockSide } from './modalSnap.js';
 import { sortModelIds } from './modelSort.js';
 import { isAltGrEvent } from './platform.js';
+import { applyMobileSidebarSide, getMobileSidebarSide } from './sidebar-layout.js';
 
 let initialized = false;
 let modalEl = null;
@@ -2048,6 +2049,7 @@ async function initAgentSettings() {
 function initAppearance() {
   syncAppearanceCheckboxes();
   syncPrivacyCheckboxes();
+  initMobileSidebarSideToggle();
 
   modalEl.querySelectorAll('[data-ui-key]').forEach(function(chk) {
     chk.addEventListener('change', async function() {
@@ -2123,6 +2125,32 @@ function syncAppearanceCheckboxes() {
 function syncPrivacyCheckboxes() {
   modalEl.querySelectorAll('[data-privacy-key="sensitive-blur"]').forEach(function(chk) {
     chk.checked = localStorage.getItem('odysseus-sensitive-blur') === 'on';
+  });
+}
+
+function syncMobileSidebarSideToggle() {
+  var wrap = el('set-mobileSidebarSide');
+  if (!wrap) return;
+  var side = getMobileSidebarSide();
+  wrap.classList.toggle('side-right', side === 'right');
+  wrap.querySelectorAll('[data-side]').forEach(function(btn) {
+    var on = btn.dataset.side === side;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+
+function initMobileSidebarSideToggle() {
+  var wrap = el('set-mobileSidebarSide');
+  if (!wrap || wrap._wired) return;
+  wrap._wired = true;
+  syncMobileSidebarSideToggle();
+  wrap.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-side]');
+    if (!btn) return;
+    var side = btn.dataset.side === 'left' ? 'left' : 'right';
+    applyMobileSidebarSide(side);
+    syncMobileSidebarSideToggle();
   });
 }
 
