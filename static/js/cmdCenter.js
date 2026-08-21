@@ -87,8 +87,8 @@ const DATA = {
   ceo_brief: { status: 'missing', content: '', title: 'CEO Brief' },
   audio: {
     tts: 'standby',
-    label: 'TTS Standby',
-    hint: 'Tap Audio or hold Space 3s · delegate in agent voice',
+    label: 'Jarvis standby',
+    hint: 'Tap Audio or hold Space — Jarvis stays on this surface',
   },
 };
 
@@ -106,6 +106,11 @@ let _spaceHold = null;
 let _visSettingsWired = false;
 let _infoPopoverWired = false;
 let _syncInFlight = false;
+let _heavyHydrateInFlight = false;
+let _heavyHydrated = false;
+let _calendarHydrateInFlight = false;
+let _calendarHydrated = false;
+let _calendarEpoch = 0;
 
 const VIS_STORAGE_KEY = 'odysseus-cmd-center-visibility';
 /** @deprecated superseded by CMD_VIEW_KEY — read once for one-time migration only. */
@@ -215,25 +220,31 @@ function _loadViewState() {
       return {
         view: MOBILE_TABS.includes(parsed?.view) ? parsed.view : 'hud',
         domainFilter: DOMAIN_TABS.includes(parsed?.domainFilter) ? parsed.domainFilter : 'CORE',
+        coreLens: parsed?.coreLens === 'money_move' ? 'money_move' : 'full_picture',
       };
     }
     const legacy = localStorage.getItem(DOMAIN_TAB_KEY);
     if (legacy && DOMAIN_TABS.includes(legacy)) {
-      return { view: 'hud', domainFilter: legacy };
+      return { view: 'hud', domainFilter: legacy, coreLens: 'full_picture' };
     }
   } catch { /* ignore */ }
-  return { view: 'hud', domainFilter: 'CORE' };
+  return { view: 'hud', domainFilter: 'CORE', coreLens: 'full_picture' };
 }
 
-function _persistViewState(view, domainFilter) {
+function _persistViewState(view, domainFilter, coreLens) {
   try {
-    localStorage.setItem(CMD_VIEW_KEY, JSON.stringify({ view, domainFilter }));
+    localStorage.setItem(CMD_VIEW_KEY, JSON.stringify({
+      view,
+      domainFilter,
+      coreLens: coreLens === 'money_move' ? 'money_move' : 'full_picture',
+    }));
   } catch { /* ignore */ }
 }
 
 const _initialViewState = _loadViewState();
 let _domainTab = _initialViewState.domainFilter;
 let _mobileTab = _initialViewState.view;
+let _coreLens = _initialViewState.coreLens;
 let _commsInboxFilter = 'unread';
 
 const COMMS_INBOX_FILTERS = [
@@ -280,6 +291,12 @@ const CMD_COMPONENT_ATLAS = {
     provenance: 'globe_graph + branch_health → Three.js scene (cmdCenterScene.js).',
     action: 'Orbit, hover nodes for summary, click to jump to a branch.',
   },
+  scene_legend: {
+    label: 'Status Legend',
+    goal: 'Decode globe node colors — calm, due soon, overdue.',
+    provenance: 'Static attention triad used by cmdCenterScene data-node encoding.',
+    action: 'Informational; sits under the AUTO spin control.',
+  },
   stage_cards: {
     label: 'Stage Cards',
     goal: 'One-tap ritual shortcuts — CEO brief, morning report, relay, plan, sync, up next.',
@@ -287,10 +304,22 @@ const CMD_COMPONENT_ATLAS = {
     action: 'Click a float card to run ceo_brief, jobs, agent_bin, plan, refresh, or calendar.',
   },
   hero: {
-    label: 'Hero Directive',
-    goal: 'Primary directive — know what is on fire within 5 seconds.',
-    provenance: 'hero — relay handoffs → agency jobs → top directive → notes fallback.',
+    label: 'Hero Overlay',
+    goal: 'Bottom-of-stage directive banner — branch status, count, and primary CTA.',
+    provenance: 'hero — relay handoffs → agency jobs → top directive → notes fallback; domain tabs overlay from stage cards.',
     action: 'Click overlay or CTA to act on the top-ranked item.',
+  },
+  glance: {
+    label: 'Glance Chips',
+    goal: 'Attention / in-flight / today chips above the hero overlay.',
+    provenance: 'hero + counts + stage_cards up_next / agenda.',
+    action: 'Informational; hero remains the primary CTA.',
+  },
+  ceo_quick_read: {
+    label: 'Quick Read',
+    goal: '≤5 CEO scan bullets under the hero overlay.',
+    provenance: 'mycelia_feed.quick_read — Top 3, signals, research, fruit, hygiene.',
+    action: 'Informational; act from hero or Mycelia deck.',
   },
   command_deck: {
     label: 'Command Deck',
@@ -397,8 +426,9 @@ const CMD_COMPONENT_ATLAS = {
 };
 
 const CMD_VIS_TOGGLABLE = [
-  'status_pills', 'vitals', 'priority_queue', 'swarm_activity', 'documents',
-  'globe_scene', 'stage_cards', 'hero', 'command_deck', 'audio_io', 'ai_wire',
+  'status_pills', 'globe_scene', 'scene_legend', 'stage_cards', 'hero', 'glance', 'ceo_quick_read',
+  'vitals', 'priority_queue', 'swarm_activity', 'documents',
+  'command_deck', 'audio_io', 'ai_wire',
 ];
 
 function _esc(text) {
@@ -449,6 +479,11 @@ function _paintSyncChrome({ text, stale } = {}) {
     label.dataset.stale = nextStale ? 'true' : 'false';
   }
   if (btn) btn.dataset.stale = nextStale ? 'true' : 'false';
+  // Unchanged live polls skip a full _paint(), so a recovered sync would
+  // otherwise leave the 504 banner stuck until the next full render.
+  if (!_fetchError) {
+    document.querySelector('#cmd-center-root .cmd-error-banner')?.remove();
+  }
 }
 
 function _setHeaderSyncBusy(busy) {
@@ -533,7 +568,7 @@ function _tabHasVisiblePanel(root, tab) {
     if (node.dataset.cmdHidden !== 'true') return true;
   }
   if (tab === 'hud') {
-    const extras = ['cmd-status-strip', 'cmd-scene-mount', 'cmd-stage-cards-wrap', 'cmd-hero'];
+    const extras = ['cmd-status-strip', 'cmd-scene-mount', 'cmd-scene-legend', 'cmd-stage-cards-wrap', 'cmd-hero', 'cmd-glance', 'cmd-quick-read'];
     for (const id of extras) {
       const el = document.getElementById(id);
       if (el && el.dataset.cmdHidden !== 'true') return true;
@@ -823,6 +858,28 @@ function _ensureStyles() {
 .cmd-domain-tab-dot.amber {
   background: #ffb347; box-shadow: 0 0 5px rgba(255,179,71,0.75);
 }
+.cmd-core-lens {
+  display: flex; gap: 4px; align-items: center; flex-shrink: 0; margin-left: 6px;
+}
+.cmd-core-lens[hidden] { display: none !important; }
+.cmd-core-lens-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #1f2630;
+  color: #7a8694;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.cmd-core-lens-btn[aria-pressed="true"] {
+  background: rgba(166,226,46,0.12);
+  border-color: rgba(166,226,46,0.65);
+  color: #a6e22e;
+}
+.cmd-core-lens-btn:hover { color: #c8d0d8; border-color: #3a4550; }
 /* Mobile stand-in for .cmd-domain-tabs — a lens picker, not a second tab strip. */
 .cmd-domain-select { display: none; }
 .cmd-branch-focus {
@@ -906,6 +963,9 @@ function _ensureStyles() {
   content: ""; flex: 1; height: 1px; background: #1a2030;
 }
 #cmd-task-board .cmd-board-list { display: flex; flex-direction: column; gap: 6px; }
+#cmd-task-board .cmd-prod-empty-live {
+  color: #5a6470; opacity: 1; padding: 10px 0 6px; line-height: 1.45;
+}
 
 .cmd-prod-add {
   width: 100%; margin-top: 8px; box-sizing: border-box;
@@ -1266,14 +1326,49 @@ function _ensureStyles() {
   cursor: pointer; user-select: none;
 }
 .cmd-scene-popup-cta:hover { background: rgba(127,255,0,0.12); box-shadow: 0 0 10px rgba(127,255,0,0.35); }
+.cmd-scene-chrome {
+  position: absolute; top: 10px; right: 12px; z-index: 5;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  pointer-events: none;
+}
 .cmd-scene-auto {
-  position: absolute; top: 10px; right: 12px; z-index: 5; pointer-events: auto;
+  position: relative; pointer-events: auto; flex-shrink: 0;
   font: 10px/1 'JetBrains Mono', monospace; letter-spacing: 0.16em; text-transform: uppercase;
   color: #7fff00; border: 1px solid rgba(127,255,0,0.35); padding: 5px 8px; cursor: pointer;
   background: rgba(6,14,8,0.7); user-select: none;
 }
 .cmd-scene-auto:hover { box-shadow: 0 0 10px rgba(127,255,0,0.3); }
 .cmd-scene-auto[data-on="false"] { color: #6a7a6a; border-color: rgba(120,140,120,0.3); }
+.cmd-scene-legend {
+  pointer-events: none; user-select: none;
+  font: 10px/1.45 'JetBrains Mono', 'Consolas', monospace;
+  letter-spacing: 0.12em; text-transform: uppercase; color: #9fb89f;
+  background: rgba(6,14,8,0.78); border: 1px solid rgba(127,255,0,0.28);
+  box-shadow: 0 0 12px rgba(0,0,0,0.4), 0 0 8px rgba(127,255,0,0.1);
+  padding: 7px 9px;
+}
+.cmd-scene-legend-h {
+  color: #7fff00; letter-spacing: 0.18em; font-size: 9px; margin-bottom: 2px;
+  border-bottom: 1px solid rgba(127,255,0,0.22); padding-bottom: 4px;
+}
+.cmd-scene-legend-row {
+  display: flex; align-items: center; gap: 7px; margin-top: 3px;
+}
+.cmd-scene-legend-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.cmd-scene-legend-row[data-attn="calm"] { color: #78ff91; text-shadow: 0 0 5px rgba(120,255,145,0.35); }
+.cmd-scene-legend-row[data-attn="calm"] .cmd-scene-legend-dot {
+  background: #78ff91; box-shadow: 0 0 6px rgba(120,255,145,0.85);
+}
+.cmd-scene-legend-row[data-attn="due"] { color: #ffb347; text-shadow: 0 0 5px rgba(255,179,71,0.35); }
+.cmd-scene-legend-row[data-attn="due"] .cmd-scene-legend-dot {
+  background: #ffb347; box-shadow: 0 0 6px rgba(255,179,71,0.85);
+}
+.cmd-scene-legend-row[data-attn="overdue"] { color: #ff5c49; text-shadow: 0 0 5px rgba(255,92,73,0.35); }
+.cmd-scene-legend-row[data-attn="overdue"] .cmd-scene-legend-dot {
+  background: #ff5c49; box-shadow: 0 0 6px rgba(255,92,73,0.85);
+}
 
 .cmd-float-card {
   position: absolute; z-index: 2; border: 1px solid rgba(166,226,46,0.35);
@@ -1315,6 +1410,7 @@ function _ensureStyles() {
 .cmd-hero-title { font-size: 12px; margin-top: 4px; opacity: 0.9; }
 .cmd-hero-value { font-size: 34px; font-weight: 700; letter-spacing: 0.08em; margin-top: 6px; text-shadow: 0 0 18px rgba(166,226,46,0.45); }
 .cmd-hero[data-attn="overdue"] .cmd-hero-value { color: #ff5c49; text-shadow: 0 0 26px rgba(255,92,73,0.45); }
+.cmd-hero[data-attn="stale"] .cmd-hero-value { color: #ffb347; text-shadow: 0 0 22px rgba(255,179,71,0.4); }
 .cmd-hero-unit { font-size: 12px; letter-spacing: 0.18em; margin-left: 8px; opacity: 0.7; }
 .cmd-hero-explain { font-size: 10px; opacity: 0.65; margin-top: 6px; line-height: 1.4; max-width: 520px; }
 .cmd-hero-vel { font-size: 10px; opacity: 0.55; margin-top: 4px; letter-spacing: 0.1em; }
@@ -1322,6 +1418,16 @@ function _ensureStyles() {
   display: inline-block; margin-top: 8px; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
   border: 1px solid rgba(166,226,46,0.35); padding: 5px 10px; opacity: 0.85;
 }
+.cmd-hero-cta-row {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px;
+}
+.cmd-hero-cta-row .cmd-hero-cta { margin-top: 0; }
+.cmd-hero-confirm {
+  font: inherit; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  border: 1px solid rgba(255,179,71,0.45); background: rgba(255,179,71,0.08); color: #ffb347;
+  padding: 5px 10px; cursor: pointer;
+}
+.cmd-hero-confirm:hover { background: rgba(255,179,71,0.16); }
 .cmd-quick-read {
   margin: 8px 0 4px; padding: 8px 10px; max-width: 520px;
   border: 1px solid rgba(166,226,46,0.18); background: rgba(5,10,5,0.55);
@@ -1500,6 +1606,7 @@ function _ensureStyles() {
    * collapses to a select so it never reads as a second row of nav tabs,
    * and stays reachable from every view (not just HUD). */
   .cmd-domain-tabs { display: none; }
+  .cmd-core-lens { display: flex; }
   .cmd-domain-select {
     display: block; flex: 0 1 124px; min-width: 0;
     background: rgba(5,10,5,0.85); border: 1px solid #1f2630; color: #ff9a3c;
@@ -1683,22 +1790,29 @@ async function _hydrateNotesPreviewIfMissing() {
 }
 
 /**
- * @param {{ syncCalendar?: boolean, live?: boolean }} [opts] `live: true` is
- *   the poll path — sends `since_hash` (short-circuits to `{unchanged:true}`
- *   when nothing changed) and `include_globe=0` (globe_graph is the most
- *   expensive step and changes far less often than notes/tasks; the initial
- *   open fetch still requests it).
+ * HUD first paint and live poll use the working GET:
+ *   `/api/home/cmd-center?include_globe=0&include_inbox=0`
+ * Globe (MemPalace), inbox (IMAP), and CalDAV (`sync_calendar`) are omitted
+ * on that URL so Money Move is not blocked by the 45s proxy/uvicorn timeout
+ * or the 15s CalDAV wait. They hydrate after paint.
+ *
+ * @param {{ syncCalendar?: boolean, live?: boolean, includeGlobe?: boolean, includeInbox?: boolean }} [opts]
+ *   `live: true` is the poll path — sends `since_hash` (short-circuits to
+ *   `{unchanged:true}` when nothing changed). Globe/inbox stay off unless
+ *   `includeGlobe` / `includeInbox` are true (lazy hydrate only).
+ *   `syncCalendar: true` is Vault Sync only. Post-paint calendar hydrate uses
+ *   its own GET so it can merge agenda/up-next without replacing `_data`.
  * @returns {Promise<boolean>} true when the server reported `unchanged`
  *   (caller should skip re-rendering and only refresh the sync label).
  */
-async function _fetchData({ syncCalendar = false, live = false } = {}) {
+async function _fetchData({ syncCalendar = false, live = false, includeGlobe = false, includeInbox = false } = {}) {
+  const epoch = _calendarEpoch;
   try {
     const params = new URLSearchParams();
     if (syncCalendar) params.set('sync_calendar', '1');
-    if (live) {
-      params.set('include_globe', '0');
-      if (_data?.payload_hash) params.set('since_hash', _data.payload_hash);
-    }
+    params.set('include_globe', includeGlobe ? '1' : '0');
+    params.set('include_inbox', includeInbox ? '1' : '0');
+    if (live && _data?.payload_hash) params.set('since_hash', _data.payload_hash);
     const qs = params.toString() ? `?${params.toString()}` : '';
     const res = await fetch(`${API_BASE}/api/home/cmd-center${qs}`, { credentials: 'same-origin' });
     if (res.status === 401) {
@@ -1716,11 +1830,19 @@ async function _fetchData({ syncCalendar = false, live = false } = {}) {
       _fetchError = null;
       return true;
     }
-    // include_globe=0 polls omit globe_graph entirely — keep rendering the
-    // last-known one instead of losing it (see vault-live-sync-efficiency).
+    // include_globe=0 / include_inbox=0 polls omit those keys — keep
+    // rendering the last-known snapshot instead of losing it.
     const prevGlobeGraph = _data?.globe_graph;
+    const prevCommsPreview = _data?.comms_preview;
+    const prevData = _data;
     _data = { ...DATA, ...payload };
     if (!('globe_graph' in payload) && prevGlobeGraph) _data.globe_graph = prevGlobeGraph;
+    if (!('comms_preview' in payload) && prevCommsPreview) _data.comms_preview = prevCommsPreview;
+    // A parallel CalDAV hydrate may have merged fresher agenda/up-next while
+    // this request was in flight (globe/inbox/poll omit sync_calendar).
+    if (!syncCalendar && epoch !== _calendarEpoch) {
+      _copyAgendaAndUpNext(prevData, _data);
+    }
     await _hydrateNotesPreviewIfMissing();
     _syncedAt = payload.synced_at || new Date().toISOString();
     _fetchError = null;
@@ -1730,6 +1852,92 @@ async function _fetchData({ syncCalendar = false, live = false } = {}) {
     if (!_fetchError) _fetchError = `Sync failed (${err.message || 'network'}) — click Vault Sync.`;
     if (!(_data.vitals && _data.vitals.length)) _data = { ...DATA };
     return false;
+  }
+}
+
+/** After HUD paint: pull globe then inbox without blocking Money Move. */
+async function _hydrateGlobeAndInbox({ force = false } = {}) {
+  if (!_open) return;
+  if (_heavyHydrateInFlight) return;
+  if (_heavyHydrated && !force) return;
+  _heavyHydrateInFlight = true;
+  try {
+    await _fetchData({ includeGlobe: true });
+    if (_open) {
+      updateCmdCenterScene(
+        _data.branch_health || [],
+        _data.counts?.handoffs_in_progress || 0,
+        _data.globe_graph,
+      );
+    }
+    await _fetchData({ includeInbox: true });
+    if (_open) {
+      const root = document.getElementById('cmd-center-root');
+      if (root) _paintDomainRails(root, _data);
+    }
+    _heavyHydrated = true;
+  } catch (err) {
+    console.warn('[cmd-center] globe/inbox hydrate failed', err);
+  } finally {
+    _heavyHydrateInFlight = false;
+  }
+}
+
+function _copyAgendaAndUpNext(from, onto) {
+  if (!from || !onto) return;
+  if (from.agenda) onto.agenda = from.agenda;
+  const nextUp = (from.stage_cards || []).find((c) => c && c.id === 'up_next');
+  if (!nextUp) return;
+  const cards = Array.isArray(onto.stage_cards) ? onto.stage_cards.slice() : [];
+  const idx = cards.findIndex((c) => c && c.id === 'up_next');
+  if (idx >= 0) cards[idx] = nextUp;
+  else cards.push(nextUp);
+  onto.stage_cards = cards;
+}
+
+function _mergeCalendarSurfaces(payload) {
+  if (!payload || payload.unchanged) return;
+  _copyAgendaAndUpNext(payload, _data);
+  if (payload.synced_at) _syncedAt = payload.synced_at;
+  _paintSyncChrome();
+  const cardsUpdated = _updateStageCardsInPlace(_data.stage_cards);
+  const glanceEl = document.getElementById('cmd-glance');
+  if (glanceEl) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _renderGlance(_data);
+    const next = wrap.firstElementChild;
+    if (next) glanceEl.replaceWith(next);
+  }
+  if (cardsUpdated) _updateCardAnchors();
+}
+
+/** After HUD paint: CalDAV sync, then merge agenda / up-next without a full remount. */
+async function _hydrateCalendar({ force = false } = {}) {
+  if (!_open) return;
+  if (_calendarHydrateInFlight) return;
+  if (_calendarHydrated && !force) return;
+  _calendarHydrateInFlight = true;
+  try {
+    const params = new URLSearchParams();
+    params.set('sync_calendar', '1');
+    params.set('include_globe', '0');
+    params.set('include_inbox', '0');
+    const res = await fetch(`${API_BASE}/api/home/cmd-center?${params}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`cmd-center ${res.status}`);
+    const payload = await res.json();
+    if (!_open) return;
+    if (_syncInFlight) {
+      _calendarHydrated = true;
+      return;
+    }
+    _mergeCalendarSurfaces(payload);
+    _calendarEpoch += 1;
+    _calendarHydrated = true;
+    window.dispatchEvent(new CustomEvent('calendar-refresh'));
+  } catch (err) {
+    console.warn('[cmd-center] calendar hydrate failed', err);
+  } finally {
+    _calendarHydrateInFlight = false;
   }
 }
 
@@ -1834,7 +2042,23 @@ function _statusForRender(data) {
 }
 
 function _persistDomainTab(tab) {
-  _persistViewState(_mobileTab, tab);
+  _persistViewState(_mobileTab, tab, _coreLens);
+}
+
+function _setCoreLens(lens) {
+  _coreLens = lens === 'money_move' ? 'money_move' : 'full_picture';
+  _persistViewState(_mobileTab, _domainTab, _coreLens);
+  _syncCoreLensUi();
+  _paintDomainStage(_data);
+  const glanceEl = document.getElementById('cmd-glance');
+  if (glanceEl) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _renderGlance(_data);
+    const next = wrap.firstElementChild;
+    if (next) glanceEl.replaceWith(next);
+  }
+  _heroAnimated = false;
+  _animateHero((_activeHero(_data) || {}).value || 0);
 }
 
 function _filterByBranch(list, tab) {
@@ -1854,6 +2078,25 @@ function _domainOptionLabel(tab, data) {
   return _domainTabAttention(data, tab).show ? `${tab} •` : tab;
 }
 
+function _renderCoreLens() {
+  const hidden = _domainTab !== 'CORE';
+  return `<div class="cmd-core-lens" id="cmd-core-lens" ${hidden ? 'hidden' : ''} aria-label="CORE lens">
+    <button type="button" class="cmd-core-lens-btn" data-core-lens="full_picture"
+      aria-pressed="${_coreLens === 'full_picture' ? 'true' : 'false'}">Full picture</button>
+    <button type="button" class="cmd-core-lens-btn" data-core-lens="money_move"
+      aria-pressed="${_coreLens === 'money_move' ? 'true' : 'false'}">Money Move</button>
+  </div>`;
+}
+
+function _syncCoreLensUi() {
+  const el = document.getElementById('cmd-core-lens');
+  if (!el) return;
+  el.hidden = _domainTab !== 'CORE';
+  el.querySelectorAll('[data-core-lens]').forEach((btn) => {
+    btn.setAttribute('aria-pressed', btn.dataset.coreLens === _coreLens ? 'true' : 'false');
+  });
+}
+
 function _renderDomainTabs(data = _data) {
   return `<nav class="cmd-domain-tabs" id="cmd-domain-tabs" aria-label="Vault domain tabs">
     ${DOMAIN_TABS.map((tab) => {
@@ -1869,7 +2112,8 @@ function _renderDomainTabs(data = _data) {
   </nav>
   <select class="cmd-domain-select" id="cmd-domain-select" aria-label="Vault domain filter">
     ${DOMAIN_TABS.map((tab) => `<option value="${tab}"${_domainTab === tab ? ' selected' : ''}>${_esc(_domainOptionLabel(tab, data))}</option>`).join('')}
-  </select>`;
+  </select>
+  ${_renderCoreLens()}`;
 }
 
 function _updateDomainTabDots(root, data = _data) {
@@ -2069,8 +2313,34 @@ function _normalizeProdOrbitalItem(item, overrides) {
   };
 }
 
+/** Orbital demo keys (t1/t2/t6) — never render as live PROD cards. */
+function _isSeedOrFakeId(id) {
+  const s = String(id || '').trim();
+  if (!s) return true;
+  return /^(t[0-9]+|demo[-_].+|seed[-_].+)$/i.test(s);
+}
+
+function _collectLiveProdQueue(data) {
+  const seen = new Set();
+  const out = [];
+  const pools = [data.priority_queue, data.attention_stack, data.directives];
+  for (const list of pools) {
+    for (const item of list || []) {
+      if (!item) continue;
+      const id = String(item.id || item.target_id || '').trim();
+      if (!id || seen.has(id) || _isSeedOrFakeId(id)) continue;
+      const branch = String(item.branch || '').toLowerCase();
+      if (branch && branch !== 'prod') continue;
+      if (!branch && item.kind && item.kind !== 'note' && item.kind !== 'task') continue;
+      seen.add(id);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 function _bucketProdQueue(data) {
-  const items = _filterByBranch(data.directives || data.priority_queue, 'PROD');
+  const items = _collectLiveProdQueue(data);
   const overrides = _loadProdOrbitalStatusMap();
   const live = items.map((i) => _normalizeProdOrbitalItem(i, overrides));
   const liveIds = new Set(live.map((t) => t.id));
@@ -2080,7 +2350,7 @@ function _bucketProdQueue(data) {
   let done = live.filter((t) => t.status === 'done');
 
   const snaps = _loadProdOrbitalDoneSnap()
-    .filter((s) => s && s.id && !liveIds.has(String(s.id)))
+    .filter((s) => s && s.id && !_isSeedOrFakeId(s.id) && !liveIds.has(String(s.id)))
     .map((s) => ({
       id: String(s.id),
       kind: s.kind || 'note',
@@ -2146,11 +2416,12 @@ function _renderTaskBoard(data) {
         : `<div class="cmd-empty">${_esc(empty)}</div>`}</div>
     </div>`;
   };
+  const liveEmpty = total === 0 && open.length === 0 && blocked.length === 0;
   return `<section class="cmd-panel" data-tab="queue" data-cmd-vis="task_board">
     ${_panelHeader('Tasks', 'task_board')}
     <div class="cmd-panel-b" id="cmd-task-board">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <span style="font-size:9px;color:#5a6470;">${total} total</span>
+        <span style="font-size:9px;color:#5a6470;">${total} live</span>
         <button type="button" class="cmd-board-open-tasks" data-action="tasks">All Tasks →</button>
       </div>
       <input type="text" id="cmd-prod-add" class="cmd-prod-add" placeholder="+ new task (enter to add)" autocomplete="off" />
@@ -2159,6 +2430,7 @@ function _renderTaskBoard(data) {
         <span class="cmd-board-count blocked">${blocked.length} BLOCKED</span>
         <span class="cmd-board-count done">${done.length} DONE</span>
       </div>
+      ${liveEmpty ? '<div class="cmd-empty cmd-prod-empty-live">No live PROD items. Pin, due, or checklist notes land here — this rail does not invent tasks.</div>' : ''}
       ${section('OPEN', open, 'No open tasks.')}
       ${section('BLOCKED', blocked, 'Nothing blocked.')}
       ${section('DONE', done, 'No completions yet.', 4)}
@@ -2231,7 +2503,7 @@ function _renderDirectivePanel(data) {
       <div class="cmd-directive-blurb">${_esc(blurb)}</div>
       <div class="cmd-directive-meta">${_esc(meta)}</div>
       ${hero.cta_label && hero.branch === 'prod' ? `
-        <button type="button" class="cmd-mem-brief" data-action="${_esc(hero.action || '')}" data-id="${_esc(hero.target_id || '')}">
+        <button type="button" class="cmd-mem-brief" data-action="open_directive">
           ${_esc(hero.cta_label)} →
         </button>` : ''}
       <button type="button" class="cmd-mem-brief" data-action="plan_today">${_esc(planLabel)}</button>
@@ -2578,7 +2850,7 @@ function _renderMyceliaFruit(data) {
 function _renderCeoQuickRead(data) {
   const lines = data.mycelia_feed?.quick_read || [];
   if (!lines.length) return '';
-  return `<div class="cmd-quick-read" id="cmd-quick-read" data-cmd-vis="hero">
+  return `<div class="cmd-quick-read" id="cmd-quick-read" data-cmd-vis="ceo_quick_read" data-tab="hud">
     <div class="cmd-quick-read-label">Quick read</div>
     <ul class="cmd-quick-read-list">
       ${lines.map((l) => `<li class="cmd-quick-read-item" data-kind="${_esc(l.kind || '')}">${_esc(l.text || '')}</li>`).join('')}
@@ -2681,7 +2953,7 @@ function _renderPanelById(id, data, tab) {
         <div class="cmd-panel-b">
           <div class="cmd-audio" id="cmd-audio" data-state="standby" role="button" tabindex="0" aria-label="Activate Jarvis voice">
             <span class="cmd-audio-dot"></span>
-            <span id="cmd-audio-label">${_esc(audio.label || 'TTS Standby')}</span>
+            <span id="cmd-audio-label">${_esc(audio.label || 'Jarvis standby')}</span>
             <button type="button" class="cmd-audio-lock" id="cmd-audio-lock" title="Toggle voice lock (hold the floor)" aria-label="Toggle voice lock">Lock</button>
           </div>
           <div class="cmd-audio-hint">${_esc(audio.hint || 'Tap to arm Jarvis · Lock holds the floor · Alt+Shift+V')}</div>
@@ -2887,7 +3159,20 @@ function _setDomainTab(tab) {
   _persistDomainTab(tab);
   const root = document.getElementById('cmd-center-root');
   if (!root) return;
+  root.dataset.domainTab = tab;
+  _syncCoreLensUi();
   _paintDomainRails(root, _data);
+  _paintDomainStage(_data);
+  const glanceEl = document.getElementById('cmd-glance');
+  if (glanceEl) {
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _renderGlance(_data);
+    const next = wrap.firstElementChild;
+    if (next) glanceEl.replaceWith(next);
+  }
+  if (tab === 'CORE' || tab === 'COMMS' || tab === 'MYCELIA') {
+    void _hydrateGlobeAndInbox();
+  }
 }
 
 function _wireDomainTabs(root) {
@@ -2897,14 +3182,25 @@ function _wireDomainTabs(root) {
     select.addEventListener('change', () => { _setDomainTab(select.value); });
   }
   const nav = root.querySelector('#cmd-domain-tabs');
-  if (!nav || nav.dataset.wired === '1') return;
-  nav.dataset.wired = '1';
-  nav.addEventListener('click', (e) => {
-    const btn = e.target.closest('.cmd-domain-tab');
-    if (!btn) return;
-    e.preventDefault();
-    _setDomainTab(btn.dataset.domainTab);
-  });
+  if (nav && nav.dataset.wired !== '1') {
+    nav.dataset.wired = '1';
+    nav.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cmd-domain-tab');
+      if (!btn) return;
+      e.preventDefault();
+      _setDomainTab(btn.dataset.domainTab);
+    });
+  }
+  const lens = root.querySelector('#cmd-core-lens');
+  if (lens && lens.dataset.wired !== '1') {
+    lens.dataset.wired = '1';
+    lens.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-core-lens]');
+      if (!btn) return;
+      e.preventDefault();
+      _setCoreLens(btn.dataset.coreLens);
+    });
+  }
   _wireNotesSearch(root);
 }
 
@@ -2919,13 +3215,13 @@ function _setWireExpanded(expanded) {
 function _readRailsCollapsed() {
   try {
     const raw = localStorage.getItem(RAILS_COLLAPSED_KEY);
-    if (!raw) return { left: false, right: false };
+    if (!raw) return { left: true, right: true };
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
       return { left: !!parsed.left, right: !!parsed.right };
     }
   } catch { /* ignore */ }
-  return { left: false, right: false };
+  return { left: true, right: true };
 }
 
 function _writeRailsCollapsed(state) {
@@ -3052,10 +3348,11 @@ function _startLiveUpdates() {
 }
 
 function _glanceStats(data) {
-  const hero = data?.hero || DATA.hero;
+  const hero = _activeHero(data) || data?.hero || DATA.hero;
   const counts = data?.counts || {};
   const unit = String(hero.unit || '').toUpperCase();
-  const attention = unit === 'OVERDUE' || unit === 'HANDOFFS'
+  const attention = unit === 'OVERDUE' || unit === 'HANDOFFS' || unit === 'STALE'
+    || unit === 'TOP 3' || unit === 'DIRECTIVES' || unit === 'CLEAR'
     ? (Number(hero.value) || 0)
     : (Number(counts.handoffs_attention) || Number(hero.value) || 0);
   const inFlight = Number(counts.handoffs_in_progress) || 0;
@@ -3069,12 +3366,187 @@ function _glanceStats(data) {
   return { attention, inFlight, today };
 }
 
+function _heroAttn(hero) {
+  const unit = String(hero?.unit || '').toUpperCase();
+  if (unit === 'OVERDUE' || unit === 'STALE') return unit.toLowerCase();
+  return '';
+}
+
+function _visibleStageCards(cards) {
+  return (cards || []).filter((c) => c.needs_you !== false);
+}
+
+function _stageCardsForDomain(cards, tab = _domainTab) {
+  const vis = _visibleStageCards(cards);
+  if (!tab || tab === 'CORE') return vis;
+  const branches = DOMAIN_TAB_BRANCHES[tab];
+  if (!branches) return vis;
+  return vis.filter((c) => branches.includes(_cardBranch(c)));
+}
+
+function _activeHero(data, tab = _domainTab) {
+  const payload = data || _data || {};
+  if (tab === 'CORE' && _coreLens === 'money_move' && payload.money_hero) {
+    return payload.money_hero;
+  }
+  return _domainHeroOverlay(payload, tab);
+}
+
+function _domainHeroOverlay(data, tab = _domainTab) {
+  const hero = data?.hero || DATA.hero;
+  if (!tab || tab === 'CORE') return hero;
+  const branches = DOMAIN_TAB_BRANCHES[tab] || [];
+  if (hero?.branch && branches.includes(hero.branch)) return hero;
+  const vis = _stageCardsForDomain(data?.stage_cards, tab);
+  if (vis[0]) {
+    return {
+      ...hero,
+      label: tab,
+      title: vis[0].label,
+      true_line: vis[0].subtitle || vis[0].label,
+      explain: vis[0].subtitle || vis[0].label,
+      act: vis[0].label,
+      cta_label: vis[0].label,
+      action: vis[0].action,
+      target_id: vis[0].target_id,
+      unit: 'FOCUS',
+      branch: _cardBranch(vis[0]),
+    };
+  }
+  const clear = {
+    AGENCY: 'No job applications need attention.',
+    RELAY: 'Relay is idle — nothing in flight, nothing waiting.',
+    COMMS: 'No one is waiting on a reply.',
+    MEM: 'Memory is a warehouse. Nothing in MEM is on fire.',
+    PROD: 'No prod touchpoint needs you on this lens.',
+    MYCELIA: 'No harvest signal on this lens.',
+  };
+  const line = clear[tab] || `${tab} is clear.`;
+  return {
+    label: `${tab} — Clear`,
+    title: line,
+    value: 0,
+    unit: 'CLEAR',
+    true_line: line,
+    explain: line,
+    act: '',
+    cta_label: '',
+    action: '',
+    target_id: '',
+    branch: branches[0] || 'core',
+    velocity: '',
+    needle: '',
+  };
+}
+
+const SEND_PACK_DOC_PREFIX = '4f9a694f';
+const SEND_PACK_NOTE_PREFIX = 'f1cf1f16';
+const GRANT_PACKET_NOTE_PREFIX = '08e7c105';
+const NPR_DRAFT_PREFIXES = ['4be22ee3', '8504c427', '80aa4a73'];
+const CONFIRM_SEND_ACTIONS = ['confirm_pack_sent', 'confirm_proposal_sent', 'confirm_npr_sent', 'confirm_grant_packet_sent'];
+
+function _idHasPrefix(id, prefix) {
+  const s = String(id || '').toLowerCase();
+  const p = String(prefix || '').toLowerCase();
+  if (!s || !p) return false;
+  return s === p || s.startsWith(p) || p.startsWith(s.slice(0, 8));
+}
+
+function _onMoneyMoveLens() {
+  return _domainTab === 'CORE' && _coreLens === 'money_move';
+}
+
+/** Pack vs NPR vs Impact+ human-gate on CORE Money Move. Empty = no Confirm sent HUD. */
+function _heroNeedleKind(hero) {
+  if (!_onMoneyMoveLens() || !hero) return '';
+  const confirm = String(hero.confirm_action || '');
+  if (confirm === 'confirm_grant_packet_sent') return 'grant';
+  if (confirm === 'confirm_npr_sent') return 'npr';
+  if (confirm === 'confirm_pack_sent') return 'pack';
+  const action = String(hero.action || '');
+  if (action === 'email' || action === 'ceo_brief' || action === 'calendar') return '';
+  const id = String(hero.target_id || '');
+  const blob = `${hero.title || ''} ${hero.true_line || ''} ${hero.explain || ''} ${hero.needle || ''} ${hero.velocity || ''}`.toLowerCase();
+  if (NPR_DRAFT_PREFIXES.some((p) => _idHasPrefix(id, p))
+      || (blob.includes('npr') && (blob.includes('thank') || blob.includes('panel')))) {
+    return 'npr';
+  }
+  if (_idHasPrefix(id, GRANT_PACKET_NOTE_PREFIX)
+      || (blob.includes('impact+') && (blob.includes('nomination') || blob.includes('doctoral')))) {
+    return 'grant';
+  }
+  if (_idHasPrefix(id, SEND_PACK_DOC_PREFIX) || _idHasPrefix(id, SEND_PACK_NOTE_PREFIX)
+      || blob.includes('send pack') || blob.includes('human gate')
+      || (blob.includes('upwork') && (blob.includes('proposal') || blob.includes('pack')))) {
+    return 'pack';
+  }
+  return '';
+}
+
+function _renderHeroCtaRow(hero) {
+  const cta = hero?.cta_label
+    ? `<span class="cmd-hero-cta">${_esc(hero.cta_label)} →</span>`
+    : '';
+  const kind = _heroNeedleKind(hero);
+  const confirmOne = String(hero?.confirm_one_action || '');
+  let confirms = '';
+  if (kind === 'pack') {
+    confirms = `<button type="button" class="cmd-hero-confirm" id="cmd-hero-confirm-sent" data-action="confirm_pack_sent" title="Mark the send pack as sent. Does not submit to Upwork.">Confirm sent</button>`;
+    if (confirmOne === 'confirm_proposal_sent' || !hero?.confirm_action) {
+      confirms += `<button type="button" class="cmd-hero-confirm" id="cmd-hero-confirm-one" data-action="confirm_proposal_sent" title="Check off the first unchecked pack proposal. Does not submit to Upwork.">Confirm one proposal</button>`;
+    }
+  } else if (kind === 'npr') {
+    confirms = `<button type="button" class="cmd-hero-confirm" id="cmd-hero-confirm-sent" data-action="confirm_npr_sent" title="Mark the NPR thank-you as sent. Does not send SMTP.">Confirm sent</button>`;
+  } else if (kind === 'grant') {
+    confirms = `<button type="button" class="cmd-hero-confirm" id="cmd-hero-confirm-sent" data-action="confirm_grant_packet_sent" title="Mark the Impact+ nomination as submitted. Does not submit to CIHR.">Confirm sent</button>`;
+  }
+  if (!cta && !confirms) return '';
+  return `<div class="cmd-hero-cta-row">${cta}${confirms}</div>`;
+}
+
+function _applyHeroToDom(hero) {
+  const heroEl = document.getElementById('cmd-hero');
+  if (!heroEl || !hero) return;
+  heroEl.dataset.action = hero.action || '';
+  heroEl.dataset.id = hero.target_id || '';
+  heroEl.dataset.attn = _heroAttn(hero);
+  const label = heroEl.querySelector('.cmd-hero-label');
+  const title = heroEl.querySelector('.cmd-hero-title');
+  const unit = heroEl.querySelector('.cmd-hero-unit');
+  const explain = heroEl.querySelector('.cmd-hero-explain');
+  const vel = heroEl.querySelector('.cmd-hero-vel');
+  if (label) label.textContent = hero.label || '';
+  if (title) title.textContent = hero.title || '';
+  if (unit) unit.textContent = hero.unit || '';
+  if (explain) explain.textContent = hero.explain || hero.true_line || '';
+  if (vel) vel.textContent = hero.velocity || hero.needle || '';
+  heroEl.querySelectorAll(':scope > .cmd-hero-cta').forEach((el) => el.remove());
+  const row = heroEl.querySelector('.cmd-hero-cta-row');
+  const rowHtml = _renderHeroCtaRow(hero);
+  if (rowHtml) {
+    if (row) row.outerHTML = rowHtml;
+    else heroEl.insertAdjacentHTML('beforeend', rowHtml);
+  } else if (row) {
+    row.remove();
+  }
+}
+
+function _paintDomainStage(data) {
+  const wrap = document.getElementById('cmd-stage-cards-wrap');
+  if (wrap) wrap.innerHTML = _renderStageCards(data?.stage_cards);
+  _applyHeroToDom(_activeHero(data, _domainTab));
+  _updateCardAnchors();
+}
+
 function _renderGlance(data) {
   const g = _glanceStats(data);
+  const flight = g.inFlight > 0
+    ? `<span class="cmd-glance-chip">In flight<strong>${_esc(String(g.inFlight))}</strong></span>`
+    : '';
   return `
-    <div class="cmd-glance" id="cmd-glance" data-cmd-vis="hero">
+    <div class="cmd-glance" id="cmd-glance" data-cmd-vis="glance" data-tab="hud">
       <span class="cmd-glance-chip" data-attn="${g.attention > 0 ? 'true' : 'false'}">Attention<strong>${_esc(String(g.attention))}</strong></span>
-      <span class="cmd-glance-chip">In flight<strong>${_esc(String(g.inFlight))}</strong></span>
+      ${flight}
       <span class="cmd-glance-chip" title="${_esc(g.today)}">Today<strong>${_esc(g.today)}</strong></span>
     </div>`;
 }
@@ -3198,7 +3670,7 @@ function _isPassiveCard(c) {
 
 function _renderStageCards(cards) {
   const positions = ['tl', 'tr', 'bl', 'br', 'ml'];
-  return (cards || []).slice(0, 5).map((c, i) => `
+  return _stageCardsForDomain(cards, _domainTab).slice(0, 5).map((c, i) => `
     <div class="cmd-float-card${_isPassiveCard(c) ? ' cmd-float-card--passive' : ''}" data-pos="${positions[i] || 'tl'}" data-action="${_esc(c.action || '')}" data-id="${_esc(c.target_id || '')}" data-branch="${_esc(_cardBranch(c))}" data-dedup-key="${_esc(c.dedup_key || '')}" data-primary="${c.primary ? 'true' : 'false'}">
       <div class="cmd-float-label">${_esc(c.label)}</div>
       <div class="cmd-float-sub">${_esc(c.subtitle || '')}</div>
@@ -3212,7 +3684,7 @@ function _updateStageCardsInPlace(cards) {
   const stage = document.getElementById('cmd-stage');
   if (!stage) return false;
   const nodes = Array.from(stage.querySelectorAll('.cmd-float-card'));
-  const list = cards || [];
+  const list = _stageCardsForDomain(cards, _domainTab);
   if (!nodes.length || nodes.length !== list.length) return false;
   list.forEach((c, i) => {
     const el = nodes[i];
@@ -3233,37 +3705,9 @@ function _updateStageCardsInPlace(cards) {
 function _refreshHandoffPanelsInPlace(data) {
   const root = document.getElementById('cmd-center-root');
   if (root) _paintDomainRails(root, data);
-
-  const hero = data.hero || DATA.hero;
-  const heroEl = document.getElementById('cmd-hero');
-  if (heroEl) {
-    heroEl.dataset.action = hero.action || '';
-    heroEl.dataset.id = hero.target_id || '';
-    heroEl.dataset.attn = (hero.unit || '').toUpperCase() === 'OVERDUE' ? 'overdue' : '';
-    const label = heroEl.querySelector('.cmd-hero-label');
-    const title = heroEl.querySelector('.cmd-hero-title');
-    const unit = heroEl.querySelector('.cmd-hero-unit');
-    const explain = heroEl.querySelector('.cmd-hero-explain');
-    const vel = heroEl.querySelector('.cmd-hero-vel');
-    if (label) label.textContent = hero.label || '';
-    if (title) title.textContent = hero.title || '';
-    if (unit) unit.textContent = hero.unit || '';
-    if (explain) explain.textContent = hero.explain || '';
-    if (vel) vel.textContent = hero.velocity || '';
-    let cta = heroEl.querySelector('.cmd-hero-cta');
-    if (hero.cta_label) {
-      if (!cta) {
-        cta = document.createElement('span');
-        cta.className = 'cmd-hero-cta';
-        heroEl.appendChild(cta);
-      }
-      cta.textContent = `${hero.cta_label} →`;
-    } else if (cta) {
-      cta.remove();
-    }
-    _heroAnimated = false;
-    _animateHero(hero.value || 0);
-  }
+  _applyHeroToDom(_activeHero(data, _domainTab));
+  _heroAnimated = false;
+  _animateHero((_activeHero(data, _domainTab) || {}).value || 0);
 
   const statusList = _statusForRender(data);
   const statusStrip = document.getElementById('cmd-status-strip');
@@ -3281,6 +3725,7 @@ function _refreshHandoffPanelsInPlace(data) {
 
   const nowText = document.getElementById('cmd-now-text');
   if (nowText && data.audio?.label) nowText.textContent = data.audio.label;
+  if (root) _applyVisibilityPrefs(root);
 }
 
 /** Anchor each floating card to the edge facing the globe center, in
@@ -3323,7 +3768,7 @@ function _updateCardAnchors() {
 }
 
 function _buildHTML(data) {
-  const hero = data.hero || DATA.hero;
+  const hero = _activeHero(data) || data.hero || DATA.hero;
   const stale = _syncedAt && (Date.now() - new Date(_syncedAt).getTime() > 60000);
   const statusList = _statusForRender(data);
   const rails = _readRailsCollapsed();
@@ -3371,17 +3816,25 @@ function _buildHTML(data) {
 
         <section class="cmd-stage" id="cmd-stage" data-tab="hud">
           <div id="cmd-scene-mount" data-cmd-vis="globe_scene"></div>
-          <div class="cmd-scene-auto" id="cmd-scene-auto" data-cmd-vis="globe_scene" data-on="true" role="button" tabindex="0" aria-label="Toggle globe auto-spin" title="Toggle auto-spin (double-click empty space to reset)">⟳ AUTO</div>
+          <div class="cmd-scene-chrome" id="cmd-scene-chrome">
+            <div class="cmd-scene-auto" id="cmd-scene-auto" data-cmd-vis="globe_scene" data-on="true" role="button" tabindex="0" aria-label="Toggle globe auto-spin" title="Toggle auto-spin (double-click empty space to reset)">⟳ AUTO</div>
+            <div class="cmd-scene-legend" id="cmd-scene-legend" data-cmd-vis="scene_legend" data-tab="hud" aria-label="Node status legend">
+              <div class="cmd-scene-legend-h">STATUS</div>
+              <div class="cmd-scene-legend-row" data-attn="calm"><span class="cmd-scene-legend-dot"></span><span>CALM</span></div>
+              <div class="cmd-scene-legend-row" data-attn="due"><span class="cmd-scene-legend-dot"></span><span>DUE SOON</span></div>
+              <div class="cmd-scene-legend-row" data-attn="overdue"><span class="cmd-scene-legend-dot"></span><span>OVERDUE</span></div>
+            </div>
+          </div>
           <div class="cmd-stage-cards-wrap" id="cmd-stage-cards-wrap" data-cmd-vis="stage_cards" data-tab="hud">${_renderStageCards(data.stage_cards)}</div>
           ${_renderGlance(data)}
           ${_renderCeoQuickRead(data)}
-          <div class="cmd-hero" id="cmd-hero" data-cmd-vis="hero" data-tab="hud" data-attn="${_esc((hero.unit || '').toUpperCase() === 'OVERDUE' ? 'overdue' : '')}" data-action="${_esc(hero.action || '')}" data-id="${_esc(hero.target_id || '')}">
+          <div class="cmd-hero" id="cmd-hero" data-cmd-vis="hero" data-tab="hud" data-attn="${_esc(_heroAttn(hero))}" data-action="${_esc(hero.action || '')}" data-id="${_esc(hero.target_id || '')}">
             <div class="cmd-hero-label">${_esc(hero.label || '')}</div>
             <div class="cmd-hero-title">${_esc(hero.title || '')}</div>
             <div class="cmd-hero-value"><span id="cmd-hero-num">0</span><span class="cmd-hero-unit">${_esc(hero.unit || '')}</span></div>
             <div class="cmd-hero-explain">${_esc(hero.explain || '')}</div>
             <div class="cmd-hero-vel">${_esc(hero.velocity || '')}</div>
-            ${hero.cta_label ? `<span class="cmd-hero-cta">${_esc(hero.cta_label)} →</span>` : ''}
+            ${_renderHeroCtaRow(hero)}
           </div>
         </section>
 
@@ -3524,31 +3977,59 @@ function _ensureAgentModeForDelegate() {
   }
 }
 
+function _speakHeroTrue() {
+  const payload = _data || {};
+  const onMoneyMove = _domainTab === 'CORE' && _coreLens === 'money_move' && payload.money_hero;
+  const hero = onMoneyMove
+    ? payload.money_hero
+    : (_activeHero(payload, _domainTab) || payload.hero || {});
+  const text = String(hero.true_line || hero.title || hero.explain || '').trim();
+  if (!text || _isVoiceMuted()) return;
+  const branch = String(hero.branch || (onMoneyMove ? 'prod' : 'core')).toUpperCase();
+  _mapBriefHighlight({ type: 'domain', domain: branch });
+  _ensureAudio();
+  runBrief({
+    script: [{ text, highlight: { type: 'domain', domain: branch } }],
+  });
+}
+
+function _briefHasFullPicture(content) {
+  const blob = String(content || '').toLowerCase();
+  return [
+    'top 3',
+    'inbound',
+    "what's upcoming",
+    'job pipeline',
+    'handoffs',
+    'research findings',
+    'fruit ledger',
+    'recent chron',
+  ].every((h) => blob.includes(h));
+}
+
 async function _activateVoiceDelegate() {
-  const switched = _ensureAgentModeForDelegate();
+  // Jarvis already bridges tools via setJarvisMode. Do not click
+  // mode-agent-btn — that leaves the vault HUD (_ensureAgentModeForDelegate).
   try {
     const voiceChat = window.voiceChatModule || (await import('./voiceChat.js')).default;
     const voiceRealtime = window.voiceRealtimeModule || (await import('./voiceRealtime.js')).default;
 
     voiceRealtime.setJarvisMode?.(true);
-
-    if (switched) {
-      voiceRealtime.reapplySessionPatch?.();
-    }
+    voiceRealtime.reapplySessionPatch?.();
 
     const wasActive = voiceChat.isActive?.();
     const realtimeLive = voiceChat.isRealtimeActive?.();
 
     if (wasActive && realtimeLive) {
       await voiceRealtime.reapplyVaultBrief?.({ force: true });
-      window.uiModule?.showToast?.('Jarvis live — speak to delegate without leaving vault', 3500);
+      window.uiModule?.showToast?.('Jarvis live on this surface — speak the next money move', 3500);
       document.dispatchEvent(new CustomEvent('odysseus:voice-ui-state', {
-        detail: { state: voiceRealtime.isVoiceLocked?.() ? 'listening' : 'listening', label: 'Listening' },
+        detail: { state: 'listening', label: 'Listening' },
       }));
+      _speakHeroTrue();
       return;
     }
 
-    // Ambient presence from CMD: Realtime hot mic listens immediately.
     const ok = await voiceChat.setActive(true, {
       showError: (m) => window.uiModule?.showError?.(m),
       showToast: (m) => window.uiModule?.showToast?.(m),
@@ -3560,11 +4041,8 @@ async function _activateVoiceDelegate() {
     document.dispatchEvent(new CustomEvent('odysseus:voice-ui-state', {
       detail: { state: 'listening', label: 'Listening' },
     }));
-
-    const msg = switched
-      ? 'Jarvis on — speak naturally (agent bridge for vault work)'
-      : 'Jarvis on — vault brief loaded; speak naturally';
-    window.uiModule?.showToast?.(msg, 4000);
+    _speakHeroTrue();
+    window.uiModule?.showToast?.('Jarvis on this surface — speak the next money move', 4000);
   } catch (err) {
     console.warn('[cmd-center] voice activate failed', err);
     window.uiModule?.showToast?.('Voice activation failed');
@@ -3590,11 +4068,14 @@ async function _refreshAfterTriage() {
 }
 
 function _triageStackFromPayload() {
-  const stack = Array.isArray(_data.attention_stack) ? _data.attention_stack.filter(Boolean) : [];
+  const stack = Array.isArray(_data.attention_stack)
+    ? _data.attention_stack.filter((item) => item && !_isSeedOrFakeId(item.id || item.target_id))
+    : [];
   if (stack.length) return stack;
   // Fallback if Python payload is stale (pre-widen): mirror directive notes + handoffs/jobs.
   const queue = Array.isArray(_data.priority_queue) ? _data.priority_queue : [];
-  const fromQueue = queue.filter((i) => i && ['note', 'handoff', 'job'].includes(i.kind));
+  const fromQueue = queue.filter((i) => i && ['note', 'handoff', 'job'].includes(i.kind)
+    && !_isSeedOrFakeId(i.id || i.target_id));
   if (fromQueue.length) {
     return fromQueue.map((item) => ({
       id: item.id,
@@ -3623,7 +4104,7 @@ function _triageStackFromPayload() {
     due_label: d.due_label || '',
     action: d.action || 'open_note',
     target_id: d.target_id || d.id,
-  })).filter((d) => d.id);
+  })).filter((d) => d.id && !_isSeedOrFakeId(d.id));
 }
 
 function _openDirectiveTriageFromHero() {
@@ -3841,14 +4322,61 @@ async function _runAction(action, id) {
   if (!action) return;
   console.debug('[CMD Center]', action, id || '');
 
+  if (action === 'hero_act') {
+    const money = _data.money_hero || {};
+    const hero = money.action
+      ? money
+      : (_activeHero(_data, _domainTab) || _data.hero || {});
+    const next = hero.action;
+    if (!next || next === 'hero_act') return;
+    await _runAction(next, hero.target_id || '');
+    return;
+  }
+  if (action === 'confirm_pack_sent' || action === 'confirm_proposal_sent' || action === 'confirm_npr_sent' || action === 'confirm_grant_packet_sent') {
+    try {
+      const res = await fetch(`${API_BASE}/api/voice/cmd-action`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id: id || '' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const detail = data && data.detail;
+      const errMsg = (!res.ok && (
+        (typeof detail === 'string' && detail)
+        || (detail && detail.message)
+        || data.message
+        || data.error
+        || `HTTP ${res.status}`
+      )) || '';
+      if (!res.ok) throw new Error(errMsg);
+      const speech = data.speech || 'Logged as sent. Not submitting.';
+      window.uiModule?.showToast?.(speech, 4000);
+      window.voiceRealtimeModule?.speakText?.(speech);
+      await _fetchData();
+      _paint();
+    } catch (err) {
+      console.warn('confirm send failed', err);
+      window.uiModule?.showToast?.('Could not mark as sent');
+    }
+    return;
+  }
+  if (action === 'speak_true') {
+    _speakHeroTrue();
+    return;
+  }
+
   if (action === 'refresh') {
     if (_syncInFlight) return;
     _syncInFlight = true;
     _setHeaderSyncBusy(true);
     try {
       await _fetchData({ syncCalendar: true });
+      _calendarHydrated = true;
+      _calendarEpoch += 1;
       window.dispatchEvent(new CustomEvent('calendar-refresh'));
       _paint();
+      void _hydrateGlobeAndInbox({ force: true });
     } finally {
       _syncInFlight = false;
       _setHeaderSyncBusy(false);
@@ -3858,6 +4386,11 @@ async function _runAction(action, id) {
 
   if (action === 'plan_today') {
     _openTodayPlanSheet();
+    return;
+  }
+
+  if (action === 'open_directive') {
+    _openDirectiveTriageFromHero();
     return;
   }
 
@@ -3953,9 +4486,8 @@ async function _runAction(action, id) {
     return;
   }
   if (action === 'ceo_brief') {
-    if (_domainTab !== 'MEM') _setDomainTab('MEM');
     const existing = _data.ceo_brief || {};
-    if (existing.status === 'ready') {
+    if (existing.status === 'ready' && _briefHasFullPicture(existing.content)) {
       try {
         const res = await fetch(`${API_BASE}/api/home/ceo-brief/latest`, { credentials: 'same-origin' });
         const payload = await res.json().catch(() => ({}));
@@ -3964,7 +4496,8 @@ async function _runAction(action, id) {
         }
       } catch (_) { /* keep the cmd-center excerpt */ }
       window.uiModule?.showToast?.("Today's CEO brief is ready", 2500);
-      _setDomainTab('MEM');
+      await _fetchData();
+      _paint();
       return;
     }
     window.uiModule?.showToast?.(
@@ -3998,7 +4531,8 @@ async function _runAction(action, id) {
         payload.compiled === false ? "Today's CEO brief is ready" : 'CEO brief ready',
         3500,
       );
-      _setDomainTab('MEM');
+      await _fetchData();
+      _paint();
     } catch (err) {
       console.warn('ceo_brief failed', err);
       window.uiModule?.showToast?.('CEO brief failed');
@@ -4024,7 +4558,7 @@ function _setAudioUi(state, label) {
   const root = document.getElementById('cmd-audio');
   const lab = document.getElementById('cmd-audio-label');
   if (root) root.dataset.state = state || 'standby';
-  if (lab) lab.textContent = label || 'TTS Standby';
+  if (lab) lab.textContent = label || 'Jarvis standby';
 }
 
 function _bindVoiceUi() {
@@ -4129,7 +4663,7 @@ function _fireBrief() {
     stopBrief();
     return;
   }
-  // HQ_HOOK_BRIEF_WIRE
+  // Harvest-ranked BRIEF ME (Top 3 / needs you / can wait) — not HUD hero, not Listen.
   const script = (_data && _data.brief_script) || [];
   runBrief({ script });
 }
@@ -4241,9 +4775,27 @@ function _wireClicks(root) {
     }
     const target = e.target.closest('[data-action]');
     if (!target || !root.contains(target)) return;
-    // OPEN DIRECTIVE / hero CTA → always triage modal (never dump into Notes).
+    const confirmAct = target.dataset.action || '';
+    if (CONFIRM_SEND_ACTIONS.includes(confirmAct)) {
+      e.preventDefault();
+      e.stopPropagation();
+      _runAction(confirmAct, target.dataset.id || '');
+      return;
+    }
     const heroHit = target.id === 'cmd-hero' || target.closest('#cmd-hero');
     if (heroHit) {
+      e.preventDefault();
+      e.stopPropagation();
+      const hero = _activeHero(_data, _domainTab) || _data.hero || {};
+      const act = hero.action || target.dataset.action || '';
+      if (act && act !== 'open_directive') {
+        _runAction(act, hero.target_id || target.dataset.id || '');
+        return;
+      }
+      _openDirectiveTriageFromHero();
+      return;
+    }
+    if (target.dataset.action === 'open_directive') {
       e.preventDefault();
       e.stopPropagation();
       _openDirectiveTriageFromHero();
@@ -4391,7 +4943,7 @@ function _paint() {
   _wireTabs(pane);
   if (root) _wireDomainTabs(root);
   _tickClock();
-  _animateHero(_data.hero?.value || 0);
+  _animateHero(_activeHero(_data)?.value || 0);
   _mountScene();
   _ensureAudio();
   _setMobileTab(_mobileTab);
@@ -4525,10 +5077,14 @@ export async function openCmdCenter() {
     closeFn: () => { _forceCloseCmdCenter(); },
   });
 
-  await _fetchData({ syncCalendar: true });
+  _heavyHydrated = false;
+  _calendarHydrated = false;
+  await _fetchData();
   if (_open) {
     _paint();
     _startLiveUpdates();
+    void _hydrateGlobeAndInbox();
+    void _hydrateCalendar();
   }
 }
 

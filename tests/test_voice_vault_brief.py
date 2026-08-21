@@ -91,6 +91,120 @@ def test_build_brief_script_domain_highlight_from_branch():
     assert priority_line["highlight"]["domain"] == "RELAY"
 
 
+HARVEST_MD = """# CEO Brief — 2026-08-20
+
+_Generated 09:00 from the morning chron wave._
+
+## Top 3 actions that move the needle
+1. **SUBMIT Prelim — SWE Product** — hygiene item 1; materials ready.
+2. **SEND NPR Panel 2 thank-you emails** — drafts ready.
+3. **Close Q3 residue** — checkbox still open.
+
+## What's upcoming
+Calendar (next 48h):
+- tomorrow 10:00 — Aether standup
+Due soon:
+- Pay insurance
+Overdue:
+- RSVP Thesis Defence
+
+## Job pipeline
+No job applications need attention.
+
+## Handoffs in flight
+_None._
+
+## Research findings (Rhizo)
+_Rhizo hasn't filed a research brief today._
+
+## Fruit ledger (Herald)
+_No fruit ledger entry yet._
+
+## Recent chron outputs
+_No successful chron runs in the recent window._
+"""
+
+
+def test_build_brief_script_harvest_leads_with_top3_not_hud_hero():
+    script = build_brief_script(
+        hero={"label": "Prod", "title": "Search as Code", "unit": "DIRECTIVES", "branch": "prod"},
+        money_hero={
+            "title": "SUBMIT Prelim — SWE Product",
+            "true_line": "Top money move: SUBMIT Prelim — SWE Product.",
+            "unit": "TOP 3",
+            "branch": "prod",
+        },
+        ceo_brief={"status": "ready", "content": HARVEST_MD, "title": "CEO Brief — 2026-08-20"},
+        priority_queue=[{"title": "Search as Code", "status": "due", "branch": "prod"}],
+        overdue_count=0,
+        research=[{"title": "Open Notebook slim script", "status": "done"}],
+    )
+    blob = " ".join(line["text"] for line in script)
+    assert "SUBMIT Prelim" in blob
+    assert "Top money move" in blob
+    assert "Top 3:" in blob
+    assert "Needs you:" in blob
+    assert "Can wait:" in blob
+    assert "That's the state of the V.A.U.L.T." in blob
+    assert "Search as Code" not in blob
+    assert "Open Notebook" not in blob
+    assert "What changed" not in blob
+    assert "2099" not in blob
+    assert 3 <= len(script) <= 6
+
+
+def test_build_brief_script_speaks_fruit_count_when_present():
+    harvest = HARVEST_MD.replace(
+        "_No fruit ledger entry yet._",
+        "```\n### 2026-08-20 · Herald\n"
+        "- FRUIT: Upwork Send Pack — 5 proposals sent\n"
+        "- EVIDENCE: checklist f1cf1f16 all done\n```",
+    )
+    script = build_brief_script(
+        money_hero={
+            "title": "SEND NPR Panel 2 thank-you emails",
+            "spoken_needle": "Top money move: SEND NPR Panel 2 thank-you emails.",
+            "true_line": (
+                "Top money move: SEND NPR Panel 2 thank-you emails. "
+                "1 fruit on the ledger. Last: Upwork Send Pack — 5 proposals sent."
+            ),
+            "fruit_count": 1,
+            "last_fruit": "Upwork Send Pack — 5 proposals sent",
+            "unit": "TOP 3",
+            "branch": "prod",
+        },
+        ceo_brief={"status": "ready", "content": harvest, "title": "CEO Brief — 2026-08-20"},
+    )
+    blob = " ".join(line["text"] for line in script)
+    assert "1 fruit on the ledger" in blob
+    assert "Upwork Send Pack" in blob
+    assert "don't invent fruit" not in blob.lower()
+    assert "do not invent fruit" not in blob.lower()
+
+
+def test_format_vault_brief_includes_money_needle_and_top3():
+    text = format_vault_brief(
+        hero={
+            "label": "Directives",
+            "title": "Search as Code",
+            "explain": "10 open directives",
+        },
+        money_hero={
+            "true_line": "Top money move: SUBMIT Prelim — SWE Product.",
+            "title": "SUBMIT Prelim — SWE Product",
+        },
+        ceo_brief={"status": "ready", "content": HARVEST_MD},
+        priority_queue=[{"title": "Handoff A", "kind": "handoff"}],
+        counts={"handoffs_attention": 1},
+    )
+    assert "Search as Code" in text
+    assert "Money needle" in text
+    assert "SUBMIT Prelim" in text
+    assert "Today's Top 3" in text
+    assert "SEND NPR" in text
+    assert len(text) <= MAX_BRIEF_CHARS
+
+
 def test_format_vault_brief_includes_hero_and_branches():
     text = format_vault_brief(
         hero={
@@ -176,6 +290,26 @@ def test_client_wires_vault_brief_and_jarvis():
     assert "reapplyVaultBrief" in cmd
     assert "cmd-audio-lock" in cmd
     assert "Jarvis stays armed" in cmd
+    assert 'data-core-lens="full_picture"' in cmd
+    assert 'data-core-lens="money_move"' in cmd
+    assert "coreLens: 'full_picture'" in cmd
+    assert "payload.money_hero" in cmd
+    speak = cmd[cmd.index("function _speakHeroTrue"): cmd.index("function _briefHasFullPicture")]
+    assert "onMoneyMove" in speak
+    assert "payload.money_hero" in speak
+    assert "_coreLens === 'money_move'" in speak
+    paint = cmd[cmd.index("function _paint()"): cmd.index("function _forceCloseCmdCenter")]
+    assert "_speakHeroTrue" not in paint
+    assert "_fireBrief" not in paint
+    assert "runBrief" not in paint
+    ceo = cmd[cmd.index("if (action === 'ceo_brief')"): cmd.index("// DISABLED: Docker Odysseus")]
+    assert "_speakHeroTrue()" not in ceo
+    assert "runBrief" not in ceo
+    assert "_fireBrief" not in ceo
+    assert "audio-brief" not in ceo
+    fire = cmd[cmd.index("function _fireBrief"): cmd.index("function _wireClicks")]
+    assert "brief_script" in fire
+    assert "Listen" in fire or "Harvest-ranked" in fire
 
     ptt = (ROOT / "static" / "js" / "voiceKeyboardPtt.js").read_text(encoding="utf-8")
     assert "Alt+Shift+V" in ptt or "altKey && e.shiftKey" in ptt

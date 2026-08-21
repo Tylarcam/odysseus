@@ -385,3 +385,44 @@ class MemoryManager:
         # Sort by final score (descending) and return top matches
         relevant.sort(key=lambda x: x[0], reverse=True)
         return [mem for _, mem in relevant[:max_items]]
+
+
+def pin_memory_item(memory_manager, memory_id: str, pinned: bool = True, owner: str = None) -> Dict:
+    """Pin or unpin a memory. Same write path as POST /api/memory/{id}/pin.
+
+    Exact id first, then a unique prefix (voice list returns 8-char ids).
+    Never deletes. Returns ``{ok, pinned, memory_id}`` or ``{ok: False, error}``.
+    """
+    mid = (memory_id or "").strip()
+    if not mid:
+        return {"ok": False, "error": "memory_id is required"}
+
+    all_mem = memory_manager.load_all() or []
+    idx = None
+    for i, memory in enumerate(all_mem):
+        if memory.get("id") == mid:
+            idx = i
+            break
+    if idx is None:
+        matches = [
+            i for i, memory in enumerate(all_mem)
+            if str(memory.get("id") or "").startswith(mid)
+        ]
+        if len(matches) == 1:
+            idx = matches[0]
+        elif len(matches) > 1:
+            return {"ok": False, "error": f"Memory id '{mid}' is ambiguous"}
+    if idx is None:
+        return {"ok": False, "error": f"Memory item {mid} not found"}
+
+    memory = all_mem[idx]
+    if owner is not None and memory.get("owner") != owner:
+        return {"ok": False, "error": "Memory not found"}
+
+    all_mem[idx]["pinned"] = bool(pinned)
+    memory_manager.save(all_mem)
+    return {
+        "ok": True,
+        "pinned": bool(pinned),
+        "memory_id": memory.get("id") or mid,
+    }

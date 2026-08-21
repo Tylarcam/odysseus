@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+import logging
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.constants import DATA_DIR
+from src.job_pipeline.brief import get_job_mode
 from core.lineage import count_lineage_edges, lineage_for
 from services.home.dashboard import build_recent_projects
 from services.home.kg_graph import build_globe_graph
@@ -28,13 +31,45 @@ from services.home.swarm_registry import (
     is_swarm_task_id,
     resolve_swarm_docs,
 )
-from services.home.mycelia_feed import build_mycelia_feed, mycelia_priority_queue_items
+from services.home.mycelia_feed import (
+    append_conversion_fruit,
+    build_mycelia_feed,
+    conversion_fruit_events,
+    find_fruit_ledger,
+    mycelia_priority_queue_items,
+    parse_top3,
+)
+from services.documents.ceo_brief_script import (
+    charter_needles,
+    collect_inbound_candidates,
+    find_grant_packet,
+    find_objectives_charter,
+    human_gate_cleared,
+    is_upwork_send_gate,
+    rank_money_candidates,
+)
 from services.documents.ceo_brief_store import select_ceo_brief
 from services.mempalace.bridge import fetch_mempalace_globe_graph
 from src.research_handler import list_recent_research_reports
 
+logger = logging.getLogger(__name__)
+
 # Rolling window for COMMS closed-loop conversion (reminded edges).
 COMMS_CONVERSION_WINDOW_DAYS = 7
+
+CORE_LENSES = ("full_picture", "money_move")
+
+_PACK_REF = re.compile(
+    r"`([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{8})`",
+    re.IGNORECASE,
+)
+
+# NPR Panel 2 thank-you drafts (notes). First unsent is Money Move Do-it when NPR is the needle.
+_NPR_THANKYOU_DRAFT_IDS = ("4be22ee3", "8504c427", "80aa4a73")
+_NPR_SENT = re.compile(
+    r"\((sent|cleared|done)\)|marked sent|already sent",
+    re.IGNORECASE,
+)
 
 # Base urgency by kind used when a stalled lineage neighbor escalates a chain.
 _STALLED_CHAIN_BASE_URGENCY: Dict[str, int] = {
@@ -380,17 +415,18 @@ def _build_priority_queue(
         role = job.get("role") or "Role"
         # Bucket membership implies needs_review even if status fields are absent.
         job_obj = {**job, "attention": job.get("attention") or "needs_review"}
+        subtitle, due_label = _job_queue_labels(job, default_subtitle="Agency · needs review", default_label="NEEDS REVIEW")
         items.append(
             apply_stalled_urgency(
                 {
                     "id": job.get("id"),
                     "kind": "job",
                     "title": f"{company} — {role}",
-                    "subtitle": "Agency · needs review",
+                    "subtitle": subtitle,
                     "branch": "agency",
                     "urgency": 95,
                     "status": "due",
-                    "due_label": "NEEDS REVIEW",
+                    "due_label": due_label,
                     "overdue_days": None,
                     "due_at": None,
                     "action": "jobs",
@@ -405,17 +441,18 @@ def _build_priority_queue(
     for job in jobs.get("ready_to_apply") or []:
         company = job.get("company") or "Company"
         role = job.get("role") or "Role"
+        subtitle, due_label = _job_queue_labels(job, default_subtitle="Agency · ready to apply", default_label="READY")
         items.append(
             apply_stalled_urgency(
                 {
                     "id": job.get("id"),
                     "kind": "job",
                     "title": f"{company} — {role}",
-                    "subtitle": "Agency · ready to apply",
+                    "subtitle": subtitle,
                     "branch": "agency",
                     "urgency": 90,
                     "status": "due",
-                    "due_label": "READY",
+                    "due_label": due_label,
                     "overdue_days": None,
                     "due_at": None,
                     "action": "jobs",
@@ -916,12 +953,14 @@ def _urgency_verdict_for_uid(
 
 def _comms_preview_row_from_verdict(key: str, verdict: Dict[str, Any]) -> Dict[str, Any]:
     score = int(verdict.get("score") or 0)
+    tags = [str(t).strip().lower() for t in (verdict.get("tags") or []) if t]
     return {
         "id": str(key),
         "subject": str(verdict.get("subject") or "(no subject)"),
         "from": str(verdict.get("from") or ""),
         "score": score,
         "reason": str(verdict.get("reason") or ""),
+        "tags": tags,
         "urgent": score >= 2,
         "is_read": False,
         "date_epoch": 0.0,
@@ -954,6 +993,7 @@ def _build_comms_preview(
         verdict = _urgency_verdict_for_uid(per_uid, uid, account_id)
         score = int(verdict.get("score") or 0)
         from_display = str(em.get("from_name") or em.get("from_address") or verdict.get("from") or "")
+        tags = [str(t).strip().lower() for t in (verdict.get("tags") or em.get("tags") or []) if t]
         items.append(
             {
                 "id": row_id,
@@ -963,6 +1003,7 @@ def _build_comms_preview(
                 "from": from_display,
                 "score": score,
                 "reason": str(verdict.get("reason") or ""),
+                "tags": tags,
                 "urgent": score >= 2,
                 "is_read": bool(em.get("is_read")),
                 "date_epoch": float(em.get("date_epoch") or 0.0),
@@ -1039,6 +1080,53 @@ def _patch_comms_branch_health(
         break
 
 
+def _job_queue_labels(
+    job: Dict[str, Any],
+    *,
+    default_subtitle: str,
+    default_label: str,
+) -> Tuple[str, str]:
+    """Watch-mode jobs keep Agency copy off the submit-queue language."""
+    state = str(job.get("watch_state") or "").strip().lower()
+    if state == "archive_candidate":
+        return "Agency · archive candidate", "ARCHIVE"
+    if state == "expiring":
+        return "Agency · expiring", "EXPIRES"
+    if state == "watched":
+        return "Agency · watching", "WATCH"
+    return default_subtitle, default_label
+
+
+def _agency_branch_card(
+    *,
+    jobs_ready: int,
+    jobs_review: int,
+    jobs: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Agency HUD chip: watch/archive counts, never a submit-queue fire alarm."""
+    if get_job_mode(jobs=jobs) == "watch":
+        watched = int(jobs.get("watched_count") or 0)
+        expiring = int(jobs.get("expiring_count") or 0)
+        if not watched and not expiring and "watched_count" not in jobs:
+            watched = jobs_ready + jobs_review
+        return {
+            "id": "agency",
+            "label": "Agency",
+            "state": "alive" if (watched or expiring) else "idle",
+            "count": watched + expiring,
+            "summary": f"{watched} watched · {expiring} expiring",
+            "action": "jobs",
+        }
+    return {
+        "id": "agency",
+        "label": "Agency",
+        "state": "busy" if (jobs_ready or jobs_review) else "idle",
+        "count": jobs_ready + jobs_review,
+        "summary": f"{jobs_ready} ready · {jobs_review} review",
+        "action": "jobs",
+    }
+
+
 def _build_branch_health(
     *,
     notes_list: List[Dict[str, Any]],
@@ -1049,6 +1137,7 @@ def _build_branch_health(
     in_progress: int,
     jobs_ready: int,
     jobs_review: int,
+    jobs: Optional[Dict[str, Any]] = None,
     voice_state: str = "standby",
     research_count: int = 0,
 ) -> List[Dict[str, Any]]:
@@ -1103,14 +1192,7 @@ def _build_branch_health(
             "summary": "Inbox ready",
             "action": "email",
         },
-        {
-            "id": "agency",
-            "label": "Agency",
-            "state": "busy" if (jobs_ready or jobs_review) else "idle",
-            "count": jobs_ready + jobs_review,
-            "summary": f"{jobs_ready} ready · {jobs_review} review",
-            "action": "jobs",
-        },
+        _agency_branch_card(jobs_ready=jobs_ready, jobs_review=jobs_review, jobs=jobs or {}),
         {
             "id": "relay",
             "label": "Relay",
@@ -1132,6 +1214,405 @@ def _build_branch_health(
     ]
 
 
+def _money_pack(hero: Dict[str, Any]) -> Dict[str, Any]:
+    true_line = str(hero.get("true_line") or hero.get("explain") or hero.get("title") or "").strip()
+    act = str(hero.get("act") or hero.get("cta_label") or "").strip()
+    needle = str(hero.get("needle") or hero.get("velocity") or "").strip()
+    if true_line:
+        hero["true_line"] = true_line
+        hero["explain"] = true_line
+    if act:
+        hero["act"] = act
+        hero.setdefault("cta_label", act)
+    if needle:
+        hero["needle"] = needle
+    return hero
+
+
+def _ledger_body(rec: Dict[str, Any]) -> str:
+    return str(rec.get("content") or rec.get("current_content") or rec.get("body") or "")
+
+
+def _persist_fruit_ledger(rec: Dict[str, Any], kind: str, text: str) -> None:
+    """Write conversion fruit onto the existing Herald stub. No new product."""
+    rid = str(rec.get("id") or "").strip()
+    if not rid:
+        return
+    try:
+        from core.database import Document, Note, SessionLocal
+    except Exception:
+        return
+    db = SessionLocal()
+    try:
+        if kind == "doc":
+            row = db.query(Document).filter(Document.id == rid).first()
+            if not row:
+                return
+            row.current_content = text
+        else:
+            row = db.query(Note).filter(Note.id == rid).first()
+            if not row:
+                return
+            row.content = text
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.debug("fruit ledger persist skipped", exc_info=True)
+    finally:
+        db.close()
+
+
+def _apply_conversion_fruit(
+    notes_list: List[Dict[str, Any]],
+    docs_list: List[Dict[str, Any]],
+) -> None:
+    """When a money gate clears, append a Herald FRUIT line to the existing ledger."""
+    events = conversion_fruit_events(notes=notes_list, documents=docs_list)
+    if not events:
+        return
+    found = find_fruit_ledger(docs_list, notes_list)
+    if not found:
+        return
+    rec = found.get("record") or {}
+    kind = str(found.get("kind") or "note")
+    new_text, added = append_conversion_fruit(_ledger_body(rec), events)
+    if not added:
+        return
+    rec["content"] = new_text
+    rec["current_content"] = new_text
+    _persist_fruit_ledger(rec, kind, new_text)
+
+
+def _attach_fruit_scoreboard(hero: Dict[str, Any], fruit: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Money Move speaks fruit count + last fruit when the ledger has any."""
+    fruit = fruit or {}
+    try:
+        count = int(fruit.get("fruit_count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    last = str(fruit.get("last_fruit") or "").strip()
+    hero["fruit_count"] = count
+    hero["last_fruit"] = last
+    needle = str(hero.get("true_line") or hero.get("explain") or hero.get("title") or "").strip()
+    hero["spoken_needle"] = needle
+    if count > 0 and last:
+        noun = "fruit" if count == 1 else "fruits"
+        fruit_line = f"{count} {noun} on the ledger. Last: {last}."
+        hero["fruit_line"] = fruit_line
+        if needle:
+            hero["true_line"] = f"{needle} {fruit_line}"
+            hero["explain"] = hero["true_line"]
+        else:
+            hero["true_line"] = fruit_line
+            hero["explain"] = fruit_line
+    else:
+        hero["fruit_line"] = ""
+    return hero
+
+
+def _needle_action(title: str, pack_ref: Optional[str], source: str = "") -> str:
+    src = str(source or "").strip().lower()
+    if src == "email":
+        return "email"
+    if src == "doc" or pack_ref:
+        return "open_doc"
+    if src == "note":
+        return "open_note"
+    low = str(title or "").lower().replace("*", "").strip()
+    if low.startswith("unblock"):
+        return "agent_bin"
+    if is_upwork_send_gate(low) or "send pack" in low or "human gate" in low:
+        return "open_doc"
+    if "npr" in low and ("thank" in low or "panel" in low):
+        return "open_note"
+    if "proposal" in low or "grant" in low or "inbound" in low:
+        return "ceo_brief"
+    if low.startswith("submit") or low.startswith("decide"):
+        return "jobs"
+    return "ceo_brief"
+
+
+def _resolve_pack_target(
+    pack_ref: Optional[str],
+    documents: Optional[List[Dict[str, Any]]],
+    title: str = "",
+) -> Optional[str]:
+    """Map an 8-char Library ref or send-pack title to a full document id."""
+    docs = [d for d in (documents or []) if isinstance(d, dict) and not d.get("archived")]
+    ref = str(pack_ref or "").strip()
+    if ref:
+        for rec in docs:
+            did = str(rec.get("id") or "")
+            if not did:
+                continue
+            if did == ref or did.startswith(ref) or ref.startswith(did[:8]):
+                return did
+    low = (title or "").lower()
+    if is_upwork_send_gate(title) or "send pack" in low or "human gate" in low:
+        for rec in docs:
+            dt = str(rec.get("title") or rec.get("name") or "").lower()
+            if "send pack" in dt and is_upwork_send_gate(dt):
+                did = str(rec.get("id") or "").strip()
+                if did:
+                    return did
+    return ref or None
+
+
+def _is_pack_needle(title: str, pack_ref: Optional[str], source: str = "") -> bool:
+    src = str(source or "").strip().lower()
+    if src == "email":
+        return False
+    if src == "doc" and (is_upwork_send_gate(title) or "send pack" in (title or "").lower()):
+        return True
+    if pack_ref and (is_upwork_send_gate(title) or "send pack" in (title or "").lower() or "human gate" in (title or "").lower()):
+        return True
+    return is_upwork_send_gate(title)
+
+
+def _is_npr_needle(title: str, source: str = "") -> bool:
+    if str(source or "").strip().lower() == "email":
+        return False
+    low = str(title or "").lower()
+    return "npr" in low and ("thank" in low or "panel" in low)
+
+
+def _is_grant_packet_needle(title: str, source: str = "") -> bool:
+    """Impact+ nomination packet — human gate only, never auto-submit."""
+    if str(source or "").strip().lower() == "email":
+        return False
+    return "impact+" in str(title or "").lower()
+
+
+def _confirm_send_fields(
+    title: str,
+    pack_ref: Optional[str] = None,
+    source: str = "",
+) -> Dict[str, str]:
+    """HUD Confirm sent. Omit when the needle is not a human send gate."""
+    if _is_pack_needle(title, pack_ref, source):
+        return {
+            "confirm_action": "confirm_pack_sent",
+            "confirm_one_action": "confirm_proposal_sent",
+        }
+    if _is_npr_needle(title, source):
+        return {"confirm_action": "confirm_npr_sent"}
+    if _is_grant_packet_needle(title, source):
+        return {"confirm_action": "confirm_grant_packet_sent"}
+    return {}
+
+
+def _npr_draft_unsent(rec: Optional[Dict[str, Any]]) -> bool:
+    """Missing from this payload still counts as pending (do not invent a send)."""
+    if rec is None:
+        return True
+    if rec.get("archived"):
+        return False
+    title = str(rec.get("title") or "")
+    if _NPR_SENT.search(title):
+        return False
+    items = rec.get("items")
+    if isinstance(items, list) and items:
+        open_n = sum(
+            1
+            for it in items
+            if isinstance(it, dict) and not it.get("done") and not it.get("checked")
+        )
+        if open_n == 0:
+            return False
+    return True
+
+
+def _resolve_npr_draft(notes: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """First unsent NPR Panel 2 thank-you draft (canonical id order)."""
+    recs = [n for n in (notes or []) if isinstance(n, dict)]
+
+    def _match(prefix: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        for rec in recs:
+            nid = str(rec.get("id") or "").strip()
+            if not nid:
+                continue
+            if nid == prefix or nid.startswith(prefix) or prefix.startswith(nid[:8]):
+                return rec, nid
+        return None, None
+
+    for did in _NPR_THANKYOU_DRAFT_IDS:
+        rec, nid = _match(did)
+        if _npr_draft_unsent(rec):
+            return nid or did
+    return None
+
+
+def _build_money_hero(
+    *,
+    ceo_brief: Optional[Dict[str, Any]] = None,
+    mycelia_feed: Optional[Dict[str, Any]] = None,
+    notes_list: Optional[List[Dict[str, Any]]] = None,
+    documents: Optional[List[Dict[str, Any]]] = None,
+    comms_preview: Optional[List[Dict[str, Any]]] = None,
+    charter_txt: str = "",
+    today: Optional[date] = None,
+) -> Dict[str, Any]:
+    """CORE Money Move lens — not the default full-picture hero."""
+    brief = ceo_brief or {}
+    status = str(brief.get("status") or "missing")
+    charter = find_objectives_charter(notes_list or [])
+    charter_body = charter_txt or str((charter or {}).get("content") or (charter or {}).get("body") or "")
+    inbound_items = collect_inbound_candidates(
+        comms_preview=comms_preview,
+        notes=notes_list,
+        documents=documents,
+        today=today,
+    )
+    gate_done = human_gate_cleared(notes=notes_list, documents=documents)
+
+    def _keep_open_gate(cand: Any) -> bool:
+        if not gate_done:
+            return True
+        if isinstance(cand, dict):
+            blob = f"{cand.get('title') or ''} {cand.get('raw') or ''}"
+        else:
+            blob = str(cand or "")
+        return not (is_upwork_send_gate(blob) or "send pack" in blob.lower())
+
+    inbound_items = [c for c in inbound_items if _keep_open_gate(c)]
+    if status in ("stale", "missing"):
+        title = brief.get("title") or "CEO Brief"
+        return _money_pack({
+            "label": "Primary Directive — Needle",
+            "title": title,
+            "value": 1,
+            "unit": "STALE",
+            "velocity": "Refresh ranks the day so the next hour is money, not inventory",
+            "true_line": (
+                f"{title} is stale. Refresh ranks the day so the next hour is money, not inventory."
+            ),
+            "act": "Refresh brief",
+            "needle": "The brief is the ranking. Without it the vault lists facts.",
+            "cta_label": "Refresh brief",
+            "branch": "core",
+            "action": "ceo_brief",
+            "target_id": brief.get("id"),
+            "dedup_key": f"ceo_brief:{brief.get('id')}" if brief.get("id") else "ceo_brief:missing",
+            "ranked_top3": [],
+            "charter_id": (charter or {}).get("id"),
+            "charter_title": (charter or {}).get("title"),
+        })
+
+    items = parse_top3(str(brief.get("content") or ""))
+    mycelia_top3 = list((mycelia_feed or {}).get("top3") or [])
+    ranked = rank_money_candidates(
+        [
+            c
+            for c in (
+                list(inbound_items)
+                + list(items)
+                + list(charter_needles(charter_body))
+                + mycelia_top3
+            )
+            if _keep_open_gate(c)
+        ],
+        charter_body,
+    )
+    if ranked:
+        items = ranked
+    if items:
+        first = items[0]
+        raw = str(first.get("raw") or first.get("title") or "")
+        found = _PACK_REF.findall(raw)
+        pack_ref = found[0] if found else None
+        title = first.get("title") or "Top money move"
+        rationale = first.get("rationale") or ""
+        source = str(first.get("source") or "")
+        action = first.get("action") or _needle_action(title, pack_ref, source)
+        target_id = first.get("target_id") or pack_ref or brief.get("id")
+        if _is_pack_needle(title, pack_ref, source):
+            resolved = _resolve_pack_target(
+                pack_ref or first.get("target_id"),
+                documents,
+                title,
+            )
+            if resolved:
+                action = "open_doc"
+                target_id = resolved
+            elif source != "note":
+                action = "open_doc"
+        elif _is_npr_needle(title, source):
+            npr_id = _resolve_npr_draft(notes_list)
+            if npr_id:
+                action = "open_note"
+                target_id = npr_id
+        else:
+            packet = find_grant_packet(title, notes_list)
+            if packet:
+                pid = str(packet.get("id") or "").strip()
+                if pid:
+                    action = "open_note"
+                    target_id = pid
+        confirm = _confirm_send_fields(title, pack_ref, source)
+        if confirm:
+            items[0] = {**first, **confirm}
+        needle = rationale or "The brief already ranked this. Execute, don't re-inventory."
+        if source in ("email", "note", "doc") or "npr" in title.lower() or "upwork" in title.lower():
+            needle = rationale or "Named inbound opportunity — not a charter slogan."
+        elif charter_body and title and "submit prelim" not in title.lower():
+            needle = rationale or "Charter ranks this over job-queue hygiene."
+        return _money_pack({
+            "label": "Primary Directive — Needle",
+            "title": title,
+            "value": len(items),
+            "unit": "TOP 3",
+            "velocity": rationale,
+            "true_line": f"Top money move: {title}.",
+            "act": "Do it",
+            "needle": needle,
+            "cta_label": "Do it",
+            "branch": "prod",
+            "action": action,
+            "target_id": target_id,
+            "dedup_key": f"needle:{pack_ref or target_id or brief.get('id') or 'top3'}",
+            "ranked_top3": items[:3],
+            "charter_id": (charter or {}).get("id"),
+            "charter_title": (charter or {}).get("title"),
+            **confirm,
+        })
+
+    top3 = (mycelia_feed or {}).get("top3") or []
+    if top3:
+        first = top3[0]
+        board_id = ((mycelia_feed or {}).get("board") or {}).get("id")
+        return _money_pack({
+            "label": "Primary Directive — Needle",
+            "title": first.get("title") or first.get("raw") or "Top priority from blackboard",
+            "value": len(top3),
+            "unit": "TOP 3",
+            "velocity": first.get("rationale") or "From swarm blackboard harvest",
+            "true_line": "Sporangium's needle-movers for today.",
+            "act": "Open blackboard",
+            "needle": first.get("rationale") or "Execute the ranked money move, not the inventory.",
+            "cta_label": "Open blackboard",
+            "branch": "mycelia",
+            "action": "open_doc" if board_id else "tasks",
+            "target_id": board_id,
+            "dedup_key": "mycelia:top3:1",
+        })
+
+    return _money_pack({
+        "label": "Primary Directive — Needle",
+        "title": "Protect focus",
+        "value": 0,
+        "unit": "CLEAR",
+        "velocity": "No conversion item is waiting",
+        "true_line": "No money needle on file. Capture inbound opportunity — do not invent inventory.",
+        "act": "",
+        "needle": "Do not invent inventory.",
+        "cta_label": "",
+        "branch": "core",
+        "action": "",
+        "target_id": None,
+        "dedup_key": "needle:clear",
+    })
+
+
 def _build_hero(
     *,
     attention: int,
@@ -1148,6 +1629,10 @@ def _build_hero(
     overdue_count: int = 0,
     mycelia_feed: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    watch = get_job_mode(jobs=jobs) == "watch"
+    hero_queue = [i for i in (priority_queue or []) if not (watch and i.get("kind") == "job")]
+    hero_directives = [d for d in (directives or []) if not (watch and d.get("kind") == "job")]
+
     if attention:
         top = priority_queue[0] if priority_queue else {}
         return {
@@ -1164,7 +1649,7 @@ def _build_hero(
             "dedup_key": f"handoff:{primary_handoff.get('id')}" if primary_handoff else None,
         }
 
-    if jobs_ready:
+    if not watch and jobs_ready:
         ready = jobs.get("ready_to_apply") or []
         names = ", ".join(
             f"{j.get('company') or '?'}" for j in ready[:3]
@@ -1183,7 +1668,7 @@ def _build_hero(
             "dedup_key": f"job:{ready[0].get('id')}" if ready else None,
         }
 
-    if jobs_review:
+    if not watch and jobs_review:
         needs_review = jobs.get("needs_review") or []
         return {
             "label": "Primary Directive — Agency",
@@ -1199,8 +1684,8 @@ def _build_hero(
             "dedup_key": f"job:{needs_review[0].get('id')}" if needs_review else None,
         }
 
-    if directives:
-        top = priority_queue[0] if priority_queue else directives[0]
+    if hero_directives:
+        top = hero_queue[0] if hero_queue else hero_directives[0]
         # Hero number = actionable overdue count when present (never a
         # separately-maintained "directives" counter that drifts from reality).
         if overdue_count > 0:
@@ -1208,12 +1693,12 @@ def _build_hero(
             hero_unit = "OVERDUE"
             explain = f"{overdue_count} overdue item(s) need triage"
         else:
-            hero_value = len(directives)
+            hero_value = len(hero_directives)
             hero_unit = "DIRECTIVES"
             explain = "Pinned, due, or checklist notes need attention"
         return {
             "label": "Primary Directive — Prod",
-            "title": top.get("title") or _title(directives[0], "Open directive"),
+            "title": top.get("title") or _title(hero_directives[0], "Open directive"),
             "value": hero_value,
             "unit": hero_unit,
             "velocity": top.get("due_label") or top.get("subtitle") or f"{len(sessions_list)} recent chats",
@@ -1436,8 +1921,15 @@ def build_cmd_center(
     owner: str = "",
     include_globe: bool = True,
 ) -> Dict[str, Any]:
-    notes_list = [n for n in notes if not n.get("archived")]
+    from routes.home_routes import HUD_PINNED_NOTE_PREFIXES
+
+    pin_notes = set(HUD_PINNED_NOTE_PREFIXES)
+    notes_list = [
+        n for n in notes
+        if (not n.get("archived")) or str(n.get("id") or "")[:8] in pin_notes
+    ]
     docs_list = [d for d in documents if not d.get("archived")]
+    _apply_conversion_fruit(notes_list, docs_list)
     tasks_list = list(tasks)
     sessions_list = list(sessions)
     runs_list = list(task_runs or [])
@@ -1758,6 +2250,14 @@ def build_cmd_center(
         overdue_count=overdue_count,
         mycelia_feed=mycelia_feed,
     )
+    money_hero = _build_money_hero(
+        ceo_brief=ceo_brief,
+        mycelia_feed=mycelia_feed,
+        notes_list=notes_list,
+        documents=docs_list,
+        comms_preview=comms_preview,
+    )
+    money_hero = _attach_fruit_scoreboard(money_hero, (mycelia_feed or {}).get("fruit"))
 
     wire_events: List[Dict[str, Any]] = []
     for note in notes_list[:6]:
@@ -1907,6 +2407,7 @@ def build_cmd_center(
         in_progress=in_progress,
         jobs_ready=jobs_ready,
         jobs_review=jobs_review,
+        jobs=jobs,
         voice_state=voice_state,
         research_count=len(recent_research),
     )
@@ -1967,6 +2468,8 @@ def build_cmd_center(
 
         brief_script = build_brief_script(
             hero=hero,
+            money_hero=money_hero,
+            ceo_brief=ceo_brief,
             priority_queue=priority_queue,
             counts={
                 "handoffs_attention": attention,
@@ -2009,14 +2512,22 @@ def build_cmd_center(
         "relay_stats": relay_stats,
         "stage_cards": stage_cards,
         "hero": hero,
+        "money_hero": money_hero,
+        "core_lenses": list(CORE_LENSES),
         "commands": commands,
         "suggested_commands": suggested_commands,
         "wire": wire_events[:16],
         "jobs_detail": {
             "ready_to_apply": _jobs_with_related_to(list(jobs.get("ready_to_apply") or [])),
             "needs_review": _jobs_with_related_to(list(jobs.get("needs_review") or [])),
+            "archive_candidates": _jobs_with_related_to(list(jobs.get("archive_candidates") or [])),
             "headline": jobs.get("headline"),
             "funnel": _normalize_job_funnel(jobs),
+            "job_mode": get_job_mode(jobs=jobs),
+            "watch_window_days": int(jobs.get("watch_window_days") or 30),
+            "watched_count": int(jobs.get("watched_count") or 0),
+            "expiring_count": int(jobs.get("expiring_count") or 0),
+            "archive_candidate_count": int(jobs.get("archive_candidate_count") or 0),
         },
         "plan_note_id": plan_note_id,
         "today_plan": today_plan,

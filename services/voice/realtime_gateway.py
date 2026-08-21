@@ -51,7 +51,10 @@ _JARVIS_INSTRUCTIONS = (
     "list_emails/read_email for mail, cmd_navigate to open vault surfaces. "
     "Draft email replies via agent bridge (confirm before send). "
     "For multi-step vault actions (claim handoffs, jobs tailor, research start, email send), "
-    "the session may bridge into full agent mode — speak results briefly."
+    "the session may bridge into full agent mode — speak results briefly. "
+    "To pin a filed money fact into always-on context, manage_memory action=pin "
+    "with memory_id from list/search ('pin that', 'pin this money fact'). "
+    "unpin removes it from always-on context. Pin does not delete."
 )
 
 # Keep injected memory context well under realtime session limits.

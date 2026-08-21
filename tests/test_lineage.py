@@ -304,7 +304,7 @@ def _create_note_endpoint(monkeypatch, session_factory):
     from routes.note_routes import NoteCreate
 
     monkeypatch.setattr(note_routes, "SessionLocal", session_factory)
-    monkeypatch.setattr(note_routes, "get_current_user", lambda request: "alice")
+    monkeypatch.setattr(note_routes, "effective_user", lambda request: "alice")
 
     router = note_routes.setup_note_routes()
     endpoint = next(

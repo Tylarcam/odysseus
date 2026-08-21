@@ -829,6 +829,11 @@ body.bg-pattern-sparkles {
       transition: background 0.15s, color 0.15s;
     }
     .modal-minimize-btn:hover { background: var(--fg); color: var(--bg); }
+    .modal-fullscreen-btn { margin-right: 4px; }
+    @media (max-width: 768px) {
+      .modal-fullscreen-btn,
+      [data-fullscreen-toggle] { display: none !important; }
+    }
     .modal.modal-minimized { display: none !important; }
     /* Window tile snap ghost (desktop only) */
     #tile-ghost {
@@ -31257,7 +31262,9 @@ body.notes-mobile-mode .note-cl-quickadd,
 body.notes-mobile-mode .note-card .note-checkbox-rm,
 /* Panel-fullscreen toggle is redundant on mobile — the panel always
    fills the viewport already. */
-body.notes-mobile-mode #notes-fullscreen-toggle {
+body.notes-mobile-mode #notes-fullscreen-toggle,
+body.notes-mobile-mode .modal-fullscreen-btn,
+body.notes-mobile-mode [data-fullscreen-toggle] {
   display: none !important;
 }
 
@@ -38680,6 +38687,11 @@ body.theme-frosted .modal {
   margin-left: auto;
   font-size: 10px;
   opacity: 0.55;
+}
+.agent-bin-cli {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  opacity: 0.8;
 }
 .agent-bin-title {
   font-size: 13px;

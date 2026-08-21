@@ -19,6 +19,7 @@ from src.handoff_relay import (
     _parse_frontmatter,
     _replace_frontmatter_field,
     build_relay_agent_prompt,
+    claim_external_relay,
     is_external_relay_target,
     queue_handoff_relay_for_document,
     retry_handoff_relay,
@@ -240,3 +241,43 @@ def test_queue_handoff_relay_for_document_creates_note(relay_db):
     assert note is not None
     assert note.handoff_relay_status == "queued"
     assert note.handoff_target == "cursor"
+
+
+def test_claim_external_relay_marks_running_and_stores_cli_session(relay_db):
+    from core.database import Document, Note
+
+    db = relay_db()
+    doc = Document(
+        id="doc-cli-1",
+        title="handoff → cursor: Live CLI",
+        language="markdown",
+        current_content="---\ntarget: cursor\nstatus: pending\n---\n\n## Goal\nGo",
+        version_count=1,
+        is_active=True,
+        owner=None,
+    )
+    note = Note(
+        id="note-cli-1",
+        owner=None,
+        title="Live CLI",
+        handoff_doc_id="doc-cli-1",
+        handoff_target="cursor",
+        handoff_relay_status="queued",
+    )
+    db.add(doc)
+    db.add(note)
+    db.commit()
+
+    sid = "ae628ff4-d881-4031-a6e1-b9e9c660482d"
+    assert claim_external_relay("doc-cli-1", owner="alice", session_id=sid) is True
+
+    db2 = relay_db()
+    note2 = db2.query(Note).filter(Note.id == "note-cli-1").first()
+    assert note2.handoff_relay_status == "running"
+    assert note2.handoff_relay_session_id == sid
+    doc2 = db2.query(Document).filter(Document.id == "doc-cli-1").first()
+    assert "status: running" in (doc2.current_content or "")
+    assert f"external_session_id: {sid}" in (doc2.current_content or "")
+
+    assert claim_external_relay("doc-cli-1", owner="alice", session_id=sid) is True
+

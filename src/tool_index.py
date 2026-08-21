@@ -6,9 +6,11 @@ embed them in a ChromaDB collection and retrieve only the top-K
 relevant ones per user message.
 """
 
-import logging
+import asyncio
 import hashlib
+import logging
 import re
+import threading
 import time
 from typing import Dict, List, Optional, Set
 
@@ -213,14 +215,20 @@ class ToolIndex:
         # Without this, upsert leaves them in place and RAG keeps
         # surfacing tools that no longer exist.
         indexed = False
+        encoded = False
+        wanted = set(ids)
         for lane in self._lanes:
             try:
                 existing = lane.collection.get(where={"tool_type": "builtin"})
                 existing_ids = (existing or {}).get("ids") or []
-                stale = [i for i in existing_ids if i not in set(ids)]
+                stale = [i for i in existing_ids if i not in wanted]
                 if stale:
                     lane.collection.delete(ids=stale)
                     logger.info(f"Pruned {len(stale)} stale builtin tool entries from {lane.name} index")
+                remaining = set(existing_ids) - set(stale)
+                if remaining >= wanted:
+                    indexed = True
+                    continue
             except Exception as e:
                 logger.debug(f"Stale-pruning skipped for {lane.name}: {e}")
 
@@ -232,6 +240,7 @@ class ToolIndex:
                     metadatas=metadatas,
                 )
                 indexed = True
+                encoded = True
             except Exception as e:
                 logger.warning("Builtin tool indexing failed in %s lane: %s", lane.name, e)
         if not indexed:
@@ -240,7 +249,10 @@ class ToolIndex:
         self._fingerprint = hashlib.sha256(
             ",".join(sorted(BUILTIN_TOOL_DESCRIPTIONS.keys())).encode()
         ).hexdigest()
-        logger.info(f"Indexed {len(docs)} built-in tools")
+        if encoded:
+            logger.info(f"Indexed {len(docs)} built-in tools")
+        else:
+            logger.info(f"Indexed {len(docs)} built-in tools (already present)")
 
     def index_mcp_tools(self, mcp_mgr, disabled_map: Optional[Dict] = None):
         """Index MCP tool descriptions. Call after MCP servers connect/disconnect."""
@@ -575,32 +587,62 @@ class ToolIndex:
 _tool_index: Optional[ToolIndex] = None
 _last_attempt = 0.0
 _RETRY_INTERVAL = 30.0
+_init_lock = threading.Lock()
+
+
+def peek_tool_index() -> Optional[ToolIndex]:
+    """Return the warm singleton without loading MiniLM or indexing."""
+    if _tool_index is not None and _tool_index.healthy:
+        return _tool_index
+    return None
+
+
+def _on_asyncio_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False
 
 
 def get_tool_index() -> Optional[ToolIndex]:
-    """Get or create the singleton ToolIndex. Returns None if unavailable."""
+    """Get or create the singleton ToolIndex. Returns None if unavailable.
+
+    MiniLM/ONNX load must not run on the uvicorn event loop. Callers already
+    on the loop get the warm singleton or None — use asyncio.to_thread to init.
+    """
     global _tool_index, _last_attempt
 
-    if _tool_index is not None and _tool_index.healthy:
-        return _tool_index
+    existing = peek_tool_index()
+    if existing is not None:
+        return existing
 
-    now = time.monotonic()
-    if now - _last_attempt < _RETRY_INTERVAL:
+    if _on_asyncio_loop():
+        logger.debug("ToolIndex not ready; refusing MiniLM load on the event loop")
         return None
-    _last_attempt = now
 
-    try:
-        _tool_index = ToolIndex()
-        _tool_index.index_builtin_tools()
-        return _tool_index
-    except Exception as e:
-        logger.warning(f"ToolIndex init failed (will retry in {_RETRY_INTERVAL}s): {e}")
-        _tool_index = None
-        return None
+    with _init_lock:
+        existing = peek_tool_index()
+        if existing is not None:
+            return existing
+
+        now = time.monotonic()
+        if now - _last_attempt < _RETRY_INTERVAL:
+            return None
+        _last_attempt = now
+        try:
+            _tool_index = ToolIndex()
+            _tool_index.index_builtin_tools()
+            return _tool_index
+        except Exception as e:
+            logger.warning(f"ToolIndex init failed (will retry in {_RETRY_INTERVAL}s): {e}")
+            _tool_index = None
+            return None
 
 
 def reset_tool_index() -> None:
     """Clear the singleton so embedding endpoint changes rebuild tool lanes."""
     global _tool_index, _last_attempt
-    _tool_index = None
-    _last_attempt = 0.0
+    with _init_lock:
+        _tool_index = None
+        _last_attempt = 0.0

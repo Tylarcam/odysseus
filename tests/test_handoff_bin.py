@@ -56,3 +56,15 @@ def test_bucket_handoff_notes_groups():
     assert len(out["in_progress"]) == 1
     assert len(out["done"]) == 2
     assert out["counts"]["total"] == 4
+
+
+def test_compact_handoff_note_omits_body():
+    from src.handoff_bin import compact_handoff_note
+
+    row = compact_handoff_note(
+        _note(content="huge body that must not ship to Agent Bin", items=[{"text": "x"}])
+    )
+    assert "content" not in row
+    assert "items" not in row
+    assert row["handoff_doc_id"] == "d1"
+    assert row["handoff_target"] == "cursor"

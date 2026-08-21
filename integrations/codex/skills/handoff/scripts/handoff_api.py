@@ -160,6 +160,31 @@ def _api_request(method: str, path: str, body: dict[str, Any] | None = None) -> 
         raise SystemExit(1) from exc
 
 
+def _claim_relay(doc_id: str, session_id: str = "") -> dict[str, Any]:
+    """Mark the note-backed relay running so Agent Bin shows In progress."""
+    config = _config()
+    if config is None:
+        raise SystemExit(2)
+    base_url, token = config
+    path = f"/api/handoff-relay/{urllib.parse.quote(doc_id)}/claim"
+    if session_id:
+        path += f"?session_id={urllib.parse.quote(session_id)}"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    req = urllib.request.Request(base_url + path, data=b"", headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw.strip() else {"ok": True}
+    except urllib.error.HTTPError as exc:
+        text = exc.read().decode("utf-8", errors="replace")
+        return {"ok": False, "error": text or f"HTTP {exc.code}"}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
     if not content.startswith("---\n"):
         return {}, content
@@ -581,11 +606,15 @@ def cmd_pickup(args: argparse.Namespace) -> int:
         )
         return 1
 
+    session_id = (getattr(args, "session", None) or os.environ.get("CURSOR_SESSION_ID") or "").strip()
+    claimed = _claim_relay(str(parsed.get("id") or args.id or ""), session_id)
+
     print(
         json.dumps(
             {
                 "ok": True,
                 "handoff": parsed,
+                "claimed": claimed,
                 "instructions": (
                     "Execute the Next steps in the handoff body. "
                     "Run the Agent bootstrap block first if Odysseus access or a specific cwd is required."
@@ -630,6 +659,7 @@ def main() -> int:
     pickup_p = sub.add_parser("pickup")
     pickup_p.add_argument("target")
     pickup_p.add_argument("--id")
+    pickup_p.add_argument("--session")
 
     mat_p = sub.add_parser("materialize-jd")
     mat_p.add_argument("--id")

@@ -17,6 +17,10 @@ def _client():
     async def render_pdf(doc_id: str):
         return Response(b"%PDF-1.4\n", media_type="application/pdf")
 
+    @app.get("/static/story-canvas/index.html")
+    async def story_canvas_index():
+        return Response("<!DOCTYPE html><html></html>", media_type="text/html")
+
     return TestClient(app)
 
 
@@ -34,3 +38,11 @@ def test_document_pdf_preview_can_be_framed_by_same_origin():
     assert response.headers["Content-Security-Policy"] == (
         "default-src 'none'; frame-ancestors 'self'"
     )
+
+
+def test_story_canvas_static_can_be_framed_by_same_origin():
+    response = _client().get("/static/story-canvas/index.html")
+
+    assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert "frame-ancestors 'self'" in response.headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" not in response.headers["Content-Security-Policy"]

@@ -1,8 +1,77 @@
 """Shared auth helpers used by all route files."""
 
 import os
+import secrets
 from typing import Optional
 from fastapi import Request, HTTPException, WebSocket
+
+# Operator machine token from ODYSSEUS_API_TOKEN. Broad enough for agents to
+# compile the CEO brief and fetch notes/docs; excludes email:send.
+ENV_API_TOKEN_ID = "env"
+ENV_API_TOKEN_SCOPES = [
+    "chat",
+    "todos:read",
+    "todos:write",
+    "documents:read",
+    "documents:write",
+    "email:read",
+    "email:draft",
+    "calendar:read",
+    "calendar:write",
+    "memory:read",
+    "memory:write",
+    "cookbook:read",
+    "cookbook:launch",
+]
+
+
+def match_env_api_token(raw_token: str, env_token: Optional[str] = None) -> bool:
+    """True when the Bearer equals ``ODYSSEUS_API_TOKEN`` (no SQLite)."""
+    offered = (raw_token or "").strip()
+    expected = (env_token if env_token is not None else os.getenv("ODYSSEUS_API_TOKEN") or "").strip()
+    if not offered.startswith("ody_") or not expected.startswith("ody_"):
+        return False
+    if len(offered) < 12 or len(expected) < 12:
+        return False
+    if len(offered) != len(expected):
+        return False
+    return secrets.compare_digest(offered, expected)
+
+
+def env_api_token_owner(auth_manager) -> Optional[str]:
+    """First admin (else first configured user) for the env operator token."""
+    users = getattr(auth_manager, "users", None) or {}
+    if not isinstance(users, dict) or not users:
+        return None
+    for name, data in users.items():
+        if isinstance(data, dict) and data.get("is_admin"):
+            return name
+    return next(iter(users), None)
+
+
+def stamp_env_api_token(request, owner: str) -> None:
+    """Attribute an env-token Bearer as the sandboxed owner, same as SQLite hits."""
+    request.state.current_user = "api"
+    request.state.api_token = True
+    request.state.api_token_id = ENV_API_TOKEN_ID
+    request.state.api_token_owner = owner
+    request.state.api_token_scopes = list(ENV_API_TOKEN_SCOPES)
+
+
+def accept_env_api_token(
+    request,
+    raw_token: str,
+    auth_manager,
+    env_token: Optional[str] = None,
+) -> bool:
+    """Stamp owner on ``request`` when Bearer matches the env token. No DB I/O."""
+    if not match_env_api_token(raw_token, env_token=env_token):
+        return False
+    owner = env_api_token_owner(auth_manager)
+    if not owner:
+        return False
+    stamp_env_api_token(request, owner)
+    return True
 
 
 def get_current_user(request: Request) -> Optional[str]:
@@ -165,6 +234,9 @@ def authenticate_websocket(websocket: WebSocket) -> Optional[str]:
         raw_token = auth_header[7:]
         if len(raw_token) < 12 or len(raw_token) > 100:
             return None
+        env_owner = env_api_token_owner(auth_manager) if match_env_api_token(raw_token) else None
+        if env_owner:
+            return env_owner
         try:
             from core.database import ApiToken, SessionLocal
             import bcrypt

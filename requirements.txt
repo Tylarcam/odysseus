@@ -37,7 +37,9 @@ python-dateutil
 caldav
 cryptography
 bcrypt
-mcp
+# Pin <2: mcp_servers/* use v1 Server.list_tools()/call_tool() decorators.
+# Unpinned `mcp` pulled 2.0.0 and crashed with AttributeError: no list_tools.
+mcp>=1.28,<2
 pyotp
 qrcode[pil]
 croniter

@@ -2,6 +2,7 @@
 """STT API routes — multi-provider (local Whisper, API endpoint, browser)."""
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.concurrency import run_in_threadpool
 import logging
 
 from src.upload_limits import read_upload_limited, STT_MAX_AUDIO_BYTES
@@ -52,7 +53,10 @@ def setup_stt_routes(stt_service):
     async def get_stt_stats():
         """Get STT service statistics"""
         try:
-            return stt_service.get_stats()
+            # get_stats() can lazily import faster_whisper/torch and load the
+            # Whisper model — a multi-minute blocking operation that must not
+            # run on the event loop.
+            return await run_in_threadpool(stt_service.get_stats)
         except Exception as e:
             logger.error(f"Failed to get STT stats: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -61,8 +65,10 @@ def setup_stt_routes(stt_service):
     async def transcribe_audio(file: UploadFile = File(...)):
         """Transcribe uploaded audio file to text"""
         try:
-            if not stt_service.available:
-                stats = stt_service.get_stats()
+            # available/get_stats/transcribe may import torch and load the
+            # Whisper model synchronously — keep them off the event loop.
+            if not await run_in_threadpool(lambda: stt_service.available):
+                stats = await run_in_threadpool(stt_service.get_stats)
                 message = _stt_unavailable_message(stats)
                 raise HTTPException(status_code=503, detail={"message": message})
 
@@ -70,13 +76,14 @@ def setup_stt_routes(stt_service):
             if not audio_bytes:
                 raise HTTPException(status_code=400, detail={"message": "Empty audio file"})
 
-            text = stt_service.transcribe(
+            text = await run_in_threadpool(
+                stt_service.transcribe,
                 audio_bytes,
                 content_type=file.content_type or "",
                 filename=file.filename or "",
             )
             if text is None:
-                stats = stt_service.get_stats()
+                stats = await run_in_threadpool(stt_service.get_stats)
                 message = _stt_unavailable_message(stats)
                 if stats.get("ffmpeg") is False or stats.get("reason") == "ffmpeg_missing":
                     raise HTTPException(status_code=503, detail={"message": message})

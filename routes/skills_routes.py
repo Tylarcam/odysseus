@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user
 from core.middleware import require_admin
 
 logger = logging.getLogger(__name__)
@@ -1075,7 +1075,7 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
     router = APIRouter(prefix="/api/skills", tags=["skills"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        return effective_user(request)
 
     def _verify_owner(skill: dict, user: Optional[str]):
         if user is None:

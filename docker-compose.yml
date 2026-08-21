@@ -61,6 +61,8 @@ services:
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - LOCALHOST_BYPASS=${LOCALHOST_BYPASS:-false}
+      # Operator agent Bearer (ody_). Accepted as the owner without SQLite.
+      - ODYSSEUS_API_TOKEN=${ODYSSEUS_API_TOKEN:-}
       - ODYSSEUS_ADMIN_USER=${ODYSSEUS_ADMIN_USER:-admin}
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
@@ -80,6 +82,9 @@ services:
       - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY:-}
+      - TINYFISH_API_KEY=${TINYFISH_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       # gmail_gog provider — gogcli binary + encrypted file keyring in ./data/gog
       - GOG_PATH=/usr/local/bin/gog
       - GOG_HOME=/app/data/gog

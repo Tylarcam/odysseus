@@ -375,24 +375,45 @@ function handleTranscriptionCompleted(event) {
 function maybeDispatchCmdShortcut(text) {
   const t = (text || '').toLowerCase().trim();
   if (!t) return false;
+  // Upwork Send Pack (Library) — voice open_doc, not only Money Move "do it".
+  const SEND_PACK_ID = '4f9a694f-7103-4ced-9798-3a701929bcbe';
   const rules = [
+    // Human-gate confirms FIRST — never bridge, never submit/SMTP/CIHR.
+    { re: /\bi submitted (the )?nomination\b/, action: 'confirm_grant_packet_sent', confirmSend: true },
+    { re: /\bi submitted (the )?(canada )?(impact\+|impact plus)\b/, action: 'confirm_grant_packet_sent', confirmSend: true },
+    { re: /\bi sent (the )?(upwork )?(send )?pack\b/, action: 'confirm_pack_sent', confirmSend: true },
+    { re: /\bmark (the )?(upwork )?(send )?pack (as )?(done|sent)\b/, action: 'confirm_pack_sent', confirmSend: true },
+    { re: /\bcheck off (the )?(upwork )?(send )?pack\b/, action: 'confirm_pack_sent', confirmSend: true },
+    { re: /\bi sent proposal (1|one)\b/, action: 'confirm_proposal_sent', confirmSend: true },
+    { re: /\bi sent (the )?(npr )?(thank[- ]you)\b/, action: 'confirm_npr_sent', confirmSend: true },
+    { re: /\bi sent (the )?npr\b/, action: 'confirm_npr_sent', confirmSend: true },
+    { re: /\bmark (the )?(npr )?(thank[- ]you).*(sent|done)\b/, action: 'confirm_npr_sent', confirmSend: true },
     { re: /\b(open|show)\b.*\bagent bin\b/, action: 'agent_bin' },
     { re: /\b(open|show)\b.*\bjobs?\b/, action: 'jobs' },
     { re: /\b(open|show)\b.*\bemail\b/, action: 'email' },
     { re: /\b(open|show)\b.*\bresearch\b/, action: 'research' },
     { re: /\b(open|show)\b.*\bcalendar\b/, action: 'calendar' },
     { re: /\b(open|show)\b.*\b(notes?|todos?)\b/, action: 'notes' },
+    { re: /\bopen (the )?(upwork )?(send )?pack\b/, action: 'open_doc', id: SEND_PACK_ID },
+    { re: /\bopen (the |that )(document|doc)\b/, action: 'open_doc', id: SEND_PACK_ID },
     { re: /\b(open|show)\b.*\blibrary\b/, action: 'library' },
     { re: /\b(open|show)\b.*\btasks?\b/, action: 'tasks' },
     { re: /\bplan today\b/, action: 'plan_today' },
     { re: /\brefresh (the )?(vault|cmd|hud)\b/, action: 'refresh' },
+    // BRIEF ME / Money Move "Do it" — execute the money needle, don't just narrate it.
+    { re: /^(ok(ay)?|yes|yeah|yep)?[,.]?\s*((let'?s|lets) )?do (it|that)\b/, action: 'hero_act' },
+    { re: /^(take me there|open (the )?gate)\b/, action: 'hero_act' },
   ];
   for (const rule of rules) {
     if (!rule.re.test(t)) continue;
     document.dispatchEvent(new CustomEvent('odysseus:cmd-action', {
-      detail: { action: rule.action, id: '' },
+      detail: { action: rule.action, id: rule.id || '' },
     }));
     voiceTelemetry.emit('cmd.shortcut', { action: rule.action });
+    // Confirm-send never bridges (agent must not SMTP / Upwork-submit).
+    if (rule.confirmSend) {
+      return true;
+    }
     // If the utterance is ONLY a navigate command, don't also bridge.
     // Longer sentences ("open agent bin and summarize…") still bridge.
     const onlyNav = t.length < 48 && !/\band\b|\bthen\b|\btell me\b|\bsummarize\b/.test(t);

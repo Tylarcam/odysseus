@@ -112,18 +112,18 @@ def _load_custom_endpoint() -> Dict[str, str]:
 
 
 def _build_fastembed_client():
-    from src.embeddings import FastEmbedClient
+    from src.embeddings import get_fastembed_client
 
-    client = FastEmbedClient()
-    client.get_sentence_embedding_dimension()
-    return client
+    return get_fastembed_client()
 
 
 def _build_custom_client():
-    from src.embeddings import EmbeddingClient, get_embedding_client
+    from src.embeddings import get_http_embedding_client
 
-    client = get_embedding_client()
-    if isinstance(client, EmbeddingClient):
+    # HTTP only. get_embedding_client() falls back to FastEmbed and would
+    # load MiniLM just to throw the client away when this lane requires HTTP.
+    client = get_http_embedding_client()
+    if client is not None:
         return client
     raise RuntimeError("HTTP embedding lane unavailable")
 

@@ -7,6 +7,7 @@ state without dumping the full CMD Center payload.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,302 @@ def _speech_when_future(iso_or_dt: Any) -> str:
     return f"in {days} days"
 
 
+_ISO_BIT = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?"
+)
+_H2 = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+_BULLET = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+)$")
+
+
+def _speech_plain(text: str, n: int = 90) -> str:
+    t = (text or "").strip().replace("\n", " ")
+    t = t.replace("**", "").replace("__", "").replace("`", "")
+    t = _ISO_BIT.sub("", t)
+    t = re.sub(r"\s+", " ", t).strip(" \t-—,.")
+    return _clip(t, n)
+
+
+def _is_placeholder(text: str) -> bool:
+    low = (text or "").strip().lower().strip("_* ")
+    if not low:
+        return True
+    return any(
+        p in low
+        for p in (
+            "clear day",
+            "_none",
+            "none.",
+            "no job applications",
+            "hasn't filed",
+            "no fruit ledger",
+            "no successful chron",
+            "sporangium may not",
+            "from the swarm plan",
+        )
+    )
+
+
+def _h2_map(content: str) -> Dict[str, str]:
+    text = content or ""
+    matches = list(_H2.finditer(text))
+    out: Dict[str, str] = {}
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        out[m.group(1).strip().lower()] = text[start:end].strip()
+    return out
+
+
+def _section_body(content: str, needle: str) -> str:
+    key = (needle or "").lower()
+    for heading, body in _h2_map(content).items():
+        if key in heading:
+            return body
+    return ""
+
+
+def _parse_top3_items(content: str) -> List[Dict[str, str]]:
+    if not (content or "").strip():
+        return []
+    try:
+        from services.home.mycelia_feed import parse_top3
+
+        return list(parse_top3(content) or [])
+    except Exception:  # pragma: no cover - parser is local and stable
+        return []
+
+
+def _ranked_top3(
+    money_hero: Optional[Dict[str, Any]],
+    content: str,
+) -> List[Dict[str, str]]:
+    mh = money_hero or {}
+    ranked = mh.get("ranked_top3") or []
+    if isinstance(ranked, list) and ranked:
+        out: List[Dict[str, str]] = []
+        for item in ranked[:3]:
+            if isinstance(item, dict) and (item.get("title") or item.get("raw")):
+                out.append(item)
+            elif isinstance(item, str) and item.strip():
+                out.append({"title": item.strip(), "raw": item.strip(), "rationale": ""})
+        if out:
+            return out
+    return _parse_top3_items(content)
+
+
+def _upcoming_need_and_wait(body: str) -> tuple[List[str], List[str]]:
+    need: List[str] = []
+    wait: List[str] = []
+    bucket = "wait"
+    cleaned = re.sub(r"```.*?```", " ", body or "", flags=re.DOTALL)
+    for raw_line in cleaned.splitlines():
+        low = raw_line.strip().lower()
+        if low.startswith("overdue"):
+            bucket = "need"
+            continue
+        if low.startswith("due soon") or low.startswith("calendar") or low.startswith("next chron"):
+            bucket = "wait"
+            continue
+        m = _BULLET.match(raw_line)
+        if not m:
+            continue
+        title = _speech_plain(m.group(1), 80)
+        if not title or _is_placeholder(title):
+            continue
+        (need if bucket == "need" else wait).append(title)
+    return need, wait
+
+
+def _labeled_bullets(body: str, *, need_prefix: str, wait_prefix: str) -> tuple[List[str], List[str]]:
+    need: List[str] = []
+    wait: List[str] = []
+    cleaned = re.sub(r"```.*?```", " ", body or "", flags=re.DOTALL)
+    if _is_placeholder(cleaned[:80]):
+        return need, wait
+    for raw_line in cleaned.splitlines():
+        m = _BULLET.match(raw_line)
+        if not m:
+            continue
+        title = _speech_plain(m.group(1), 80)
+        if not title or _is_placeholder(title):
+            continue
+        low = title.lower()
+        if need_prefix and low.startswith(need_prefix):
+            need.append(_speech_plain(title.split(":", 1)[-1], 80) or title)
+        elif wait_prefix and low.startswith(wait_prefix):
+            wait.append(_speech_plain(title.split(":", 1)[-1], 80) or title)
+        else:
+            need.append(title)
+    return need, wait
+
+
+def _dedupe(items: List[str], seen: Optional[set] = None) -> List[str]:
+    out: List[str] = []
+    have = seen if seen is not None else set()
+    for item in items:
+        key = item.lower()
+        if not item or key in have:
+            continue
+        have.add(key)
+        out.append(item)
+    return out
+
+
+def _fruit_ledger_empty(body: str) -> bool:
+    blob = (body or "").strip()
+    if not blob:
+        return True
+    return _is_placeholder(blob[:120])
+
+
+def _fruit_speech_line(money_hero: Optional[Dict[str, Any]], fruit_body: str) -> str:
+    """Count + last fruit when present; honest empty line when empty."""
+    mh = money_hero or {}
+    count_n = 0
+    try:
+        count_n = int(mh.get("fruit_count") or 0)
+    except (TypeError, ValueError):
+        count_n = 0
+    last = _speech_plain(str(mh.get("last_fruit") or ""), 90)
+    if "invent fruit" in last.lower():
+        last = ""
+    if count_n <= 0 or not last:
+        try:
+            from services.home.mycelia_feed import parse_fruit_ledger
+
+            parsed = parse_fruit_ledger(fruit_body or "")
+            count_n = int(parsed.get("fruit_count") or 0)
+            last = _speech_plain(str(parsed.get("last_fruit") or ""), 90)
+        except Exception:
+            pass
+    if count_n > 0 and last:
+        noun = "fruit" if count_n == 1 else "fruits"
+        return f"{count_n} {noun} on the ledger. Last: {last}."
+    if _fruit_ledger_empty(fruit_body):
+        return "Fruit ledger is empty — don't invent fruit."
+    return ""
+
+
+def _executable_target_line(money_hero: Optional[Dict[str, Any]]) -> str:
+    """Name pack vs NPR draft id so BRIEF ME has a next executable, not just a slogan."""
+    mh = money_hero or {}
+    act = str(mh.get("action") or "").strip()
+    tid = str(mh.get("target_id") or "").strip()
+    title = str(mh.get("title") or "")
+    low = title.lower()
+    id8 = tid[:8]
+    if not id8:
+        return ""
+    if act == "open_doc" or "send pack" in low or "upwork" in low:
+        return f"Next executable: send pack {id8}."
+    if act == "open_note" or "npr" in low:
+        return f"Next executable: NPR draft {id8}."
+    if act == "email":
+        return f"Next executable: email {id8}."
+    return f"Next executable: {id8}."
+
+
+def _harvest_script(
+    *,
+    money_hero: Optional[Dict[str, Any]],
+    ceo_brief: Optional[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """BRIEF ME rundown from today's CEO Brief harvest — not the HUD if-chain."""
+    brief = ceo_brief or {}
+    content = str(brief.get("content") or "")
+    top3 = _ranked_top3(money_hero, content)
+    if not top3:
+        return None
+
+    mh = money_hero or {}
+    first = top3[0]
+    first_title = _speech_plain(str(first.get("title") or first.get("raw") or "Top money move"), 90)
+    headline = _speech_plain(str(mh.get("spoken_needle") or mh.get("true_line") or ""), 140)
+    if not headline:
+        headline = f"Top money move: {first_title}."
+    if headline[-1] not in ".!?":
+        headline += "."
+
+    titles = [
+        _speech_plain(str(item.get("title") or item.get("raw") or ""), 70)
+        for item in top3
+    ]
+    titles = [t for t in titles if t]
+
+    upcoming_need, upcoming_wait = _upcoming_need_and_wait(_section_body(content, "upcoming"))
+    jobs_body = _section_body(content, "job pipeline")
+    jobs_need = _section_bullets_prefixed(jobs_body, "ready") + _section_bullets_prefixed(
+        jobs_body, "review"
+    )
+    handoff_need, handoff_wait = _labeled_bullets(
+        _section_body(content, "handoffs"),
+        need_prefix="needs attention",
+        wait_prefix="in progress",
+    )
+
+    need_bits = _dedupe([first_title] + upcoming_need + jobs_need + handoff_need)
+    wait_bits = _dedupe(titles[1:] + upcoming_wait + handoff_wait, {b.lower() for b in need_bits})
+
+    lines: List[Dict[str, Any]] = [
+        {"text": headline, "highlight": _hl_domain("prod")},
+    ]
+    exec_line = _executable_target_line(mh)
+    if exec_line:
+        lines.append({"text": exec_line, "highlight": _hl_domain("prod")})
+    if titles:
+        numbered = "; ".join(f"{i}) {t}" for i, t in enumerate(titles, 1))
+        lines.append(
+            {
+                "text": f"Top 3: {numbered}.",
+                "highlight": _hl_domain("prod"),
+            }
+        )
+    if need_bits:
+        lines.append(
+            {
+                "text": "Needs you: " + "; ".join(need_bits[:3]) + ".",
+                "highlight": _hl_overdue() if upcoming_need else _hl_domain("prod"),
+            }
+        )
+    if wait_bits and len(lines) < 5:
+        lines.append(
+            {
+                "text": "Can wait: " + "; ".join(wait_bits[:3]) + ".",
+                "highlight": _hl_domain("comms"),
+            }
+        )
+    fruit_body = _section_body(content, "fruit")
+    fruit_line = _fruit_speech_line(mh, fruit_body)
+    if fruit_line:
+        if "don't invent fruit" in fruit_line.lower() or "do not invent fruit" in fruit_line.lower():
+            if len(lines) < 6:
+                lines.append({"text": fruit_line, "highlight": _hl_domain("mem")})
+        else:
+            # Prosperity scoreboard outranks "can wait" when fruit exists.
+            if len(lines) >= 6:
+                lines[-1] = {"text": fruit_line, "highlight": _hl_domain("mem")}
+            else:
+                lines.append({"text": fruit_line, "highlight": _hl_domain("mem")})
+    if len(lines) < 6:
+        lines.append({"text": "That's the state of the V.A.U.L.T.", "highlight": _hl_all()})
+    while len(lines) < 3:
+        lines.append({"text": "Vault standing by.", "highlight": _hl_all()})
+    return lines[:6]
+
+
+def _section_bullets_prefixed(body: str, prefix: str) -> List[str]:
+    out: List[str] = []
+    cleaned = re.sub(r"```.*?```", " ", body or "", flags=re.DOTALL)
+    for raw_line in cleaned.splitlines():
+        m = _BULLET.match(raw_line)
+        if not m:
+            continue
+        title = _speech_plain(m.group(1), 80)
+        if title and title.lower().startswith(prefix):
+            out.append(_speech_plain(title.split(":", 1)[-1], 80) or title)
+    return out
+
+
 def build_brief_script(
     *,
     hero: Optional[Dict[str, Any]] = None,
@@ -127,13 +424,20 @@ def build_brief_script(
     failed_runs: Optional[List[Dict[str, Any]]] = None,
     jobs: Optional[Dict[str, Any]] = None,
     handoffs: Optional[Dict[str, Any]] = None,
+    money_hero: Optional[Dict[str, Any]] = None,
+    ceo_brief: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build a 3–6 line BRIEF ME script matching the CEO brief contract.
+    """Build a 3–6 line BRIEF ME script.
 
-    Sections: Headline · What changed · Needs you · Can wait.
-    Each line is ``{text, highlight: {type: overdue|domain|all, domain?}}``.
+    When today's CEO Brief has a Top 3 harvest, narrate that ranking
+    (headline · Top 3 · Needs you · Can wait). Otherwise keep the HUD
+    if-chain (overdue / research / directives hero).
     Speech-friendly: no ISO dates.
     """
+    harvest = _harvest_script(money_hero=money_hero, ceo_brief=ceo_brief)
+    if harvest:
+        return harvest
+
     hero = hero or {}
     priority_queue = list(priority_queue or [])
     counts = counts or {}
@@ -328,9 +632,13 @@ def format_vault_brief(
     branch_health: Optional[List[Dict[str, Any]]] = None,
     pinned_facts: Optional[List[str]] = None,
     open_note_id: Optional[str] = None,
+    money_hero: Optional[Dict[str, Any]] = None,
+    ceo_brief: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Render a speech-friendly markdown vault brief."""
     hero = hero or {}
+    money_hero = money_hero or {}
+    ceo_brief = ceo_brief or {}
     priority_queue = priority_queue or []
     counts = counts or {}
     branch_health = branch_health or []
@@ -341,7 +649,8 @@ def format_vault_brief(
         "",
         "You are Jarvis for Odysseus. Use this snapshot to answer "
         "'what's on fire' / status questions. Prefer tools or agent mode "
-        "for actions. Keep spoken answers short.",
+        "for actions. Keep spoken answers short. On Money Move, speak the "
+        "money needle and Top 3 — not the HUD inventory hero.",
         "",
     ]
 
@@ -355,6 +664,28 @@ def format_vault_brief(
     if hero.get("cta_label"):
         lines.append(f"- Suggested action: {_clip(str(hero.get('cta_label')), 80)}")
     lines.append("")
+
+    mh_line = _speech_plain(
+        str(money_hero.get("spoken_needle") or money_hero.get("true_line") or money_hero.get("title") or ""),
+        160,
+    )
+    top3 = _ranked_top3(money_hero, str(ceo_brief.get("content") or ""))
+    if mh_line:
+        lines.append("## Money needle (Money Move)")
+        lines.append(f"- {mh_line}")
+        fruit_spoken = _fruit_speech_line(
+            money_hero,
+            _section_body(str(ceo_brief.get("content") or ""), "fruit"),
+        )
+        if fruit_spoken:
+            lines.append(f"- {fruit_spoken}")
+        lines.append("")
+    if top3:
+        lines.append("## Today's Top 3 (CEO Brief harvest)")
+        for i, item in enumerate(top3, 1):
+            item_title = _speech_plain(str(item.get("title") or item.get("raw") or "item"), 100)
+            lines.append(f"{i}. {item_title}")
+        lines.append("")
 
     # Branch snapshot (Relay / Agency / Voice matter most for Jarvis)
     interesting = {
@@ -426,6 +757,8 @@ def build_vault_brief(owner: Optional[str] = None) -> Dict[str, Any]:
 
     pinned = _load_pinned_memory_facts(owner)
     hero: Dict[str, Any] = {}
+    money_hero: Dict[str, Any] = {}
+    ceo_brief: Dict[str, Any] = {}
     priority_queue: List[Dict[str, Any]] = []
     counts: Dict[str, Any] = {}
     branch_health: List[Dict[str, Any]] = []
@@ -433,6 +766,8 @@ def build_vault_brief(owner: Optional[str] = None) -> Dict[str, Any]:
     try:
         payload = _load_cmd_snapshot(owner)
         hero = payload.get("hero") or {}
+        money_hero = payload.get("money_hero") or {}
+        ceo_brief = payload.get("ceo_brief") or {}
         priority_queue = payload.get("priority_queue") or []
         counts = payload.get("counts") or {}
         branch_health = payload.get("branch_health") or []
@@ -457,6 +792,8 @@ def build_vault_brief(owner: Optional[str] = None) -> Dict[str, Any]:
 
     markdown = format_vault_brief(
         hero=hero,
+        money_hero=money_hero,
+        ceo_brief=ceo_brief,
         priority_queue=priority_queue,
         counts=counts,
         branch_health=branch_health,

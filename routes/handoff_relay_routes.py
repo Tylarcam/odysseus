@@ -54,13 +54,13 @@ def queue_handoff_relay(request: Request, doc_id: str):
 
 
 @router.post("/{doc_id}/claim")
-def claim_handoff_relay(request: Request, doc_id: str):
-    """Mark a queued cursor/claude handoff as running (CLI watcher)."""
+def claim_handoff_relay(request: Request, doc_id: str, session_id: Optional[str] = None):
+    """Mark a queued cursor/claude handoff as running (CLI watcher / pickup)."""
     owner = _owner(request)
-    ok = claim_external_relay(doc_id, owner)
+    ok = claim_external_relay(doc_id, owner, session_id=session_id)
     if not ok:
         raise HTTPException(404, "Handoff relay not found or not claimable")
-    return {"ok": True, "doc_id": doc_id, "status": "running"}
+    return {"ok": True, "doc_id": doc_id, "status": "running", "session_id": session_id}
 
 
 @router.post("/{doc_id}/complete")

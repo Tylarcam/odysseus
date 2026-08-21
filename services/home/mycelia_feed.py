@@ -9,6 +9,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # Live canonical board (see scripts/seed_swarm.py / Culler health notes).
 CANONICAL_BLACKBOARD_ID = "30abbc6f-756d-4a00-a9f6-3ef69e806f34"
+# Herald Fruit Ledger note stub — conversion fruit appends here when no Library doc exists.
+FRUIT_LEDGER_NOTE_ID = "506a37f1"
 
 _ENTRY_HEADING = re.compile(
     r"^###\s+(?P<date>\d{4}-\d{2}-\d{2})\s*[·•\-]\s*(?P<agent>.+?)\s*$",
@@ -29,6 +31,17 @@ _PENDING_SECTION = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _PENDING_ROW = re.compile(r"^\|([^|]+)\|([^|]+)\|?", re.MULTILINE)
+_PLACEHOLDER_FRUIT = re.compile(
+    r"^(what left the system|no fruit today\.?|\{[^}]+\}|<[^>]+>|your fruit here)\s*$",
+    re.IGNORECASE,
+)
+_HOWTO_FRUIT_MARKERS = (
+    "culler remediation",
+    "how to log fruit",
+    "how to use this template",
+    "how to use this",
+    "¡¡¡ fruit ledger",
+)
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
@@ -52,6 +65,50 @@ def _doc_text(doc: Dict[str, Any]) -> str:
 
 def _note_text(note: Dict[str, Any]) -> str:
     return str(note.get("content") or note.get("body") or "").strip()
+
+
+def _record_text(rec: Optional[Dict[str, Any]]) -> str:
+    if not rec:
+        return ""
+    return str(
+        rec.get("content") or rec.get("current_content") or rec.get("body") or ""
+    ).strip()
+
+
+def _is_fruit_ledger_title(title: Any) -> bool:
+    blob = str(title or "").lower()
+    return "fruit" in blob and "ledger" in blob
+
+
+def _is_fruit_stub_note(rec: Dict[str, Any]) -> bool:
+    return str(rec.get("id") or "").strip()[:8] == FRUIT_LEDGER_NOTE_ID[:8]
+
+
+def is_fruit_howto_text(text: str, title: str = "") -> bool:
+    """True for Culler-remediation / how-to / template fruit docs, not live ledgers."""
+    if "¡¡¡" in (title or "") or "¡¡¡" in (text or ""):
+        return True
+    blob = f"{title}\n{text}".lower()
+    return any(m in blob for m in _HOWTO_FRUIT_MARKERS)
+
+
+def live_fruit_count(text: str) -> int:
+    """Count ``- FRUIT:`` lines that are not how-to placeholders."""
+    n = 0
+    for match in _FRUIT_LINE.finditer(text or ""):
+        fruit = match.group(1).strip()
+        if _PLACEHOLDER_FRUIT.match(fruit):
+            continue
+        n += 1
+    return n
+
+
+def _has_live_fruit(rec: Dict[str, Any]) -> bool:
+    return live_fruit_count(_record_text(rec)) > 0
+
+
+def _is_fruit_howto_doc(rec: Dict[str, Any]) -> bool:
+    return is_fruit_howto_text(_record_text(rec), str(rec.get("title") or ""))
 
 
 def is_blackboard_spill_title(title: str) -> bool:
@@ -233,7 +290,209 @@ def parse_fruit_ledger(text: str) -> Dict[str, Any]:
                 if cols[0].lower() in ("item", "name", "fruit"):
                     continue
                 pending.append({"item": cols[0], "status": cols[1] if len(cols) > 1 else ""})
-    return {"fruits": fruits[:5], "pending": pending[:5], "fruit_count": len(fruits)}
+    last = fruits[-1]["fruit"] if fruits else ""
+    return {
+        "fruits": fruits[-5:],
+        "pending": pending[:5],
+        "fruit_count": len(fruits),
+        "last_fruit": last,
+    }
+
+
+# Canonical NPR Panel 2 thank-you drafts (same ids as cmd_center Money Move).
+NPR_PANEL2_DRAFT_IDS = ("4be22ee3", "8504c427", "80aa4a73")
+GRANT_PACKET_CHECKLIST_PREFIX = "08e7c105"
+_SENT_MARK = re.compile(
+    r"\((sent|cleared|done)\)|marked sent|already sent",
+    re.IGNORECASE,
+)
+
+
+def find_fruit_ledger(
+    documents: Optional[List[Dict[str, Any]]] = None,
+    notes: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Pick the Herald fruit source by live FRUIT: lines, then title/id tie-break.
+
+    Rank:
+      1. Has ``FRUIT:`` lines (``parse_fruit_ledger`` fruit_count > 0)
+      2. Library fruit+ledger document *with live FRUIT lines*
+      3. Herald note stub ``506a37f1``
+      4. Other fruit+ledger notes
+
+    Skip: a titled fruit+ledger Library doc with zero *live* ``- FRUIT:``
+    lines is a how-to / template / Culler-remediation — not a ledger.
+    Example/placeholder lines (``what left the system``, ``No fruit today.``)
+    do not count. How-to docs must not beat note ``506a37f1`` and must not
+    be dumped into the CEO brief.
+    Recency is the last tie-break inside the same bucket.
+    """
+    candidates: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+
+    def _add(rec: Dict[str, Any], kind: str) -> None:
+        if not isinstance(rec, dict):
+            return
+        rid = str(rec.get("id") or "").strip() or f"anon:{id(rec)}"
+        key = (kind, rid)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append({"record": rec, "kind": kind})
+
+    for d in documents or []:
+        if not _is_fruit_ledger_title(d.get("title")):
+            continue
+        if _is_fruit_howto_doc(d) or not _has_live_fruit(d):
+            continue
+        _add(d, "doc")
+    for n in notes or []:
+        if _is_fruit_stub_note(n) or _is_fruit_ledger_title(n.get("title")):
+            _add(n, "note")
+    if not candidates:
+        return None
+
+    def _sort_key(found: Dict[str, Any]) -> Tuple[int, int, float]:
+        rec = found["record"]
+        has_fruit = 1 if _has_live_fruit(rec) else 0
+        if found["kind"] == "doc":
+            type_rank = 0
+        elif _is_fruit_stub_note(rec):
+            type_rank = 1
+        else:
+            type_rank = 2
+        updated = _parse_dt(rec.get("updated_at")) or datetime.min.replace(tzinfo=timezone.utc)
+        return (-has_fruit, type_rank, -updated.timestamp())
+
+    candidates.sort(key=_sort_key)
+    return candidates[0]
+
+
+def _record_id8(rec: Dict[str, Any]) -> str:
+    return str(rec.get("id") or "").strip()[:8]
+
+
+def _npr_id_match(rec_id: str, prefix: str) -> bool:
+    nid = str(rec_id or "").strip()
+    if not nid or not prefix:
+        return False
+    return nid == prefix or nid.startswith(prefix) or prefix.startswith(nid[:8])
+
+
+def _note_marked_sent(rec: Dict[str, Any]) -> bool:
+    if rec.get("archived"):
+        return True
+    if _SENT_MARK.search(str(rec.get("title") or "")):
+        return True
+    items = rec.get("items")
+    if isinstance(items, list) and items:
+        open_n = sum(
+            1
+            for it in items
+            if isinstance(it, dict) and not it.get("done") and not it.get("checked")
+        )
+        return open_n == 0
+    return False
+
+
+def conversion_fruit_events(
+    *,
+    notes: Optional[List[Dict[str, Any]]] = None,
+    documents: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, str]]:
+    """Fruit lines earned when a money gate actually clears. No invented dollars."""
+    from services.documents.ceo_brief_script import human_gate_cleared, is_upwork_send_gate
+
+    notes_list = [n for n in (notes or []) if isinstance(n, dict)]
+    docs_list = [d for d in (documents or []) if isinstance(d, dict)]
+    events: List[Dict[str, str]] = []
+
+    if human_gate_cleared(notes=notes_list, documents=docs_list):
+        n_sent = 5
+        evidence = "Upwork send pack marked sent"
+        for rec in notes_list:
+            title = str(rec.get("title") or "")
+            if not is_upwork_send_gate(title):
+                continue
+            items = rec.get("items")
+            if isinstance(items, list) and items:
+                n_sent = len(items)
+            nid = _record_id8(rec)
+            evidence = f"checklist {nid} all done" if nid else "Upwork send checklist all done"
+            break
+        events.append({
+            "key": "upwork-send-pack",
+            "fruit": f"Upwork Send Pack — {n_sent} proposals sent",
+            "evidence": evidence,
+        })
+
+    sent_npr: Optional[str] = None
+    for prefix in NPR_PANEL2_DRAFT_IDS:
+        for rec in notes_list:
+            if not _npr_id_match(str(rec.get("id") or ""), prefix):
+                continue
+            if _note_marked_sent(rec):
+                sent_npr = _record_id8(rec) or prefix
+                break
+        if sent_npr:
+            break
+    if sent_npr:
+        events.append({
+            "key": "npr-panel-2",
+            "fruit": "NPR Panel 2 thank-you sent",
+            "evidence": f"draft {sent_npr} marked sent",
+        })
+
+    sent_grant: Optional[str] = None
+    for rec in notes_list:
+        if not _npr_id_match(str(rec.get("id") or ""), GRANT_PACKET_CHECKLIST_PREFIX):
+            continue
+        if _note_marked_sent(rec):
+            sent_grant = _record_id8(rec) or GRANT_PACKET_CHECKLIST_PREFIX
+            break
+    if sent_grant:
+        events.append({
+            "key": "impact-plus-nomination",
+            "fruit": "Impact+ Doctoral nomination submitted",
+            "evidence": f"checklist {sent_grant}",
+        })
+    return events
+
+
+def fruit_event_logged(text: str, event: Dict[str, str]) -> bool:
+    blob = (text or "").lower()
+    fruit = str(event.get("fruit") or "").strip().lower()
+    if fruit and fruit in blob:
+        return True
+    evid = str(event.get("evidence") or "").strip().lower()
+    if evid and evid in blob:
+        return True
+    return False
+
+
+def append_conversion_fruit(
+    text: str,
+    events: Optional[List[Dict[str, str]]] = None,
+    *,
+    today: Optional[str] = None,
+) -> Tuple[str, List[Dict[str, str]]]:
+    """Append Herald FRUIT blocks for new conversion events. Idempotent."""
+    day = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    body = text or ""
+    added: List[Dict[str, str]] = []
+    for event in events or []:
+        fruit = str(event.get("fruit") or "").strip()
+        if not fruit or fruit_event_logged(body, event):
+            continue
+        evidence = str(event.get("evidence") or "money gate cleared").strip()
+        block = (
+            f"### {day} · Herald\n"
+            f"- FRUIT: {fruit}\n"
+            f"- EVIDENCE: {evidence}\n"
+        )
+        body = (body.rstrip() + "\n\n" + block).strip() + "\n"
+        added.append(event)
+    return body, added
 
 
 def _merge_entries(sources: Iterable[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
@@ -387,7 +646,11 @@ def _build_quick_read(
     if pending:
         lines.append({"kind": "fruit", "text": f"Pending fruit: {pending[0].get('item') or 'see ledger'}"})
     elif (fruit.get("fruit_count") or 0) > 0:
-        lines.append({"kind": "fruit", "text": f"{fruit['fruit_count']} fruit logged today"})
+        last = str(fruit.get("last_fruit") or "").strip()
+        if last:
+            lines.append({"kind": "fruit", "text": f"{fruit['fruit_count']} fruit. Last: {last}"})
+        else:
+            lines.append({"kind": "fruit", "text": f"{fruit['fruit_count']} fruit logged today"})
     if health.get("fragmented"):
         lines.append({"kind": "health", "text": f"Board hygiene: {health.get('summary')}"})
     return lines[:5]
@@ -463,8 +726,9 @@ def build_mycelia_feed(
         top3_text = top3_text + "\n\n" + _doc_text(plan_doc)
     top3 = parse_top3(top3_text)
 
-    ledger_doc = _latest_doc_like(documents, ("fruit", "ledger"))
-    fruit = parse_fruit_ledger(_doc_text(ledger_doc) if ledger_doc else "")
+    found_ledger = find_fruit_ledger(documents, notes)
+    ledger_doc = found_ledger["record"] if found_ledger else None
+    fruit = parse_fruit_ledger(_record_text(ledger_doc))
 
     research_doc = _latest_doc_like(documents, ("research", "brief"))
     research_excerpt = ""
@@ -496,6 +760,7 @@ def build_mycelia_feed(
             **fruit,
             "ledger_id": ledger_doc.get("id") if ledger_doc else None,
             "ledger_title": ledger_doc.get("title") if ledger_doc else None,
+            "ledger_kind": found_ledger.get("kind") if found_ledger else None,
         },
         "health": health,
         "quick_read": quick_read,

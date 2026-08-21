@@ -38,6 +38,7 @@
 
 import { makeEdgeDockController } from './modalSnap.js';
 import { makeWindowResizable } from './windowResize.js';
+import { toggleMaximize, isTileMaximized } from './tileManager.js';
 
 const SNAP_PX = 6;        // cursor distance from top edge for fullscreen snap
 const UNSNAP_PX = 24;     // cursor distance from top before fullscreen exits
@@ -52,6 +53,87 @@ function _leftNavWidth() {
   const rail = parseInt(rs.getPropertyValue('--icon-rail-w') || '48', 10) || 0;
   const sb = parseInt(rs.getPropertyValue('--sidebar-w') || '0', 10) || 0;
   return rail + sb;
+}
+
+const FS_ICON_ENTER = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+const FS_ICON_EXIT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg>';
+
+function ensureFullscreenToggle(header, opts = {}) {
+  if (!header) return;
+  const modal = opts.modal;
+  const content = opts.content;
+  const fsClass = opts.fsClass || null;
+  const enableFullscreen = opts.enableFullscreen;
+  const onEnterFullscreen = opts.onEnterFullscreen;
+  const onExitFullscreen = opts.onExitFullscreen;
+  const isCustomFs = !!enableFullscreen && typeof onEnterFullscreen === 'function';
+
+  // Notes (and any header that already shipped a square) owns its own control.
+  // Do not inject a second button or bind a competing click handler.
+  if (header.querySelector('[data-fullscreen-toggle], #notes-fullscreen-toggle, .modal-fullscreen-btn')) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'modal-minimize-btn modal-fullscreen-btn';
+  btn.dataset.fullscreenToggle = '1';
+  btn.title = 'Full screen';
+  btn.setAttribute('aria-label', 'Full screen');
+  btn.setAttribute('aria-pressed', 'false');
+  btn.innerHTML = FS_ICON_ENTER;
+
+  const minBtns = header.querySelectorAll('.modal-minimize-btn:not(.modal-fullscreen-btn)');
+  const minBtn = minBtns.length ? minBtns[minBtns.length - 1] : null;
+  const closeBtn = header.querySelector('.close-btn, .modal-close, .modal-close-btn');
+  if (minBtn) {
+    if (minBtn.nextSibling) minBtn.parentNode.insertBefore(btn, minBtn.nextSibling);
+    else minBtn.parentNode.appendChild(btn);
+  } else if (closeBtn && closeBtn.parentNode) {
+    closeBtn.parentNode.insertBefore(btn, closeBtn);
+  } else {
+    header.appendChild(btn);
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.innerWidth <= 768) return;
+    if (isCustomFs) {
+      if (_customFsOn()) onExitFullscreen?.();
+      else onEnterFullscreen();
+    } else {
+      toggleMaximize(content || modal);
+    }
+    sync();
+  });
+
+  function _customFsOn() {
+    if (!fsClass) return false;
+    return !!(modal && modal.classList.contains(fsClass))
+      || !!(content && content.classList.contains(fsClass));
+  }
+
+  function sync() {
+    const on = isCustomFs ? _customFsOn() : isTileMaximized(content || modal);
+    btn.title = on ? 'Exit full screen' : 'Full screen';
+    btn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.innerHTML = on ? FS_ICON_EXIT : FS_ICON_ENTER;
+  }
+
+  sync();
+
+  if (header.dataset.fsBtnObs === '1') return;
+  header.dataset.fsBtnObs = '1';
+  const obsTarget = modal || content;
+  if (obsTarget && typeof MutationObserver !== 'undefined') {
+    const obs = new MutationObserver(sync);
+    obs.observe(obsTarget, { attributes: true, attributeFilter: ['class'] });
+    if (content && content !== obsTarget) {
+      obs.observe(content, { attributes: true, attributeFilter: ['class', 'data-_tile-zone'] });
+    } else if (content) {
+      obs.observe(content, { attributes: true, attributeFilter: ['class', 'data-_tile-zone'] });
+    }
+  }
 }
 
 export function makeWindowDraggable(modal, options = {}) {
@@ -98,6 +180,8 @@ export function makeWindowDraggable(modal, options = {}) {
   // the navigation. Callers can still pass enableLeftDock:false for a special
   // modal that should only dock right.
   const leftDock = (enableDock && options.enableLeftDock !== false) ? makeEdgeDockController(modal, 'left') : null;
+
+  ensureFullscreenToggle(header, { modal, content, fsClass, enableFullscreen, onEnterFullscreen, onExitFullscreen });
 
   // Per-drag state, reset on mousedown.
   let dragging = false;

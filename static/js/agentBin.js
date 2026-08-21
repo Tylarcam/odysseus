@@ -30,6 +30,7 @@ let _pollInterval = null;
 let _badgeInterval = null;
 let _escHandler = null;
 let _loading = false;
+let _error = '';
 
 function _esc(text) {
   if (uiModule?.esc) return uiModule.esc(text);
@@ -60,13 +61,26 @@ function _formatWhen(note) {
   }
 }
 
+function _defaultTab() {
+  const c = _data.counts || {};
+  if ((c.needs_attention || 0) > 0) return 'attention';
+  if ((c.in_progress || 0) > 0) return 'progress';
+  return _activeTab || 'attention';
+}
+
 async function _fetchHandoffs() {
   _loading = true;
+  _error = '';
   try {
     const res = await fetch(`${API_BASE}/api/notes/handoffs`, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`Handoffs fetch failed (${res.status})`);
-    _data = await res.json();
+    const payload = await res.json();
+    if (!payload || typeof payload !== 'object' || !payload.counts) {
+      throw new Error('Unexpected handoffs payload');
+    }
+    _data = payload;
   } catch (err) {
+    _error = err?.message || String(err);
     console.warn('Agent Bin fetch failed', err);
   } finally {
     _loading = false;
@@ -94,6 +108,9 @@ function _renderRow(note) {
   const agentBtn = (!external)
     ? `<button type="button" class="memory-toolbar-btn agent-bin-open-agent" data-session-id="${_esc(sessionId)}" data-note-id="${_esc(note.id)}">Open agent</button>`
     : '';
+  const cliChip = (external && sessionId)
+    ? `<span class="agent-bin-cli" title="${_esc(sessionId)}">CLI ${_esc(String(sessionId).slice(0, 8))}</span>`
+    : '';
   const looksBroken = status === 'failed'
     || (note.handoff_outcome && /node\.exe|integrityerror|unique constraint/i.test(note.handoff_outcome));
   const retryBtn = (looksBroken && _activeTab !== 'done')
@@ -111,6 +128,7 @@ function _renderRow(note) {
       <div class="agent-bin-row-head">
         <span class="note-handoff-tag agent-bin-status${statusCls}">${_esc(label)}</span>
         <span class="agent-bin-target">${target ? `→ ${_esc(target)}` : ''}</span>
+        ${cliChip}
         ${when ? `<span class="agent-bin-when">${_esc(when)}</span>` : ''}
       </div>
       <div class="agent-bin-title">${_esc(title)}</div>
@@ -146,6 +164,10 @@ function _renderList() {
   const items = _tabItems();
   if (_loading && !items.length) {
     body.innerHTML = '<div class="agent-bin-empty">Loading handoffs…</div>';
+    return;
+  }
+  if (_error && !items.length) {
+    body.innerHTML = `<div class="agent-bin-empty">Could not load handoffs (${_esc(_error)}).</div>`;
     return;
   }
   if (!items.length) {
@@ -293,7 +315,8 @@ export function openAgentBin() {
     Modals.restore('agent-bin-modal');
     _open = true;
     _fetchHandoffs().then(() => {
-      _renderList();
+      _activeTab = _defaultTab();
+      _switchTab(_activeTab);
       refreshBadge();
     });
     _startPolling();
@@ -303,6 +326,8 @@ export function openAgentBin() {
 
   _open = true;
   _activeTab = 'attention';
+  _loading = true;
+  _error = '';
 
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -351,7 +376,8 @@ export function openAgentBin() {
 
   _renderList();
   _fetchHandoffs().then(() => {
-    _renderList();
+    _activeTab = _defaultTab();
+    _switchTab(_activeTab);
     refreshBadge();
   });
   _startPolling();
@@ -429,7 +455,7 @@ export async function refreshBadge() {
     const res = await fetch(`${API_BASE}/api/notes/handoffs`, { credentials: 'same-origin' });
     if (!res.ok) return;
     const data = await res.json();
-    _updateBadge(data?.counts?.needs_attention || 0);
+    _updateBadge((data?.counts?.needs_attention || 0) + (data?.counts?.in_progress || 0));
   } catch {
     /* non-fatal */
   }

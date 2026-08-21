@@ -33,11 +33,16 @@ class TimestampMixin:
 from src.constants import DATA_DIR, AUTH_FILE, MEMORY_FILE, USER_PREFS_FILE, SETTINGS_FILE
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/app.db")
 
-# Create engine
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+# SQLite: busy_timeout retries on lock instead of failing immediately.
+# Do not set pool_size here — file SQLite defaults to NullPool; QueuePool
+# kwargs would either error or multiply writers against one DB file.
+_engine_kwargs: dict = {}
+if "sqlite" in DATABASE_URL:
+    _engine_kwargs["connect_args"] = {
+        "check_same_thread": False,
+        "timeout": 10.0,  # seconds → PRAGMA busy_timeout
+    }
+engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -45,13 +50,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Listening on the Engine class ensures this listener fires for all Engine
 # instances created within the process, not just the primary application engine.
-# The isinstance(sqlite3.Connection) check ensures that this PRAGMA foreign_keys=ON
-# configuration remains a no-op when using non-SQLite database backends.
+# The isinstance(sqlite3.Connection) check ensures that this configuration
+# remains a no-op when using non-SQLite database backends.
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, sqlite3.Connection):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        # WAL: readers don't block writers (and vice versa for most cases).
+        # synchronous=NORMAL is the usual WAL pairing; cache_size is advisory.
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-64000")
         cursor.close()
 
 

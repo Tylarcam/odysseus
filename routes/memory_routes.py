@@ -27,7 +27,7 @@ from src.request_models import MemoryAddRequest
 from core.database import SessionLocal
 from src.llm_core import llm_call_async
 from services.memory.memory_extractor import audit_memories
-from src.auth_helpers import get_current_user, require_user
+from src.auth_helpers import effective_user, require_authenticated_request
 from src.endpoint_resolver import resolve_endpoint
 from src.upload_limits import read_upload_limited, MEMORY_IMPORT_MAX_BYTES
 
@@ -39,7 +39,21 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     router = APIRouter(prefix="/api/memory", tags=["memory"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        return effective_user(request)
+
+    def _require_memory_write(request: Request) -> str:
+        """Env Bearer files as the operator; cookie users still need privilege.
+
+        ``require_privilege`` → ``require_user`` 403s the sandboxed ``api``
+        token user, which blocked Jarvis from filing proposed memories.
+        Matching extract, API tokens go through ``require_authenticated_request``
+        so they attribute as ``effective_user`` (first admin), not ``api``.
+        Cookie sessions keep ``can_manage_memory``.
+        """
+        from src.auth_helpers import require_privilege
+        if getattr(request.state, "api_token", False):
+            return require_authenticated_request(request)
+        return require_privilege(request, "can_manage_memory")
 
     def _assert_session_owner(session_obj, user):
         """SECURITY: 404 if the caller does not own this session.
@@ -86,8 +100,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         memory_data: Optional[MemoryAddRequest] = None
     ):
         """Add a new memory entry with optional category, source, and session reference."""
-        from src.auth_helpers import require_privilege
-        require_privilege(request, "can_manage_memory")
+        _require_memory_write(request)
         if memory_data is None:
             form = await request.form()
             memory_data = MemoryAddRequest(
@@ -205,7 +218,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     @router.post("/extract")
     async def extract_memory(request: Request, session: str = Form(...)) -> Dict[str, List[str]]:
         """Analyze a session's chat history and return memory suggestions."""
-        require_user(request)
+        require_authenticated_request(request)
         try:
             sess = session_manager.get_session(session)
         except KeyError:
@@ -333,8 +346,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
         file: UploadFile = File(...)
     ):
         """Extract memory suggestions from an uploaded file (PDF, TXT, MD, etc.)."""
-        from src.auth_helpers import require_privilege
-        require_privilege(request, "can_manage_memory")
+        _require_memory_write(request)
 
         endpoint_url = None
         model = None
@@ -481,15 +493,14 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     @router.post("/{memory_id}/pin")
     def pin_memory(request: Request, memory_id: str, pinned: bool = Form(True)):
         """Pin or unpin a memory. Pinned memories are always included in context."""
+        from src.memory import pin_memory_item
+
+        _require_memory_write(request)
         user = _owner(request)
-        all_mem = memory_manager.load_all()
-        for i, memory in enumerate(all_mem):
-            if memory["id"] == memory_id:
-                _verify_memory_owner(memory, user)
-                all_mem[i]["pinned"] = pinned
-                memory_manager.save(all_mem)
-                return {"ok": True, "pinned": pinned}
-        raise HTTPException(404, f"Memory item {memory_id} not found")
+        result = pin_memory_item(memory_manager, memory_id, pinned=pinned, owner=user)
+        if not result.get("ok"):
+            raise HTTPException(404, result.get("error") or f"Memory item {memory_id} not found")
+        return {"ok": True, "pinned": result["pinned"]}
 
     # Wildcard routes MUST come last — otherwise they swallow /import, /search, etc.
     @router.get("/{memory_id}")
@@ -506,6 +517,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     @router.put("/{memory_id}")
     def update_memory(request: Request, memory_id: str, text: str = Form(...), category: str = Form(None)):
         """Update an existing memory item with new text and optional category."""
+        _require_memory_write(request)
         user = _owner(request)
         all_mem = memory_manager.load_all()
         for i, memory in enumerate(all_mem):
@@ -528,6 +540,7 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     @router.delete("/{memory_id}")
     def delete_memory(request: Request, memory_id: str):
         """Delete a memory item by its ID."""
+        _require_memory_write(request)
         user = _owner(request)
         all_mem = memory_manager.load_all()
 

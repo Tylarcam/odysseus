@@ -25,6 +25,23 @@ class LLMConfig:
     RATE_LIMIT_BASE_DELAY = 2.0
     RATE_LIMIT_MAX_DELAY = 60.0
     STREAM_TIMEOUT = 300
+    # Dead NVIDIA / GPU / local NIM hosts can accept TCP then hang, or never
+    # answer SYN. A scalar httpx timeout treats connect as the full read
+    # budget (30–300s) and wedges the asyncio loop — /api/health times out
+    # with 0 bytes. Connect stays a few seconds; generation still uses `read`.
+    CONNECT_TIMEOUT = 3.0
+    MODEL_LIST_TIMEOUT = 5.0
+
+
+def _httpx_timeout(timeout=None, *, write: float = 10.0) -> httpx.Timeout:
+    """Read/write use the caller budget; connect is always short."""
+    read = float(timeout) if timeout not in (None, 0) else float(LLMConfig.DEFAULT_TIMEOUT)
+    return httpx.Timeout(
+        connect=LLMConfig.CONNECT_TIMEOUT,
+        read=read,
+        write=write,
+        pool=5.0,
+    )
 
 
 _RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
@@ -1242,6 +1259,7 @@ def list_model_ids(
     provider = _detect_provider(base_chat_url)
     if provider == "anthropic":
         return list(ANTHROPIC_MODELS)
+    probe_timeout = min(float(timeout or LLMConfig.DEFAULT_TIMEOUT), LLMConfig.MODEL_LIST_TIMEOUT)
     try:
         h = {}
         if headers:
@@ -1252,7 +1270,7 @@ def list_model_ids(
             from src.endpoint_resolver import build_models_url
 
             models_url = build_models_url(base_chat_url)
-        r = httpx.get(models_url, headers=h, timeout=timeout)
+        r = httpx.get(models_url, headers=h, timeout=_httpx_timeout(probe_timeout))
         r.raise_for_status()
         data = r.json()
         model_ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
@@ -1267,7 +1285,7 @@ def list_model_ids(
         try:
             if ":11434" in base_chat_url or "ollama" in base_chat_url.lower():
                 root = base_chat_url.replace("/v1/chat/completions", "").replace("/chat/completions", "").rstrip("/")
-                r = httpx.get(root + "/api/tags", timeout=timeout)
+                r = httpx.get(root + "/api/tags", timeout=_httpx_timeout(probe_timeout))
                 r.raise_for_status()
                 return [m.get("name") or m.get("model") for m in (r.json().get("models") or []) if m.get("name") or m.get("model")]
         except Exception:
@@ -1363,7 +1381,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
     try:
         note_model_activity(target_url, model)
-        r = httpx.post(target_url, headers=h, json=payload, timeout=timeout)
+        r = httpx.post(target_url, headers=h, json=payload, timeout=_httpx_timeout(timeout))
     except Exception as e:
         raise HTTPException(502, f"POST {target_url} failed: {e}")
     if not r.is_success:
@@ -1566,7 +1584,7 @@ async def llm_call_async(
     if _is_host_dead(target_url):
         raise HTTPException(503, f"Upstream {_host_key(target_url)} marked unreachable (cooldown active)")
 
-    call_timeout = httpx.Timeout(connect=3.0, read=float(timeout), write=10.0, pool=5.0)
+    call_timeout = _httpx_timeout(timeout)
     attempt = 0
     while attempt < max_retries:
         attempt += 1
@@ -1606,11 +1624,12 @@ async def llm_call_async(
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             _cooled = _mark_host_dead(target_url)
             duration = time.time() - start
-            _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
+            _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else ""
             logger.warning(f"LLM async connect to {target_url} failed after {duration:.2f}s: {e}{_tail}")
-            if _cooled or attempt >= max_retries:
-                raise HTTPException(503, f"Cannot reach {_host_key(target_url)}: {e}")
-            await asyncio.sleep(_retry_delay_seconds(503, attempt))
+            # Fail-open immediately so the fallback chain can try the next
+            # candidate. Retrying the same dead NVIDIA/GPU host with a long
+            # OS TCP timeout is what blocked /api/health for ~337s.
+            raise HTTPException(503, f"Cannot reach {_host_key(target_url)}: {e}")
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             duration = time.time() - start
             logger.warning(f"LLM async call attempt {attempt} failed after {duration:.2f}s: {e}")
@@ -1698,8 +1717,9 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             apply_request_headers(h, messages_copy)
 
     # Short connect timeout: a reachable peer answers SYN in <100ms even on
-    # Tailscale. 3s is plenty; 30s let one dead upstream wedge the UI.
-    stream_timeout = httpx.Timeout(connect=3.0, read=float(timeout), write=30.0, pool=5.0)
+    # Tailscale. 3s is plenty; a scalar 30–300s timeout let one dead NVIDIA
+    # GPU upstream wedge the event loop (and /api/health) for minutes.
+    stream_timeout = _httpx_timeout(timeout, write=30.0)
 
     if _is_host_dead(target_url):
         yield f'event: error\ndata: {json.dumps({"error": f"Upstream {_host_key(target_url)} unreachable (cooldown active)", "status": 503})}\n\n'

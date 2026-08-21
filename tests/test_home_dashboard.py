@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -429,6 +430,51 @@ def test_include_globe_false_skips_mempalace_and_omits_key(monkeypatch):
     data2 = build_cmd_center(notes=notes, documents=[], tasks=[], sessions=[], include_globe=True)
     assert "globe_graph" in data2
     assert calls == [1]
+
+
+def test_cmd_center_vault_timeouts_fit_request_hard_limit():
+    """Vault Sync CalDAV + IMAP caps must fit under the 45s request timeout."""
+    from routes.home_routes import _VAULT_CALDAV_TIMEOUT_SEC, _VAULT_INBOX_TIMEOUT_SEC
+
+    assert _VAULT_CALDAV_TIMEOUT_SEC + _VAULT_INBOX_TIMEOUT_SEC < 45
+    with open(home_routes.__file__, encoding="utf-8") as f:
+        src = f.read()
+    assert "include_inbox" in src
+    assert "COMMS inbox preview timed out" in src
+    assert "CalDAV sync timed out during vault refresh" in src
+
+
+def test_cmd_center_hud_client_url_skips_globe_and_inbox():
+    """HUD first paint and poll must request include_globe=0 (and include_inbox=0).
+
+    Full cmd-center (globe + inbox) 504s on the 45s proxy timeout; Money Move
+    lives on the light GET. Globe/inbox/CalDAV hydrate after paint, not on the HUD URL.
+    """
+    cmd_js = (Path(__file__).resolve().parents[1] / "static" / "js" / "cmdCenter.js").read_text(
+        encoding="utf-8"
+    )
+    assert "/api/home/cmd-center?include_globe=0&include_inbox=0" in cmd_js
+    fetch_fn = cmd_js[cmd_js.index("async function _fetchData") : cmd_js.index("async function _hydrateGlobeAndInbox")]
+    assert "params.set('include_globe', includeGlobe ? '1' : '0')" in fetch_fn
+    assert "params.set('include_inbox', includeInbox ? '1' : '0')" in fetch_fn
+    assert "if (syncCalendar) params.set('sync_calendar', '1')" in fetch_fn
+    # Regression: flags used to be inside `if (live)` so first paint hung.
+    assert "if (live)" not in fetch_fn.replace("if (live && _data?.payload_hash)", "")
+    assert "void _hydrateGlobeAndInbox()" in cmd_js
+
+    open_fn = cmd_js[cmd_js.index("export async function openCmdCenter") : cmd_js.index("export function minimizeCmdCenter")]
+    assert "await _fetchData();" in open_fn
+    assert "syncCalendar: true" not in open_fn
+    assert "void _hydrateCalendar()" in open_fn
+    assert "void _hydrateGlobeAndInbox()" in open_fn
+
+    hydrate_cal = cmd_js[cmd_js.index("async function _hydrateCalendar") : cmd_js.index("function _renderVitals")]
+    assert "params.set('sync_calendar', '1')" in hydrate_cal
+    assert "_mergeCalendarSurfaces" in hydrate_cal
+
+    # Explicit Vault Sync still blocks on CalDAV; live poll does not.
+    assert "await _fetchData({ syncCalendar: true });" in cmd_js
+    assert "await _fetchData({ live: true })" in cmd_js
 
 
 def test_build_notes_preview_newest_first_with_preview_text():
@@ -1383,3 +1429,97 @@ def test_agency_stalled_review_escalates_in_priority_queue():
     assert row["stalled"]["reason"] == "needs_review_sla"
     assert row["urgency"] == 95 + boost
     assert row["branch"] == "agency"
+
+
+def _quiet_agency():
+    return {
+        "handoffs": {"needs_attention": [], "counts": {"needs_attention": 0, "in_progress": 0}},
+        "jobs": {
+            "ready_to_apply_count": 0,
+            "needs_review_count": 0,
+            "ready_to_apply": [],
+            "needs_review": [],
+            "headline": "",
+            "summary_lines": [],
+        },
+    }
+
+
+def _search_as_code_note():
+    return {
+        "id": "n-sac",
+        "title": "Search as Code",
+        "pinned": True,
+        "note_type": "checklist",
+        "archived": False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "items": [{"text": f"Directive {i}", "done": False} for i in range(10)],
+    }
+
+
+def test_cmd_center_full_picture_hero_is_directives_when_jobs_and_relay_quiet():
+    """Default CORE hero stays the full-picture directive (Search as Code), not the money needle."""
+    from services.documents.ceo_brief_store import date_label
+
+    yesterday = date_label(datetime.now(timezone.utc) - timedelta(days=1))
+    data = build_cmd_center(
+        notes=[_search_as_code_note()],
+        documents=[{
+            "id": "ceo-stale",
+            "title": f"CEO Brief — {yesterday}",
+            "content": "Yesterday's ranking.",
+            "language": "markdown",
+            "archived": False,
+            "updated_at": f"{yesterday}T09:00:00+00:00",
+        }],
+        tasks=[],
+        sessions=[],
+        include_globe=False,
+        **_quiet_agency(),
+    )
+    assert data["hero"]["unit"] == "DIRECTIVES"
+    assert "Search as Code" in (data["hero"].get("title") or "")
+    assert len(data["stage_cards"]) == 5
+    assert data["core_lenses"] == ["full_picture", "money_move"]
+    assert data["money_hero"]["unit"] == "STALE"
+    assert data["money_hero"]["action"] == "ceo_brief"
+
+
+def test_cmd_center_money_hero_uses_brief_top3_without_replacing_default_hero():
+    """Money Move lens reads the brief Top 3; full-picture hero stays on directives."""
+    from services.documents.ceo_brief_store import date_label, canonical_title
+
+    today = date_label()
+    data = build_cmd_center(
+        notes=[_search_as_code_note()],
+        documents=[{
+            "id": "ceo-today",
+            "title": canonical_title(),
+            "content": (
+                f"# CEO Brief — {today}\n\n"
+                "## Top 3 actions that move the needle\n"
+                "1. Ship Loom pack `9ee7b1d6` — convert the demo\n"
+                "2. Protect focus\n"
+                "3. Capture inbound\n"
+            ),
+            "language": "markdown",
+            "archived": False,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }],
+        tasks=[],
+        sessions=[],
+        include_globe=False,
+        **_quiet_agency(),
+    )
+    assert data["hero"]["unit"] == "DIRECTIVES"
+    assert "Search as Code" in (data["hero"].get("title") or "")
+    assert data["money_hero"]["unit"] == "TOP 3"
+    assert "Loom" in (data["money_hero"].get("title") or "")
+    assert len(data["stage_cards"]) == 5
+    blob = " ".join(line.get("text") or "" for line in (data.get("brief_script") or []))
+    assert "Loom" in blob
+    assert "Top 3" in blob
+    assert "Needs you" in blob
+    assert "Can wait" in blob
+    assert "Search as Code" not in blob
+    assert "What changed" not in blob

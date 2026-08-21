@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from src.embedding_lanes import (
@@ -389,6 +391,7 @@ def test_custom_lane_uses_http_down_latch(monkeypatch):
 
     embeddings.reset_http_embed_state()
     calls = []
+    fe_calls = []
 
     class DownClient:
         def __init__(self, url=None, model=None, api_key=None):
@@ -399,6 +402,7 @@ def test_custom_lane_uses_http_down_latch(monkeypatch):
 
     class LocalFastEmbed(FakeEmbedder):
         def __init__(self):
+            fe_calls.append(1)
             super().__init__(384, "mini", "local://fastembed")
 
     monkeypatch.setattr(embeddings, "EmbeddingClient", DownClient)
@@ -410,7 +414,103 @@ def test_custom_lane_uses_http_down_latch(monkeypatch):
         lanes._build_custom_client()
 
     assert calls == [{"url": None, "model": None, "api_key": None}]
+    assert fe_calls == []
     embeddings.reset_http_embed_state()
+
+
+def test_get_fastembed_client_is_singleton(monkeypatch):
+    import src.embeddings as embeddings
+
+    embeddings.reset_fastembed_client()
+    constructed = []
+
+    class Dummy(FakeEmbedder):
+        def __init__(self, model=None):
+            constructed.append(1)
+            super().__init__(384, "mini", "local://fastembed")
+
+    monkeypatch.setattr(embeddings, "FastEmbedClient", Dummy)
+    first = embeddings.get_fastembed_client()
+    second = embeddings.get_fastembed_client()
+    assert first is second
+    assert constructed == [1]
+    embeddings.reset_fastembed_client()
+
+
+def test_build_embedding_lanes_reuses_fastembed_singleton(monkeypatch):
+    fake = FakeChroma()
+    _patch_chroma(monkeypatch, fake)
+
+    import src.embedding_lanes as lanes
+    import src.embeddings as embeddings
+
+    embeddings.reset_fastembed_client()
+    embeddings.reset_http_embed_state()
+    constructed = []
+
+    class Dummy(FakeEmbedder):
+        def __init__(self, model=None):
+            constructed.append(1)
+            super().__init__(384, "mini", "local://fastembed")
+
+    monkeypatch.setattr(embeddings, "FastEmbedClient", Dummy)
+
+    def _no_http():
+        raise RuntimeError("HTTP embedding lane unavailable")
+
+    monkeypatch.setattr(lanes, "_build_custom_client", _no_http)
+    lanes.build_embedding_lanes("odysseus_memories")
+    lanes.build_embedding_lanes("odysseus_tool_index")
+    assert constructed == [1]
+    embeddings.reset_fastembed_client()
+
+
+def test_get_tool_index_does_not_init_on_event_loop(monkeypatch):
+    from src.tool_index import get_tool_index, reset_tool_index
+
+    reset_tool_index()
+    constructed = []
+
+    class Boom:
+        def __init__(self):
+            constructed.append(1)
+            raise AssertionError("ToolIndex must not load MiniLM on the event loop")
+
+    monkeypatch.setattr("src.tool_index.ToolIndex", Boom)
+
+    async def _go():
+        return get_tool_index()
+
+    assert asyncio.run(_go()) is None
+    assert constructed == []
+    reset_tool_index()
+
+
+def test_index_builtin_tools_skips_encode_when_already_present(monkeypatch):
+    fake = FakeChroma()
+    _patch_chroma(monkeypatch, fake)
+
+    import src.embedding_lanes as lanes
+
+    encodes = []
+
+    class Counting(FakeEmbedder):
+        def encode(self, texts, normalize_embeddings=True):
+            encodes.append(len(texts))
+            return super().encode(texts, normalize_embeddings)
+
+    monkeypatch.setattr(lanes, "_build_custom_client", lambda: Counting(768, "nomic", "http://embeddings/v1"))
+    monkeypatch.setattr(lanes, "_build_fastembed_client", lambda: Counting(384, "mini", "local://fastembed"))
+
+    from src.tool_index import ToolIndex
+
+    index = ToolIndex()
+    index.index_builtin_tools()
+    first = list(encodes)
+    encodes.clear()
+    index.index_builtin_tools()
+    assert first
+    assert encodes == []
 
 
 def test_memory_vector_store_writes_both_lanes_and_prefers_custom(monkeypatch):

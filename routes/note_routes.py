@@ -11,7 +11,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, Note, Document, DocumentVersion
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user
+from src.note_label import normalize_note_label
 from src.constants import DATA_DIR
 from src.handoff_bin import bucket_handoff_notes
 from src.handoff_packet import (
@@ -155,6 +156,29 @@ def _note_to_dict(note: Note) -> Dict[str, Any]:
     }
 
 
+def _handoff_bin_row(note: Note) -> Dict[str, Any]:
+    """Compact Agent Bin row — never serialize note body/items."""
+    from src.handoff_bin import compact_handoff_note
+
+    return compact_handoff_note(
+        {
+            "id": note.id,
+            "title": note.title,
+            "archived": bool(note.archived),
+            "handoff_doc_id": getattr(note, "handoff_doc_id", None),
+            "handoff_target": getattr(note, "handoff_target", None),
+            "handoff_at": getattr(note, "handoff_at", None),
+            "handoff_relay_status": getattr(note, "handoff_relay_status", None),
+            "handoff_outcome": getattr(note, "handoff_outcome", None),
+            "handoff_relay_session_id": getattr(note, "handoff_relay_session_id", None),
+            "agent_session_id": getattr(note, "agent_session_id", None),
+            "handoff_relay_started_at": getattr(note, "handoff_relay_started_at", None),
+            "handoff_relay_completed_at": getattr(note, "handoff_relay_completed_at", None),
+            "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+        }
+    )
+
+
 def _reminder_text_from_note(note: Note) -> tuple[str, str]:
     """Return the reminder title/body from a stored note row."""
     title = (note.title or "Note reminder").strip() or "Note reminder"
@@ -192,7 +216,7 @@ def _merge_handoff_draft(note: Note, body: NoteHandoffRequest) -> None:
     if body.note_type is not None:
         note.note_type = body.note_type
     if body.label is not None:
-        note.label = body.label
+        note.label = normalize_note_label(body.label)
     if body.due_date is not None:
         note.due_date = body.due_date
 
@@ -674,7 +698,7 @@ def setup_note_routes(task_scheduler=None):
     router = APIRouter(prefix="/api/notes", tags=["notes"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        return effective_user(request)
 
     def _is_admin_or_single_user(request: Request, user: str | None) -> bool:
         if user == "internal-tool":
@@ -734,7 +758,7 @@ def setup_note_routes(task_scheduler=None):
                 from src.auth_helpers import owner_filter
                 q = owner_filter(q, Note, user)
             notes = q.order_by(Note.handoff_at.desc(), Note.updated_at.desc()).all()
-            return bucket_handoff_notes([_note_to_dict(n) for n in notes])
+            return bucket_handoff_notes([_handoff_bin_row(n) for n in notes])
         finally:
             db.close()
 
@@ -758,7 +782,7 @@ def setup_note_routes(task_scheduler=None):
                 items=json.dumps(body.items) if body.items is not None else None,
                 note_type=body.note_type,
                 color=body.color,
-                label=body.label,
+                label=normalize_note_label(body.label),
                 pinned=body.pinned,
                 due_date=body.due_date,
                 source=body.source,
@@ -840,13 +864,14 @@ def setup_note_routes(task_scheduler=None):
             if body.color is not None:
                 note.color = body.color
             if body.label is not None:
-                note.label = body.label
+                note.label = normalize_note_label(body.label)
             if body.pinned is not None:
                 note.pinned = body.pinned
             if body.archived is not None:
                 note.archived = body.archived
             if body.due_date is not None:
-                note.due_date = body.due_date
+                # Empty string clears (JSON null is ignored by Optional fields).
+                note.due_date = body.due_date.strip() or None if isinstance(body.due_date, str) else body.due_date
             if body.image_url is not None:
                 note.image_url = body.image_url
             if body.repeat is not None:

@@ -183,7 +183,16 @@ if AUTH_ENABLED:
         "/api/version",
         "/login",
     }
-    AUTH_EXEMPT_PREFIXES = ["/static"]
+    AUTH_EXEMPT_PREFIXES = [
+        "/static",
+        # Story Canvas is a same-origin creative tool (iframe or tab) that
+        # persists JSON projects under data/story_canvas/. Routes already
+        # treat owner as optional (get_current_user may be None); requiring
+        # a session cookie blocked Save with 401 even for logged-in users
+        # when the iframe didn't inherit the session — and the product intent
+        # is that login is irrelevant to this tool.
+        "/api/story-canvas",
+    ]
     # Dynamic paths whose own handler proves identity via a path-embedded
     # secret instead of the session/bearer auth. The route handler at
     # routes/task_routes.py validates the per-task `webhook_token` itself
@@ -317,6 +326,12 @@ if AUTH_ENABLED:
                 # Sanity check: tokens are "ody_" + 43 chars of base64
                 if len(raw_token) < 12 or len(raw_token) > 100:
                     return JSONResponse(status_code=401, content={"error": "Invalid API token"})
+                # Operator env token: accept as owner without a SQLite lookup so
+                # a cache miss or disk I/O error cannot 401 agent clients.
+                from src.auth_helpers import accept_env_api_token
+                _tok_mgr = getattr(request.app.state, "auth_manager", None) or auth_manager
+                if accept_env_api_token(request, raw_token, _tok_mgr):
+                    return await call_next(request)
                 prefix = raw_token[:8]
                 try:
                     if app.state._token_cache_dirty:
@@ -661,6 +676,14 @@ app.include_router(setup_gallery_routes())
 from routes.editor_draft_routes import setup_editor_draft_routes
 app.include_router(setup_editor_draft_routes())
 
+# Story Canvas (visual storytelling board)
+# Optional: routes file may be absent/empty during WIP — don't block boot.
+try:
+    from routes.story_canvas_routes import setup_story_canvas_routes
+    app.include_router(setup_story_canvas_routes())
+except Exception as e:
+    logging.getLogger(__name__).warning("Story Canvas routes not loaded: %s", e)
+
 # Scheduled tasks + event bus
 from src.task_scheduler import TaskScheduler
 task_scheduler = TaskScheduler(session_manager)
@@ -869,6 +892,9 @@ async def get_version():
 
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
+    """Liveness only — must not probe NVIDIA/GPU/LLM. Those connects belong
+    off the event loop with a short timeout; a hung GPU fallback previously
+    made this path time out with 0 bytes."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/api/ready")
@@ -974,7 +1000,10 @@ async def _startup_event():
     # first turn as fast as subsequent ones (warm embed ≈ a few ms).
     async def _warmup_tool_index():
         try:
-            from src.tool_index import get_tool_index
+            from src.tool_index import get_tool_index, peek_tool_index
+            if peek_tool_index() is not None:
+                logger.info("[startup] Tool index already warm")
+                return
             idx = await asyncio.to_thread(get_tool_index)
             if idx:
                 await asyncio.to_thread(idx.get_tools_for_query, "warmup", 8)
@@ -983,20 +1012,37 @@ async def _startup_event():
             logger.warning(f"Tool index warmup failed (non-critical): {type(e).__name__}: {e}")
 
     _startup_tasks.append(asyncio.create_task(_warmup_tool_index()))
-    # Warmup: ping all known LLM endpoints to prime connections
+    # Warmup: ping known LLM endpoints off the event loop. NVIDIA / GPU NIM
+    # hosts are skipped — a hung GPU connect must not stall /api/health.
     async def _warmup_endpoints():
         try:
+            from urllib.parse import urlparse
             import httpx
-            endpoints = model_discovery.get_endpoints() if model_discovery else []
-            for ep in endpoints[:5]:
-                url = ep.get("url", "").replace("/chat/completions", "/models")
-                if url:
+            from src.llm_core import _httpx_timeout
+
+            getter = getattr(model_discovery, "get_endpoints", None) if model_discovery else None
+            endpoints = getter() if callable(getter) else []
+            urls = []
+            for ep in (endpoints or [])[:5]:
+                url = (ep.get("url") or "").replace("/chat/completions", "/models")
+                if not url:
+                    continue
+                host = (urlparse(url).hostname or "").lower()
+                if "nvidia" in host:
+                    continue
+                urls.append(url)
+            if not urls:
+                return
+
+            def _ping():
+                for url in urls:
                     try:
-                        async with httpx.AsyncClient(timeout=5.0) as client:
-                            await client.get(url)
+                        httpx.get(url, timeout=_httpx_timeout(3))
                         logger.info(f"Warmup ping OK: {url}")
                     except Exception as e:
                         logger.debug(f"Warmup ping failed for endpoint: {e}")
+
+            await asyncio.to_thread(_ping)
         except Exception as e:
             logger.debug(f"Warmup ping skipped: {e}")
 

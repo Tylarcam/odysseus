@@ -1672,7 +1672,15 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
          <p>Messages will be routed through your OpenClaw agent. The agent has access to tools, memory, and skills configured in your OpenClaw workspace.</p>`,
         'OpenClaw');
     } else if (msgHistory.length) {
-      for (const msg of msgHistory) {
+      // Bulk history render: yield to the event loop every CHUNK_SIZE messages
+      // so a long agent-loop session (hundreds of tool-call bubbles) doesn't
+      // block the main thread for seconds on open. The box stays invisible
+      // (opacity 0, set above) for the whole render regardless, so this is
+      // purely about keeping the tab responsive, not visual smoothness.
+      const CHUNK_SIZE = 40;
+      if (chatHistory) chatHistory.setAttribute('aria-busy', 'true');
+      for (let i = 0; i < msgHistory.length; i++) {
+        const msg = msgHistory[i];
         const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : null;
         let displayContent;
         if (typeof msg.content === 'string') {
@@ -1693,7 +1701,17 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
           }
         }
         window.chatModule.addMessage(msg.role, markdownModule.renderContent(displayContent), modelName, meta);
+        if ((i + 1) % CHUNK_SIZE === 0 && i + 1 < msgHistory.length) {
+          await new Promise(r => requestAnimationFrame(r));
+          // Bail if the user navigated to a different session while this
+          // chunked render was mid-flight — avoid populating the wrong box.
+          if (navToken !== _sessionNavToken || currentSessionId !== id) {
+            if (chatHistory) chatHistory.removeAttribute('aria-busy');
+            return;
+          }
+        }
       }
+      if (chatHistory) chatHistory.removeAttribute('aria-busy');
     } else {
       if (window.chatModule && window.chatModule.showWelcomeScreen) window.chatModule.showWelcomeScreen();
       // Don't highlight empty sessions — feels like nothing is selected

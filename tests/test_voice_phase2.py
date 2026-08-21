@@ -120,9 +120,14 @@ def test_cmd_center_display_settings_and_atlas():
     assert 'data-cmd-rail="right"' in cmd_center
     for comp_id in (
         "status_pills", "vitals", "priority_queue", "globe_scene",
-        "hero", "command_deck", "ai_wire",
+        "hero", "glance", "ceo_quick_read", "scene_legend", "command_deck", "ai_wire",
     ):
         assert comp_id in cmd_center
+    assert 'id="cmd-hero" data-cmd-vis="hero"' in cmd_center
+    assert 'data-cmd-vis="glance"' in cmd_center
+    assert 'data-cmd-vis="ceo_quick_read"' in cmd_center
+    assert 'id="cmd-scene-legend" data-cmd-vis="scene_legend"' in cmd_center
+    assert "CMD_VIS_TOGGLABLE" in cmd_center
 
 
 def test_realtime_reapply_session_patch():

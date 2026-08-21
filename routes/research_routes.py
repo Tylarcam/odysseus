@@ -4,12 +4,14 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 from src.endpoint_resolver import resolve_endpoint
@@ -19,6 +21,54 @@ from src.constants import DEEP_RESEARCH_DIR
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9-]{1,128}$")
 
 logger = logging.getLogger(__name__)
+
+# /api/research/library scan cache — the dashboard polls this endpoint every
+# few seconds and the scan touches every file in DEEP_RESEARCH_DIR (slow on
+# Windows bind mounts). Cached UNFILTERED; owner/search/archived filtering
+# happens per-request so the cache is safe to share across users.
+_LIBRARY_CACHE = {"ts": 0.0, "items": None}
+_LIBRARY_CACHE_TTL_S = 5.0
+
+
+def _library_cache_get():
+    if _LIBRARY_CACHE["items"] is not None and (time.monotonic() - _LIBRARY_CACHE["ts"]) < _LIBRARY_CACHE_TTL_S:
+        return _LIBRARY_CACHE["items"]
+    return None
+
+
+def _library_cache_put(items):
+    _LIBRARY_CACHE["ts"] = time.monotonic()
+    _LIBRARY_CACHE["items"] = items
+
+
+def library_cache_invalidate():
+    """Call after archiving/deleting/creating research so the next poll rescans."""
+    _LIBRARY_CACHE["items"] = None
+
+
+def _scan_research_library():
+    """Sync scan of every research JSON → lightweight summaries (incl. owner).
+    Runs in a threadpool worker — file I/O here must stay OFF the event loop."""
+    items = []
+    for p in Path(DEEP_RESEARCH_DIR).glob("*.json"):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        items.append({
+            "id": p.stem,
+            "owner": d.get("owner"),
+            "query": d.get("query", ""),
+            "category": d.get("category") or "",
+            "source_count": len(d.get("sources", [])),
+            "status": d.get("status", "done"),
+            "duration": d.get("stats", {}).get("Duration", ""),
+            "rounds": d.get("stats", {}).get("Rounds", ""),
+            "started_at": d.get("started_at", 0),
+            "completed_at": d.get("completed_at", 0),
+            "archived": bool(d.get("archived")),
+        })
+    return items
 
 # Model-name substrings that are NOT chat/generation models — research must
 # never pick these as its model. An OpenAI-style endpoint often lists
@@ -360,37 +410,32 @@ def setup_research_routes(research_handler, session_manager=None, tts_service=No
     ):
         user = _require_user(request)
         """List all completed research for the Library panel."""
-        data_dir = Path(DEEP_RESEARCH_DIR)
+        # PERF: the directory scan reads every research JSON. On the Windows
+        # bind mount those open()/read() calls can stall for seconds, and this
+        # endpoint is polled every few seconds by the dashboard — doing the I/O
+        # inline on the event loop froze the whole server (py-spy caught the
+        # loop blocked in pathlib read_text here). Scan in a worker thread and
+        # cache the parsed summaries briefly to collapse the poll storm.
+        scanned = _library_cache_get()
+        if scanned is None:
+            scanned = await run_in_threadpool(_scan_research_library)
+            _library_cache_put(scanned)
+
         items = []
-        for p in data_dir.glob("*.json"):
-            try:
-                d = json.loads(p.read_text(encoding="utf-8"))
-                # SECURITY: only show research belonging to this user. Legacy
-                # JSONs without an `owner` field are hidden — auth was the only
-                # gate before, so every user saw every other user's reports.
-                if d.get("owner") != user:
-                    continue
-                # Archived view shows ONLY archived reports; default hides them.
-                if bool(d.get("archived")) != archived:
-                    continue
-                query = d.get("query", "")
-                if search and search.lower() not in query.lower():
-                    continue
-                sources = d.get("sources", [])
-                items.append({
-                    "id": p.stem,
-                    "query": query,
-                    "category": d.get("category") or "",
-                    "source_count": len(sources),
-                    "status": d.get("status", "done"),
-                    "duration": d.get("stats", {}).get("Duration", ""),
-                    "rounds": d.get("stats", {}).get("Rounds", ""),
-                    "started_at": d.get("started_at", 0),
-                    "completed_at": d.get("completed_at", 0),
-                    "archived": bool(d.get("archived")),
-                })
-            except Exception:
+        for entry in scanned:
+            # SECURITY: only show research belonging to this user. Legacy
+            # JSONs without an `owner` field are hidden — auth was the only
+            # gate before, so every user saw every other user's reports.
+            if entry.get("owner") != user:
                 continue
+            # Archived view shows ONLY archived reports; default hides them.
+            if entry.get("archived") != archived:
+                continue
+            if search and search.lower() not in entry.get("query", "").lower():
+                continue
+            item = dict(entry)
+            item.pop("owner", None)
+            items.append(item)
 
         # Sort
         if sort == "recent":
@@ -414,7 +459,9 @@ def setup_research_routes(research_handler, session_manager=None, tts_service=No
         if not path.exists():
             raise HTTPException(404, "Research not found")
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            # Threadpool: bind-mount reads can stall for seconds (see library).
+            raw = await run_in_threadpool(path.read_text, encoding="utf-8")
+            data = json.loads(raw)
         except Exception as e:
             raise HTTPException(500, f"Failed to read research: {e}")
         # SECURITY: 404 (not 403) so we don't leak that the report exists.
@@ -440,6 +487,7 @@ def setup_research_routes(research_handler, session_manager=None, tts_service=No
             raise
         except Exception as e:
             raise HTTPException(500, f"Failed to update research: {e}")
+        library_cache_invalidate()
         return {"ok": True, "id": session_id, "archived": bool(archived)}
 
     @router.delete("/api/research/{session_id}")
@@ -464,6 +512,7 @@ def setup_research_routes(research_handler, session_manager=None, tts_service=No
             deleted = True
         from services.research.audio_brief import delete_audio_brief_files
         delete_audio_brief_files(session_id)
+        library_cache_invalidate()
         return {"deleted": deleted}
 
     # ------------------------------------------------------------------

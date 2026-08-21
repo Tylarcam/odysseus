@@ -66,6 +66,13 @@ test('peek cycle does not delegate, finish, or drop the card', () => {
   assert.doesNotMatch(body, /splice|_delegate|_finish|_onRefresh/);
 });
 
+test('note done combo archives, unpins, and clears due in one PUT', () => {
+  assert.match(src, /archived:\s*true,\s*pinned:\s*false,\s*due_date:\s*''/);
+  assert.doesNotMatch(src, /Demo card dismissed/);
+  assert.match(src, /_isSeedOrFakeId/);
+  assert.match(src, /TRIAGE —/);
+});
+
 test('double-tap peeks; swipe left/right still act', () => {
   assert.match(src, /DOUBLE_TAP_MS\s*=\s*500/);
   assert.match(src, /DOUBLE_TAP_PX\s*=\s*40/);

@@ -636,19 +636,59 @@ async def scan_stuck_relays() -> None:
         db.close()
 
 
-def claim_external_relay(doc_id: str, owner: Optional[str]) -> bool:
-    """Mark a queued cursor/claude handoff as running (CLI watcher picked it up)."""
+def _stamp_doc_relay_status(
+    db,
+    doc_id: str,
+    status: str,
+    session_id: Optional[str] = None,
+) -> None:
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        return
+    content = doc.current_content or ""
+    if not content.startswith("---"):
+        return
+    updated = _replace_frontmatter_field(content, "status", status)
+    if session_id:
+        updated = _replace_frontmatter_field(updated, "external_session_id", session_id)
+    if updated != content:
+        doc.current_content = updated
+        flag_modified(doc, "current_content")
+
+
+def claim_external_relay(
+    doc_id: str,
+    owner: Optional[str],
+    session_id: Optional[str] = None,
+) -> bool:
+    """Mark a queued cursor/claude handoff as running (CLI watcher / pickup)."""
+    sid = (session_id or "").strip() or None
     db = SessionLocal()
     try:
         note = db.query(Note).filter(Note.handoff_doc_id == doc_id).first()
-        if not note or note.handoff_relay_status != "queued":
+        if not note:
             return False
         if not is_external_relay_target(note.handoff_target or ""):
             return False
-        if owner and note.owner != owner:
+        if owner and note.owner and note.owner != owner:
+            return False
+        status = (note.handoff_relay_status or "").strip().lower()
+        if status == "running":
+            dirty = False
+            if sid and note.handoff_relay_session_id != sid:
+                note.handoff_relay_session_id = sid
+                dirty = True
+            if dirty:
+                _stamp_doc_relay_status(db, doc_id, "running", sid)
+                db.commit()
+            return True
+        if status != "queued":
             return False
         note.handoff_relay_status = "running"
         note.handoff_relay_started_at = _utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        if sid:
+            note.handoff_relay_session_id = sid
+        _stamp_doc_relay_status(db, doc_id, "running", sid)
         db.commit()
         return True
     finally:
@@ -669,7 +709,7 @@ async def complete_external_relay(
         note = db.query(Note).filter(Note.handoff_doc_id == doc_id).first()
         if not note:
             return False
-        if owner and note.owner != owner:
+        if owner and note.owner and note.owner != owner:
             return False
         note_id = note.id
         note_owner = note.owner

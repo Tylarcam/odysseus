@@ -8,6 +8,24 @@ from src.handoff_packet import normalize_target
 
 _EXTERNAL = frozenset({"cursor", "claude"})
 
+# Agent Bin rows — metadata only. Full note content made /api/notes/handoffs
+# too heavy to render while Command Center already had the compact handoff.
+_BIN_ROW_KEYS = (
+    "id",
+    "title",
+    "archived",
+    "handoff_doc_id",
+    "handoff_target",
+    "handoff_at",
+    "handoff_relay_status",
+    "handoff_outcome",
+    "handoff_relay_session_id",
+    "agent_session_id",
+    "handoff_relay_started_at",
+    "handoff_relay_completed_at",
+    "updated_at",
+)
+
 
 def classify_handoff_bucket(note: dict[str, Any]) -> str:
     """Return ``needs_attention``, ``in_progress``, or ``done``."""
@@ -67,14 +85,37 @@ def bucket_handoff_notes(notes: list[dict[str, Any]]) -> dict[str, Any]:
     progress.sort(key=_sort_key_desc, reverse=True)
     done.sort(key=_sort_key_desc, reverse=True)
 
+    return compact_handoff_payload(
+        {
+            "needs_attention": needs,
+            "in_progress": progress,
+            "done": done,
+            "counts": {
+                "needs_attention": len(needs),
+                "in_progress": len(progress),
+                "done": len(done),
+                "total": len(needs) + len(progress) + len(done),
+            },
+        }
+    )
+
+
+def compact_handoff_note(note: dict[str, Any]) -> dict[str, Any]:
+    """Drop body/items so Agent Bin can load without stalling the modal."""
+    row = {key: note.get(key) for key in _BIN_ROW_KEYS}
+    row["archived"] = bool(note.get("archived"))
+    return row
+
+
+def compact_handoff_payload(bucketed: dict[str, Any]) -> dict[str, Any]:
     return {
-        "needs_attention": needs,
-        "in_progress": progress,
-        "done": done,
-        "counts": {
-            "needs_attention": len(needs),
-            "in_progress": len(progress),
-            "done": len(done),
-            "total": len(needs) + len(progress) + len(done),
+        "needs_attention": [compact_handoff_note(n) for n in bucketed.get("needs_attention") or []],
+        "in_progress": [compact_handoff_note(n) for n in bucketed.get("in_progress") or []],
+        "done": [compact_handoff_note(n) for n in bucketed.get("done") or []],
+        "counts": bucketed.get("counts") or {
+            "needs_attention": 0,
+            "in_progress": 0,
+            "done": 0,
+            "total": 0,
         },
     }

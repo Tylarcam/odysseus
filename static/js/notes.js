@@ -166,6 +166,45 @@ function _notesFullscreenSafeRect() {
   return { left, top: 0, width: right - left, height: vh };
 }
 
+const _NOTES_FS_ICON_ENTER = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+const _NOTES_FS_ICON_EXIT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg>';
+
+function _isNotesFullscreen(pane) {
+  return !!(pane && pane.classList.contains('notes-window-fullscreen'));
+}
+
+function _syncNotesFullscreenBtn(pane) {
+  const btn = pane?.querySelector?.('#notes-fullscreen-toggle')
+    || document.getElementById('notes-fullscreen-toggle');
+  if (!btn) return;
+  const on = _isNotesFullscreen(pane || document.getElementById('notes-pane'));
+  btn.title = on ? 'Exit full screen' : 'Full screen';
+  btn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen notes');
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  btn.innerHTML = on ? _NOTES_FS_ICON_EXIT : _NOTES_FS_ICON_ENTER;
+}
+
+function _enterNotesFullscreen(pane) {
+  if (!pane || window.innerWidth <= 768) return;
+  const hadLeft = pane.classList.contains('modal-left-docked');
+  const hadRight = pane.classList.contains('modal-right-docked');
+  pane.classList.remove('modal-left-docked', 'modal-right-docked');
+  if (hadLeft) clearDockSide('left', pane);
+  if (hadRight) clearDockSide('right', pane);
+  pane.classList.add('notes-window-fullscreen');
+  snapModalToZone(pane, {
+    name: 'fullscreen',
+    rect: _notesFullscreenSafeRect(),
+  });
+  _syncNotesFullscreenBtn(pane);
+}
+
+function _toggleNotesFullscreen(pane) {
+  if (!pane) return;
+  if (_isNotesFullscreen(pane)) _restoreNotesSidebarDock(pane);
+  else _enterNotesFullscreen(pane);
+}
+
 function _wireNotesWindow(pane) {
   if (!pane || pane.dataset.windowDragWired === '1') return;
   const header = pane.querySelector('.notes-pane-header');
@@ -179,16 +218,18 @@ function _wireNotesWindow(pane) {
     enableDock: true,
     enableLeftDock: true,
     onEnterFullscreen: () => {
-      pane.classList.add('notes-window-fullscreen');
-      snapModalToZone(pane, {
-        name: 'fullscreen',
-        rect: _notesFullscreenSafeRect(),
-      });
+      _enterNotesFullscreen(pane);
     },
     onExitFullscreen: () => {
       _restoreNotesSidebarDock(pane);
     },
   });
+  if (typeof MutationObserver !== 'undefined' && pane.dataset.fsBtnObs !== '1') {
+    pane.dataset.fsBtnObs = '1';
+    new MutationObserver(() => _syncNotesFullscreenBtn(pane))
+      .observe(pane, { attributes: true, attributeFilter: ['class'] });
+  }
+  _syncNotesFullscreenBtn(pane);
 }
 
 function _clearNotesSnapStyles(pane) {
@@ -213,6 +254,7 @@ function _restoreNotesSidebarDock(pane) {
   _clearNotesSnapStyles(pane);
   if (!pane.isConnected) return;
   applyEdgeDock(pane, 'right');
+  _syncNotesFullscreenBtn(pane);
 }
 
 function _loadPendingHighlights() {
@@ -438,6 +480,9 @@ const COLOR_HEX = {
 // ---- API ----
 
 let _loading = false;
+// Set when the last /api/notes fetch failed or timed out — _renderNotes shows
+// a retry state instead of the misleading "No notes yet" empty message.
+let _fetchFailed = false;
 // Undo stack — most recent action is at the end. We cap it small because the
 // only entries that survive a panel reload are in-memory anyway.
 const _undoStack = [];
@@ -469,13 +514,24 @@ async function _fetchNotes() {
   _loading = true;
   try {
     const url = `${API_BASE}/api/notes${_showingArchived ? '?archived=true' : ''}`;
-    const res = await fetch(url, { credentials: 'same-origin' });
-    if (!res.ok) { _notes = []; return; }
+    // Abort after 20s — a frozen server used to leave this promise pending
+    // forever, so the loading skeletons never resolved into cards or an error.
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 20000);
+    let res;
+    try {
+      res = await fetch(url, { credentials: 'same-origin', signal: ctrl.signal });
+    } finally {
+      clearTimeout(tid);
+    }
+    if (!res.ok) { _notes = []; _fetchFailed = true; return; }
     const data = await res.json();
     _notes = data.notes || data || [];
+    _fetchFailed = false;
   } catch (e) {
     console.error('Failed to fetch notes:', e);
     _notes = [];
+    _fetchFailed = true;
   } finally {
     _loading = false;
   }
@@ -1165,6 +1221,8 @@ export function openPanel() {
         <span class="notes-header-btn-label">Toggle</span>
       </button>
       <button id="notes-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize notes" style="position:relative;left:2px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg></button>
+      <button id="notes-fullscreen-toggle" class="modal-minimize-btn" title="Full screen" aria-label="Full screen notes" aria-pressed="false" style="position:relative;left:2px;">${_NOTES_FS_ICON_ENTER}</button>
+      <button class="close-btn" id="notes-close" title="Close" aria-label="Close notes">\u2716</button>
     </div>
     <div class="notes-search-bar">
       <select class="memory-sort-select notes-sort-select" id="notes-sort" aria-label="Sort notes" title="Sort notes">
@@ -1233,6 +1291,18 @@ export function openPanel() {
     e.preventDefault();
     e.stopPropagation();
     closePanel('down');
+  });
+  const fsBtn = document.getElementById('notes-fullscreen-toggle');
+  if (fsBtn) fsBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _toggleNotesFullscreen(pane);
+  });
+  const closeBtn = document.getElementById('notes-close');
+  if (closeBtn) closeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closePanel();
   });
   // Search + sort
   const searchEl = document.getElementById('notes-search');
@@ -1417,6 +1487,17 @@ export function openPanel() {
     requestAnimationFrame(() => _flushPendingHighlights());
     _startReminderLoop();
     _showNotesFirstOpenHint(pane);
+  }).catch((err) => {
+    // Last-ditch guard: a render exception would otherwise leave the loading
+    // skeletons on screen forever with no feedback.
+    console.error('Notes panel failed to render:', err);
+    const body = document.querySelector('#notes-pane .notes-pane-body');
+    if (body) {
+      _fetchFailed = true;
+      body.querySelector(':scope > .notes-skeleton')?.remove();
+      body.insertAdjacentHTML('beforeend', _emptyStateHtml('No notes yet'));
+      _bindRetryButton(body);
+    }
   });
 }
 
@@ -1475,12 +1556,26 @@ function _updateBulkBar() {
   if (pane) pane.classList.toggle('notes-select-mode', count > 0);
 }
 
-// A note's label field may hold multiple space-separated tags. Split + dedupe.
-function _noteTags(n) {
+// A note's label field may hold multiple space-separated tags. Split +
+// lowercase + dedupe so Jobs / jobs / #Jobs collapse to one chip.
+function _normalizeNoteLabel(raw) {
   const tags = [];
-  if (n?.label) tags.push(...n.label.trim().split(/\s+/).filter(Boolean));
-  if (n?.due_date && _hasTimeComponent(n.due_date)) tags.push('reminder');
-  return [...new Set(tags.map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
+  const seen = new Set();
+  for (const part of String(raw || '').replace(/,/g, ' ').split(/\s+/)) {
+    const t = part.replace(/^#+/, '').trim().toLowerCase();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    tags.push(t);
+  }
+  return tags;
+}
+
+function _noteTags(n) {
+  const tags = _normalizeNoteLabel(n?.label);
+  if (n?.due_date && _hasTimeComponent(n.due_date) && !tags.includes('reminder')) {
+    tags.push('reminder');
+  }
+  return tags;
 }
 
 function _visibleNoteTags(n) {
@@ -2020,6 +2115,9 @@ function _renderNotes() {
           ${_hasItems(note) ? `<button class="note-card-copy note-card-copy-corner" data-note-id="${note.id}" title="Copy all items" aria-label="Copy all items">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>` : ''}
+          <button class="note-card-corner-delete" data-note-id="${note.id}" title="Delete" aria-label="Delete note">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
           <button class="note-card-corner-archive" data-note-id="${note.id}" title="Archive" aria-label="Archive note">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
           </button>`}
@@ -2072,7 +2170,7 @@ function _renderNotes() {
     const next = [...body.children].filter(c => c !== existingForm);
     next.forEach(c => c.remove());
     if (sorted.length === 0) {
-      body.insertAdjacentHTML('beforeend', '<div class="notes-empty-msg">No notes <span style="vertical-align:-3px;margin-left:4px;">' + uiModule.emptyStateIcon('smiley') + '</span></div>');
+      body.insertAdjacentHTML('beforeend', _emptyStateHtml('No notes'));
     } else {
       existingForm.insertAdjacentHTML('afterend', html);
     }
@@ -2081,15 +2179,33 @@ function _renderNotes() {
     _renderLabelsInto(body);
     _renderQuickAdd(body);
     if (sorted.length === 0) {
-      body.insertAdjacentHTML('beforeend', '<div class="notes-empty-msg">No notes yet <span style="vertical-align:-3px;margin-left:4px;">' + uiModule.emptyStateIcon('smiley') + '</span></div>');
+      body.insertAdjacentHTML('beforeend', _emptyStateHtml('No notes yet'));
     } else {
       body.insertAdjacentHTML('beforeend', html);
     }
   }
+  _bindRetryButton(body);
 
   _bindCardEvents(body);
   _animateReflow(prevPositions);
   _applyMasonry(body);
+}
+
+// Empty state vs fetch-failure state. A failed/timed-out fetch must NOT show
+// "No notes yet" (looks like data loss) — show an explicit error + Retry.
+function _emptyStateHtml(emptyLabel) {
+  if (_fetchFailed) {
+    return '<div class="notes-empty-msg notes-fetch-error">Couldn\u2019t load notes \u2014 the server didn\u2019t respond.<br>' +
+      '<button type="button" class="notes-retry-btn" style="margin-top:8px;padding:4px 14px;cursor:pointer;">Retry</button></div>';
+  }
+  return '<div class="notes-empty-msg">' + emptyLabel + ' <span style="vertical-align:-3px;margin-left:4px;">' + uiModule.emptyStateIcon('smiley') + '</span></div>';
+}
+
+function _bindRetryButton(body) {
+  body.querySelector('.notes-retry-btn')?.addEventListener('click', () => {
+    _renderLoadingSkeleton();
+    _fetchNotes().then(() => _renderNotes());
+  });
 }
 
 // In grid view, lay out the cards as masonry by
@@ -2358,7 +2474,7 @@ function _bindCardEvents(body) {
   // title / content preview triggered edit, so padding + empty gutters were
   // dead zones that felt broken on mobile.
   if (_isNotesMobileMode() && !_selectMode) {
-    const _INTERACTIVE = 'button, a, input, label, .note-card-color-dot, .note-checkbox, .note-checkbox-rm, .note-cl-quickadd, .note-agent-tag, .note-handoff-tag, .note-card-pin, .note-card-corner-trash, .note-card-corner-menu, .note-card-corner-unarchive, .note-card-corner-archive, .note-card-edit-corner, .note-card-reminder, .note-card-cb';
+    const _INTERACTIVE = 'button, a, input, label, .note-card-color-dot, .note-checkbox, .note-checkbox-rm, .note-cl-quickadd, .note-agent-tag, .note-handoff-tag, .note-card-pin, .note-card-corner-trash, .note-card-corner-delete, .note-card-corner-menu, .note-card-corner-unarchive, .note-card-corner-archive, .note-card-edit-corner, .note-card-reminder, .note-card-cb';
     body.querySelectorAll('.note-card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (card._suppressNextClick) return;
@@ -2534,6 +2650,16 @@ function _bindCardEvents(body) {
       _archiveNoteWithAnimation(id, btn.closest('.note-card'));
     });
   });
+  // Delete corner — left of archive on active cards. Confirm first so it
+  // can't be fat-fingered as archive (archive stays one-click + undo).
+  body.querySelectorAll('.note-card-corner-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.noteId;
+      if (!id) return;
+      await _deleteNote(id);
+    });
+  });
   // Unarchive corner — only visible in archive view.
   body.querySelectorAll('.note-card-corner-unarchive').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -2550,20 +2676,13 @@ function _bindCardEvents(body) {
       });
     });
   });
-  // Trash corner — archive view only. Permanent delete, no confirmation.
+  // Trash corner — archive view only. Confirm before permanent delete.
   body.querySelectorAll('.note-card-corner-trash').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.dataset.noteId;
-      const idx = _notes.findIndex(n => n.id === id);
-      if (idx < 0) return;
-      const removed = _notes.splice(idx, 1)[0];
-      _renderNotes();
-      _deleteNoteApi(id).then(() => uiModule.showToast('Deleted')).catch(() => {
-        _notes.splice(idx, 0, removed);
-        _renderNotes();
-        uiModule.showError('Failed to delete');
-      });
+      if (!id) return;
+      await _deleteNote(id);
     });
   });
 
@@ -2626,20 +2745,13 @@ function _bindCardEvents(body) {
       });
     });
   });
-  // Delete (optimistic)
+  // Delete (confirm + optimistic) — footer action row / legacy x button
   body.querySelectorAll('.note-card-delete, .note-card-x').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.dataset.noteId;
-      const idx = _notes.findIndex(n => n.id === id);
-      if (idx < 0) return;
-      const removed = _notes.splice(idx, 1)[0];
-      _renderNotes();
-      _deleteNoteApi(id).catch(() => {
-        _notes.splice(idx, 0, removed);
-        _renderNotes();
-        uiModule.showError('Failed to delete');
-      });
+      if (!id) return;
+      await _deleteNote(id);
     });
   });
   // Copy entire checklist (title + items, markdown-style)
@@ -2760,7 +2872,7 @@ function _bindCardEvents(body) {
   if (!_isNotesMobileMode() && _notesDragReorderEnabled()) {
     body.querySelectorAll('.note-card').forEach(card => {
       card.addEventListener('dragstart', (e) => {
-        if (e.target.closest('.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-archive, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip')) {
+        if (e.target.closest('.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-archive, .note-card-corner-delete, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip')) {
           e.preventDefault();
           return;
         }
@@ -2832,7 +2944,7 @@ function _bindCardEvents(body) {
     let startX = 0, startY = 0;
     const LONG_PRESS_MS = 350;
     const MOVE_THRESHOLD_PX = 8;
-    const _selectorSkip = '.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-archive, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip, input, textarea, button, a';
+    const _selectorSkip = '.note-checkbox, .note-card-x, .note-card-select, .note-card-pin, .note-card-action, .note-card-color-dot, .note-card-title, .note-card-edit, .note-card-edit-corner, .note-card-done, .note-card-corner-archive, .note-card-corner-delete, .note-card-corner-menu, .note-agent-tag, .note-handoff-tag, .note-card-label-chip, input, textarea, button, a';
 
     // Anchor for the finger-follow transform. Recomputed after every swap so
     // the card stays under the finger across reorderings.
@@ -3620,15 +3732,11 @@ function _buildForm(note = null) {
     el.addEventListener('input', () => {
       const m = _hashtagRe.exec(el.value);
       if (!m) return;
-      const tag = m[2];
-      // Dedup against the stripped form — labelInput may already hold `#tag`
-      // (after Enter normalised), so includes(tag) on the raw split would
-      // miss the duplicate and append a bare `tag` next to `#tag`.
-      const existing = labelInput.value.trim().split(/\s+/).filter(Boolean);
-      const stripped = existing.map(t => t.replace(/^#+/, ''));
-      if (!stripped.includes(tag)) {
-        existing.push('#' + tag);
-        labelInput.value = existing.join(' ');
+      const tag = m[2].toLowerCase();
+      const existing = _normalizeNoteLabel(labelInput.value);
+      if (!existing.includes(tag)) {
+        existing.push(tag);
+        labelInput.value = existing.map(t => '#' + t).join(' ');
         labelInput.classList.add('flash-once');
         setTimeout(() => labelInput.classList.remove('flash-once'), 600);
       }
@@ -3648,7 +3756,7 @@ function _buildForm(note = null) {
     // Strip any leading #s the user typed, dedupe, then re-prepend exactly
     // one #. So typing "foo" or "#foo" both end up as "#foo " in the input;
     // the save handler keeps stripping #s before storing so DB stays clean.
-    const tags = [...new Set(labelInput.value.split(/\s+/).map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
+    const tags = _normalizeNoteLabel(labelInput.value);
     if (!tags.length) return;
     labelInput.value = tags.map(t => '#' + t).join(' ') + ' ';
     labelInput.setSelectionRange(labelInput.value.length, labelInput.value.length);
@@ -3696,7 +3804,7 @@ function _buildForm(note = null) {
     // Normalize tag input: split on whitespace, strip leading #s, dedupe,
     // re-join with single spaces. Empty → null.
     const _rawLabel = form.querySelector('.note-form-label')?.value || '';
-    const _tags = [...new Set(_rawLabel.split(/\s+/).map(t => t.replace(/^#+/, '').trim()).filter(Boolean))];
+    const _tags = _normalizeNoteLabel(_rawLabel);
     if (form.querySelector('.note-form-due').value && !_tags.includes('reminder')) _tags.push('reminder');
     const labelVal = _tags.length ? _tags.join(' ') : null;
     const payload = {
@@ -3840,21 +3948,7 @@ function _buildForm(note = null) {
 
   form.querySelector('.note-form-delete-btn')?.addEventListener('click', async () => {
     if (!isEdit) return;
-    const id = note.id;
-    if (uiModule.styledConfirm) {
-      const ok = await uiModule.styledConfirm('Delete this note?', { confirmText: 'Delete', danger: true });
-      if (!ok) return;
-    } else if (!confirm('Delete this note?')) {
-      return;
-    }
-    const idx = _notes.findIndex(n => n.id === id);
-    if (idx >= 0) _notes.splice(idx, 1);
-    _editingId = null;
-    _renderNotes();
-    _deleteNoteApi(id).then(() => uiModule.showToast('Deleted')).catch(() => {
-      uiModule.showError('Failed to delete');
-      _fetchNotes().then(() => _renderNotes());
-    });
+    await _deleteNote(note.id);
   });
 
   // Autosave a draft to localStorage on every change so unsaved edits
@@ -3890,13 +3984,11 @@ function _wireGoalForm(form, container) {
     desc.addEventListener('input', () => {
       const m = tagRe.exec(desc.value);
       if (!m) return;
-      const tag = m[2];
-      // Same dedup-after-stripping fix as the plain note hashtag handler.
-      const existing = labelInput.value.trim().split(/\s+/).filter(Boolean);
-      const stripped = existing.map(t => t.replace(/^#+/, ''));
-      if (!stripped.includes(tag)) {
-        existing.push('#' + tag);
-        labelInput.value = existing.join(' ');
+      const tag = m[2].toLowerCase();
+      const existing = _normalizeNoteLabel(labelInput.value);
+      if (!existing.includes(tag)) {
+        existing.push(tag);
+        labelInput.value = existing.map(t => '#' + t).join(' ');
         labelInput.classList.add('flash-once');
         setTimeout(() => labelInput.classList.remove('flash-once'), 600);
       }
@@ -5268,9 +5360,25 @@ async function _deleteNote(id) {
   const ok = uiModule?.styledConfirm
     ? await uiModule.styledConfirm('Delete this note?', { confirmText: 'Delete', danger: true })
     : confirm('Delete this note?');
-  if (!ok) return;
-  try { await _deleteNoteApi(id); await _fetchNotes(); _renderNotes(); uiModule.showToast('Deleted'); }
-  catch (err) { uiModule.showError(err.message); }
+  if (!ok) return false;
+  const idx = _notes.findIndex(n => n.id === id);
+  const removed = idx >= 0 ? _notes.splice(idx, 1)[0] : null;
+  if (_editingId === id) _editingId = null;
+  _renderNotes();
+  try {
+    await _deleteNoteApi(id);
+    uiModule.showToast('Deleted');
+    return true;
+  } catch (err) {
+    if (removed && idx >= 0) {
+      _notes.splice(Math.min(idx, _notes.length), 0, removed);
+      _renderNotes();
+    } else {
+      try { await _fetchNotes(); _renderNotes(); } catch {}
+    }
+    uiModule.showError(err?.message || 'Failed to delete');
+    return false;
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -5684,6 +5792,11 @@ function _openNoteMobileQuickMenu(card, note) {
     <button type="button" class="nmqm-item" data-act="archive">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       <span>Archive</span>
+    </button>
+    <div class="nmqm-divider" role="separator" aria-hidden="true"></div>
+    <button type="button" class="nmqm-item nmqm-item-danger" data-act="delete">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      <span>Delete</span>
     </button>`;
   document.body.appendChild(backdrop);
   document.body.appendChild(sheet);
@@ -5701,6 +5814,10 @@ function _openNoteMobileQuickMenu(card, note) {
   sheet.querySelector('[data-act="archive"]').addEventListener('click', () => {
     close();
     _archiveNoteWithAnimation(id, card);
+  });
+  sheet.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+    close();
+    await _deleteNote(id);
   });
 }
 

@@ -70,6 +70,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # PDF previews are embedded by the in-app document library. Keep the
         # exception route-scoped so normal app pages remain unframeable.
         is_document_pdf_preview = path.startswith("/api/document/") and path.endswith("/render-pdf")
+        # Story Canvas Vite island is embedded in the Odysseus shell iframe panel.
+        is_story_canvas_static = path.startswith("/static/story-canvas/")
         # Visual report pages are self-contained HTML — need inline scripts + external images
         is_report = path.startswith("/api/research/report/")
 
@@ -103,6 +105,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; "
+                "frame-ancestors 'self'"
+            )
+        elif is_story_canvas_static:
+            # Same-origin iframe panel — allow framing while keeping the SPA CSP.
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "font-src 'self' https://cdn.jsdelivr.net; "
+                "img-src 'self' data: blob: https:; "
+                "media-src 'self' blob:; "
+                "connect-src 'self'; "
+                "frame-src 'self'; "
                 "frame-ancestors 'self'"
             )
         else:

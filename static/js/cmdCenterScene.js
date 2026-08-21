@@ -106,7 +106,6 @@ let _resizeObserver = null;
 let _onNodeClick = null;
 let _inProgress = 0;
 let _tooltip = null;
-let _legend = null;
 let _highlight = { ids: null, branch: null, status: null, until: 0 };
 
 let _w = 0;
@@ -1056,52 +1055,6 @@ function _ensureTooltip() {
   _mount.appendChild(_tooltip);
 }
 
-function _ensureLegend() {
-  if (_legend || !_mount) return;
-  const el = document.createElement('div');
-  el.className = 'cmd-scene-legend';
-  el.setAttribute('aria-label', 'Node status legend');
-  Object.assign(el.style, {
-    position: 'absolute',
-    left: '10px',
-    bottom: '10px',
-    zIndex: '5',
-    pointerEvents: 'none',
-    font: "10px/1.45 'JetBrains Mono', 'Consolas', monospace",
-    letterSpacing: '0.12em',
-    textTransform: 'uppercase',
-    color: '#9fb89f',
-    background: 'rgba(6,14,8,0.78)',
-    border: '1px solid rgba(127,255,0,0.28)',
-    boxShadow: '0 0 12px rgba(0,0,0,0.4), 0 0 8px rgba(127,255,0,0.1)',
-    padding: '7px 9px',
-    userSelect: 'none',
-  });
-  const row = (key) => {
-    const a = ATTENTION[key];
-    return (
-      `<div style="display:flex;align-items:center;gap:7px;margin-top:3px;">` +
-      `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;` +
-      `background:${a.hex};box-shadow:0 0 6px rgba(${a.glow},0.85);"></span>` +
-      `<span style="color:${a.hex};text-shadow:0 0 5px rgba(${a.glow},0.35);">${a.label}</span>` +
-      `</div>`
-    );
-  };
-  el.innerHTML =
-    `<div style="color:#7fff00;letter-spacing:0.18em;font-size:9px;margin-bottom:2px;` +
-    `border-bottom:1px solid rgba(127,255,0,0.22);padding-bottom:4px;">STATUS</div>` +
-    row('calm') +
-    row('due') +
-    row('overdue');
-  _mount.appendChild(el);
-  _legend = el;
-}
-
-function _destroyLegend() {
-  if (_legend?.parentNode) _legend.parentNode.removeChild(_legend);
-  _legend = null;
-}
-
 export function initCmdCenterScene(mountEl, { branchHealth, inProgress = 0, globeGraph, onNodeClick, onPopupOpen } = {}) {
   disposeCmdCenterScene();
   if (!mountEl) return false;
@@ -1131,7 +1084,6 @@ export function initCmdCenterScene(mountEl, { branchHealth, inProgress = 0, glob
   _buildGlobeGraph(globeGraph);
   _buildParticles(inProgress);
   _ensureTooltip();
-  _ensureLegend();
 
   _resizeObserver = new ResizeObserver(_resize);
   _resizeObserver.observe(mountEl);
@@ -1238,7 +1190,6 @@ export function disposeCmdCenterScene() {
   if (_tooltip?.parentNode) {
     _tooltip.parentNode.removeChild(_tooltip);
   }
-  _destroyLegend();
   if (_canvas?.parentNode) {
     _canvas.parentNode.removeChild(_canvas);
   }

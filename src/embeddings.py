@@ -27,6 +27,7 @@ if os.name == "nt":
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import logging
+import threading
 import numpy as np
 import httpx
 from typing import List, Optional
@@ -201,6 +202,9 @@ def _load_persisted_endpoint() -> dict:
 
 
 _http_embed_down = False  # process-level latch: skip re-probing a dead endpoint
+_http_embed_client = None
+_fastembed_lock = threading.Lock()
+_fastembed_client = None
 
 
 def reset_http_embed_state():
@@ -208,44 +212,78 @@ def reset_http_embed_state():
     get_embedding_client() re-probes. Call this when the embedding endpoint
     setting changes (e.g. the user starts Ollama and saves the endpoint) —
     otherwise a latch tripped at startup would keep us on FastEmbed for the
-    whole process even after the endpoint comes back."""
-    global _http_embed_down
+    whole process even after the endpoint comes back.
+
+    Does not unload MiniLM; the FastEmbed singleton is independent of the
+    HTTP endpoint and is expensive to reload.
+    """
+    global _http_embed_down, _http_embed_client
     _http_embed_down = False
+    _http_embed_client = None
+
+
+def reset_fastembed_client():
+    """Drop the cached FastEmbed singleton (tests / model-path changes)."""
+    global _fastembed_client
+    with _fastembed_lock:
+        _fastembed_client = None
+
+
+def _apply_persisted_endpoint() -> None:
+    persisted = _load_persisted_endpoint()
+    if not persisted.get("url"):
+        return
+    os.environ["EMBEDDING_URL"] = persisted["url"]
+    if persisted.get("model"):
+        os.environ["EMBEDDING_MODEL"] = persisted["model"]
+    if persisted.get("api_key"):
+        from src.secret_storage import decrypt
+        os.environ["EMBEDDING_API_KEY"] = decrypt(persisted["api_key"])
+
+
+def get_http_embedding_client():
+    """HTTP embedder only — never constructs FastEmbed/MiniLM."""
+    global _http_embed_down, _http_embed_client
+
+    if _http_embed_down:
+        return None
+    if _http_embed_client is not None:
+        return _http_embed_client
+
+    _apply_persisted_endpoint()
+    try:
+        client = EmbeddingClient()
+        client.get_sentence_embedding_dimension()  # health check
+        _http_embed_client = client
+        logger.info(f"Using HTTP embedding API: {client.url} model={client.model}")
+        return client
+    except Exception as e:
+        _http_embed_down = True
+        logger.warning(f"HTTP embedding API unavailable ({e}); custom lane disabled for this process")
+        return None
+
+
+def get_fastembed_client():
+    """Process-wide MiniLM/ONNX client. Loads the model at most once."""
+    global _fastembed_client
+    if _fastembed_client is not None:
+        return _fastembed_client
+    with _fastembed_lock:
+        if _fastembed_client is None:
+            client = FastEmbedClient()
+            client.get_sentence_embedding_dimension()
+            _fastembed_client = client
+        return _fastembed_client
 
 
 def get_embedding_client():
     """Factory: try HTTP API first, fall back to local fastembed."""
-    global _http_embed_down
+    client = get_http_embedding_client()
+    if client is not None:
+        return client
 
-    # Check for a persisted custom endpoint (saved from admin panel)
-    persisted = _load_persisted_endpoint()
-    if persisted.get("url"):
-        url = persisted["url"]
-        model = persisted.get("model", "")
-        api_key = persisted.get("api_key", "")
-        # Also set in env so other code sees it
-        os.environ["EMBEDDING_URL"] = url
-        if model:
-            os.environ["EMBEDDING_MODEL"] = model
-        if api_key:
-            from src.secret_storage import decrypt
-            os.environ["EMBEDDING_API_KEY"] = decrypt(api_key)
-    # Try the HTTP embedding API — unless we already found it down this process
-    # (avoids paying the connect timeout again on every RAG/memory/tool probe).
-    if not _http_embed_down:
-        try:
-            client = EmbeddingClient()
-            client.get_sentence_embedding_dimension()  # health check
-            logger.info(f"Using HTTP embedding API: {client.url} model={client.model}")
-            return client
-        except Exception as e:
-            _http_embed_down = True
-            logger.warning(f"HTTP embedding API unavailable ({e}); using local FastEmbed for the rest of this process")
-
-    # Fall back to local fastembed
     try:
-        client = FastEmbedClient()
-        client.get_sentence_embedding_dimension()
+        client = get_fastembed_client()
         logger.info(f"Using local FastEmbed: model={client.model}")
         return client
     except ImportError:

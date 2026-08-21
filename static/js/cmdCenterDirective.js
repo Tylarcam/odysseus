@@ -61,32 +61,33 @@ function _ensureStyles() {
   style.textContent = `
 .cmd-triage-backdrop {
   position: absolute; inset: 0; z-index: 40;
-  background: rgba(2,5,2,.72); backdrop-filter: blur(3px);
+  background: rgba(5,6,8,.78); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .cmd-triage-modal {
   width: min(440px, 96vw); max-height: min(78vh, 640px);
-  background: #081108; border: 1px solid rgba(166,226,46,0.4);
-  box-shadow: 0 0 48px rgba(143,224,90,.12); display: flex; flex-direction: column;
-  font-family: "JetBrains Mono", ui-monospace, monospace; color: #a6e22e;
+  background: #0a0e14; border: 1px solid #2a3040;
+  box-shadow: 0 0 48px rgba(0,0,0,.45); display: flex; flex-direction: column;
+  font-family: "JetBrains Mono", ui-monospace, monospace; color: #c8d0d8;
 }
 .cmd-triage-h {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 12px 14px; border-bottom: 1px solid rgba(166,226,46,0.18);
-  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+  padding: 12px 14px; border-bottom: 1px solid #1a2030;
+  font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #5a6470;
 }
-.cmd-triage-h strong { color: #ff5c49; letter-spacing: 0.08em; }
+.cmd-triage-h strong { color: #ff9a3c; letter-spacing: 0.08em; }
 .cmd-triage-close {
-  background: none; border: 1px solid rgba(166,226,46,0.28); color: #a6e22e;
+  background: none; border: 1px solid #1f2630; color: #7a8694;
   font: 600 10px/1 inherit; padding: 6px 8px; cursor: pointer; letter-spacing: 0.12em;
 }
-.cmd-triage-close:hover { color: #7fff00; }
+.cmd-triage-close:hover { color: #c8d0d8; border-color: #2a3040; }
 .cmd-triage-stage {
   position: relative; flex: 1; min-height: 220px; overflow: hidden; padding: 18px 16px 12px;
   touch-action: pan-y;
 }
 .cmd-triage-card {
-  position: relative; border: 1px solid rgba(166,226,46,0.28); background: rgba(6,14,8,0.95);
+  position: relative; border: 1px solid #1a2030; background: rgba(10,14,20,0.95);
+  border-left: 3px solid #4dd8e6;
   padding: 16px 14px 14px; min-height: 180px; will-change: transform;
   transition: box-shadow .15s; -webkit-user-select: none; user-select: none;
 }
@@ -100,47 +101,47 @@ function _ensureStyles() {
   text-transform: uppercase; opacity: 0.38;
 }
 .cmd-triage-card.dragging { transition: none; }
-.cmd-triage-card[data-intent="left"] { box-shadow: -10px 0 28px rgba(255,179,71,.25); border-color: #ffb347; }
-.cmd-triage-card[data-intent="right"] { box-shadow: 10px 0 28px rgba(143,224,90,.28); border-color: #8fe05a; }
+.cmd-triage-card[data-intent="left"] { box-shadow: -10px 0 28px rgba(255,154,60,.25); border-color: #ff9a3c; }
+.cmd-triage-card[data-intent="right"] { box-shadow: 10px 0 28px rgba(77,216,230,.22); border-color: #4dd8e6; }
 .cmd-triage-hint {
   position: absolute; top: 50%; transform: translateY(-50%);
   font-size: 9px; letter-spacing: 0.2em; opacity: 0; pointer-events: none; transition: opacity .12s;
 }
-.cmd-triage-hint.left { left: 10px; color: #ffb347; }
-.cmd-triage-hint.right { right: 10px; color: #8fe05a; }
+.cmd-triage-hint.left { left: 10px; color: #ff9a3c; }
+.cmd-triage-hint.right { right: 10px; color: #4dd8e6; }
 .cmd-triage-card[data-intent="left"] .cmd-triage-hint.left,
 .cmd-triage-card[data-intent="right"] .cmd-triage-hint.right { opacity: 0.9; }
 .cmd-triage-kind {
   font-size: 8px; letter-spacing: 0.18em; opacity: 0.55; margin-bottom: 8px; text-transform: uppercase;
 }
-.cmd-triage-title { font-size: 14px; color: #c6ff8e; line-height: 1.4; margin-bottom: 10px; }
+.cmd-triage-title { font-size: 14px; color: #c8d0d8; font-weight: 500; line-height: 1.4; margin-bottom: 10px; }
 .cmd-triage-meta { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-bottom: 10px; }
 .cmd-triage-chip {
   font-size: 7px; letter-spacing: 0.1em; padding: 2px 6px; border: 1px solid; text-transform: uppercase;
 }
 .cmd-triage-chip.red { color: #ff5c49; border-color: #7a2a22; background: rgba(255,92,73,.08); }
 .cmd-triage-chip.amber { color: #ffb347; border-color: #7a5a22; background: rgba(255,179,71,.08); }
-.cmd-triage-chip.ok { color: #a6e22e; border-color: rgba(166,226,46,.35); }
-.cmd-triage-preview { font-size: 10px; opacity: 0.7; line-height: 1.45; }
+.cmd-triage-chip.ok { color: #4dd8e6; border-color: #2a3040; }
+.cmd-triage-preview { font-size: 10px; color: #7a8694; line-height: 1.45; }
 .cmd-triage-targets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
 .cmd-triage-targets button {
-  background: none; border: 1px solid rgba(166,226,46,0.22); color: rgba(166,226,46,0.55);
+  background: none; border: 1px solid #1f2630; color: #7a8694;
   font: 600 8px/1 inherit; letter-spacing: 0.12em; padding: 5px 8px; cursor: pointer; text-transform: uppercase;
 }
-.cmd-triage-targets button[aria-pressed="true"] { color: #7fff00; border-color: rgba(166,226,46,0.55); }
+.cmd-triage-targets button[aria-pressed="true"] { color: #4dd8e6; border-color: #2a3040; }
 .cmd-triage-actions {
   display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px 14px 14px;
-  border-top: 1px solid rgba(166,226,46,0.18);
+  border-top: 1px solid #1a2030;
 }
 .cmd-triage-actions button {
-  background: none; border: 1px solid rgba(166,226,46,0.35); color: #a6e22e;
+  background: none; border: 1px solid #1f2630; color: #c8d0d8;
   font: 600 9px/1 inherit; letter-spacing: 0.14em; padding: 11px 6px; cursor: pointer; text-transform: uppercase;
 }
-.cmd-triage-actions button:hover { color: #7fff00; border-color: #7fff00; }
+.cmd-triage-actions button:hover { color: #4dd8e6; border-color: #2a3040; }
 .cmd-triage-actions button:disabled { opacity: 0.35; cursor: default; }
-.cmd-triage-actions .done { border-color: rgba(143,224,90,.45); }
-.cmd-triage-actions .delegate { border-color: rgba(255,179,71,.45); color: #ffb347; }
-.cmd-triage-empty { padding: 40px 20px; text-align: center; opacity: 0.7; font-size: 11px; }
+.cmd-triage-actions .done { border-color: rgba(77,216,230,.45); color: #4dd8e6; }
+.cmd-triage-actions .delegate { border-color: rgba(255,154,60,.45); color: #ff9a3c; }
+.cmd-triage-empty { padding: 40px 20px; text-align: center; color: #5a6470; font-size: 11px; }
 @media (max-width: 720px) {
   .cmd-triage-backdrop { align-items: flex-end; padding: 0; }
   .cmd-triage-modal { width: 100%; max-height: 85vh; border-radius: 10px 10px 0 0; }
@@ -177,7 +178,7 @@ function _renderCard(item) {
   return `
     <div class="cmd-triage-hint left">← DELEGATE</div>
     <div class="cmd-triage-hint right">DONE →</div>
-    <div class="cmd-triage-card" id="cmd-triage-card">
+    <div class="cmd-triage-card" id="cmd-triage-card" style="border-left-color:${_priorityAccent(item)}">
       <div class="cmd-triage-kind">${_esc(item.kind || 'item')} · ${_index + 1}/${_stack.length}</div>
       <div class="cmd-triage-title">${_esc(item.title || 'Untitled')}</div>
       <div class="cmd-triage-meta">${chip}${branch}</div>
@@ -233,6 +234,20 @@ function _itemId(item) {
 
 function _isPersistedId(id) {
   return REAL_ID_RE.test(String(id || '').trim());
+}
+
+/** Orbital seed ids (t1/t2/t6) and other demo keys — never treat as live notes. */
+function _isSeedOrFakeId(id) {
+  const s = String(id || '').trim();
+  if (!s) return true;
+  return /^(t[0-9]+|demo[-_].+|seed[-_].+)$/i.test(s);
+}
+
+function _priorityAccent(item) {
+  const st = String(item?.status || '').toLowerCase();
+  if (st === 'overdue') return '#ff4a4a';
+  if (st === 'due') return '#ff9a3c';
+  return '#4dd8e6';
 }
 
 async function _readError(res) {
@@ -313,24 +328,13 @@ async function _finish() {
   _paintCard();
   const id = _itemId(item);
   try {
-    if (!_isPersistedId(id)) {
-      window.uiModule?.showToast?.('Demo card dismissed (no server id)', 2500);
-      await _advance();
-      return;
+    if (!id || _isSeedOrFakeId(id)) {
+      throw new Error('Missing live server id');
     }
     if (item.kind === 'note' || item.kind === 'handoff') {
-      // due_date:null is ignored by the notes API (only non-null writes).
-      // Empty string clears due; archive removes from active lists.
-      if (item.kind === 'note') {
-        try {
-          await _patchNote(id, { due_date: '' });
-        } catch (clearErr) {
-          console.warn('triage clear due failed, archiving', clearErr);
-          await _patchNote(id, { archived: true });
-        }
-      } else {
-        await _patchNote(id, { archived: true });
-      }
+      if (!_isPersistedId(id)) throw new Error('Note has no server id');
+      // due_date:null is ignored (only non-null writes). Empty string clears due.
+      await _patchNote(id, { archived: true, pinned: false, due_date: '' });
     } else if (item.kind === 'job') {
       const res = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(id)}/mark-applied`, {
         method: 'POST',
@@ -558,7 +562,9 @@ export function openDirectiveTriage({
 } = {}) {
   const host = mount || document.getElementById('cmd-center-root') || document.body;
   if (!host) return false;
-  const list = Array.isArray(stack) ? stack.filter((x) => x && (x.id || x.target_id)) : [];
+  const list = Array.isArray(stack)
+    ? stack.filter((x) => x && !_isSeedOrFakeId(_itemId(x)))
+    : [];
   if (!list.length) {
     window.uiModule?.showToast?.('Nothing to triage', 2200);
     return false;
@@ -579,7 +585,7 @@ export function openDirectiveTriage({
   el.innerHTML = `
     <div class="cmd-triage-modal" role="dialog" aria-label="Directive triage">
       <div class="cmd-triage-h">
-        <span>● NEEDS ATTENTION — <strong class="cmd-triage-count">${_stack.length}</strong></span>
+        <span>TRIAGE — <strong class="cmd-triage-count">${_stack.length}</strong> OPEN</span>
         <button type="button" class="cmd-triage-close" data-triage-act="close" aria-label="Close">ESC</button>
       </div>
       <div class="cmd-triage-stage"></div>

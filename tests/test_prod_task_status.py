@@ -40,7 +40,7 @@ def _note_routes(monkeypatch, session_factory):
     import routes.note_routes as note_routes
 
     monkeypatch.setattr(note_routes, "SessionLocal", session_factory)
-    monkeypatch.setattr(note_routes, "get_current_user", lambda request: "alice")
+    monkeypatch.setattr(note_routes, "effective_user", lambda request: "alice")
     router = note_routes.setup_note_routes()
     by_path = {}
     for route in router.routes:

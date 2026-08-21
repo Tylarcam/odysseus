@@ -1143,12 +1143,13 @@ def ceo_brief_morning_harvest_ready(
 
 
 async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
-    """Compose a spoken CEO brief (headline / what changed / needs you / can wait)
-    from live harvest — calendar, due notes, jobs, handoffs, latest deep_research,
-    and cron exceptions only — then kick off the audio brief pipeline.
+    """Gather every chron task's latest output into one full-picture CEO Brief
+    document (Top 3, upcoming, jobs, handoffs, Rhizo, fruit ledger, recent
+    runs). Does not start Open Notebook / Listen — Library Listen stays explicit.
     """
     import json as _json
-    from datetime import datetime as _dt, timedelta as _td
+    from datetime import datetime as _dt
+    from sqlalchemy import and_ as _and
     from sqlalchemy import or_ as _or
 
     from core.database import (
@@ -1157,9 +1158,14 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     from core.database import get_upcoming_events as _get_events
     from src.handoff_bin import bucket_handoff_notes as _bucket_handoffs
     from src.job_pipeline.brief import get_jobs_for_brief as _jobs_for_brief
-    from services.documents.audio_brief import kickoff_doc_audio_brief as _kickoff_audio
-    from services.documents.ceo_brief_script import compose_ceo_brief_markdown
-    from src.research_handler import list_recent_research_reports
+    from services.documents.ceo_brief_script import (
+        GRANT_CATALOG_BODY_CHARS,
+        compose_ceo_brief_markdown,
+        excerpt as _excerpt,
+        harvest_fruit_ledger_text as _harvest_fruit,
+        is_grant_catalog_title,
+    )
+    from services.home.mycelia_feed import FRUIT_LEDGER_NOTE_ID
 
     progress_cb = kwargs.get("progress_cb")
 
@@ -1217,14 +1223,22 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
 
     _progress("Gathering chron outputs…")
 
+    substrate_txt = ""
+    research_txt = ""
+    ledger_txt = ""
+    fruit_docs: list = []
+    fruit_notes: list = []
+    charter_txt = ""
+    inbound_notes: list = []
+    inbound_docs: list = []
+    comms_preview: list = []
     events: list = []
     due_soon: list = []
     overdue: list = []
+    next_run: dict | None = None
     jobs: dict = {}
     handoffs: dict = {"needs_attention": [], "in_progress": []}
     runs: list = []
-    missed_tasks: list = []
-    harvest_flags: dict = {}
 
     db = SessionLocal()
     try:
@@ -1240,14 +1254,130 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
 
         substrate = _latest_doc_like(["Swarm Substrate", "Swarm Plan"])
         research_doc = _latest_doc_like(["Research Brief"])
-        ledger = _latest_doc_like(["Fruit Ledger"])
-        harvest_flags = {
-            "has_swarm_plan": bool(substrate),
-            "has_research_brief_doc": bool(research_doc),
-            "has_ledger": bool(ledger),
-        }
+        substrate_txt = _excerpt(substrate.current_content if substrate else "")
+        research_txt = _excerpt(research_doc.current_content if research_doc else "")
 
-        # Agenda: calendar (next 48h) + due/overdue notes + missed cron.
+        # Mycelia source: Library fruit+ledger doc if present, else Herald note 506a37f1.
+        try:
+            fq = db.query(Document).filter(
+                Document.is_active == True,  # noqa: E712
+                (Document.archived == False) | (Document.archived.is_(None)),  # noqa: E712
+                Document.title.ilike("%fruit%"),
+                Document.title.ilike("%ledger%"),
+            )
+            if owner:
+                fq = owner_filter(fq, Document, owner, include_shared=_allow_null)
+            for d in fq.order_by(Document.updated_at.desc()).limit(5).all():
+                fruit_docs.append({
+                    "id": d.id,
+                    "title": d.title,
+                    "content": d.current_content or "",
+                    "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+                })
+        except Exception as e:
+            logger.debug(f"ceo_brief: fruit doc gather failed: {e}")
+        try:
+            nq_fruit = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            if owner:
+                nq_fruit = owner_filter(nq_fruit, Note, owner, include_shared=_allow_null)
+            nq_fruit = nq_fruit.filter(_or(
+                Note.id == FRUIT_LEDGER_NOTE_ID,
+                Note.id.like(f"{FRUIT_LEDGER_NOTE_ID}%"),
+                _and(Note.title.ilike("%fruit%"), Note.title.ilike("%ledger%")),
+            ))
+            for n in nq_fruit.order_by(Note.updated_at.desc()).limit(8).all():
+                fruit_notes.append({
+                    "id": n.id,
+                    "title": n.title,
+                    "content": n.content or "",
+                    "updated_at": n.updated_at.isoformat() if n.updated_at else None,
+                })
+        except Exception as e:
+            logger.debug(f"ceo_brief: fruit note gather failed: {e}")
+        ledger_txt = _excerpt(_harvest_fruit(documents=fruit_docs, notes=fruit_notes), 4000)
+
+        try:
+            cq = db.query(Note).filter(
+                Note.archived == False,  # noqa: E712
+                Note.title.ilike("Objectives%"),
+            )
+            if owner:
+                cq = owner_filter(cq, Note, owner, include_shared=_allow_null)
+            crow = cq.order_by(Note.pinned.desc(), Note.updated_at.desc()).first()
+            if crow and crow.content:
+                charter_txt = crow.content
+        except Exception as e:
+            logger.debug(f"ceo_brief: charter gather failed: {e}")
+
+        try:
+            inbound_phrases = [
+                "upwork", "proposal", "npr", "grant", "invoice",
+                "send pack", "human gate",
+            ]
+            nq_in = db.query(Note).filter(Note.archived == False)  # noqa: E712
+            if owner:
+                nq_in = owner_filter(nq_in, Note, owner, include_shared=_allow_null)
+            nq_in = nq_in.filter(_or(*[Note.title.ilike(f"%{p}%") for p in inbound_phrases]))
+            for n in nq_in.order_by(Note.pinned.desc(), Note.updated_at.desc()).limit(24).all():
+                items = None
+                try:
+                    items = _json.loads(n.items) if n.items else None
+                except Exception:
+                    items = None
+                inbound_notes.append({
+                    "id": n.id,
+                    "title": n.title,
+                    "content": (n.content or "")[:400],
+                    "items": items,
+                    "label": n.label,
+                    "pinned": bool(n.pinned),
+                    "archived": False,
+                })
+        except Exception as e:
+            logger.debug(f"ceo_brief: inbound notes gather failed: {e}")
+
+        try:
+            seen_doc_ids: set[str] = set()
+            for phrases in (
+                ["Grant Scout"],
+                ["grant catalog"],
+                ["Upwork"],
+                ["Send Pack"],
+                ["NPR"],
+                ["grant"],
+                ["invoice"],
+            ):
+                d = _latest_doc_like(phrases)
+                if not d or d.id in seen_doc_ids:
+                    continue
+                doc_title = d.title or ""
+                if "grant grafter" in doc_title.lower():
+                    continue
+                seen_doc_ids.add(d.id)
+                cap = GRANT_CATALOG_BODY_CHARS if is_grant_catalog_title(doc_title) else 400
+                inbound_docs.append({
+                    "id": d.id,
+                    "title": d.title,
+                    "content": _excerpt(d.current_content or "", cap),
+                    "archived": False,
+                })
+        except Exception as e:
+            logger.debug(f"ceo_brief: inbound docs gather failed: {e}")
+
+        try:
+            from routes.home_routes import _ensure_fruit_ledger_snapshot
+            _ensure_fruit_ledger_snapshot(db, owner, inbound_notes, inbound_docs)
+        except Exception as e:
+            logger.debug(f"ceo_brief: hud pin gather failed: {e}")
+
+        try:
+            from services.home.cmd_center import _build_comms_preview, _load_email_urgency_state
+            comms_preview = _build_comms_preview(_load_email_urgency_state(owner))
+        except Exception as e:
+            logger.debug(f"ceo_brief: inbound inbox gather failed: {e}")
+            comms_preview = []
+
+        # Agenda: calendar (next 48h) + due/overdue notes + next chron run.
         try:
             for e in (_get_events(owner=owner, horizon_days=2, limit=12) or []):
                 start = e.get("start") or e.get("dtstart")
@@ -1277,26 +1407,15 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         due_soon.sort(key=lambda x: x["due_date"] or "")
         overdue.sort(key=lambda x: x["due_date"] or "")
 
-        t_q = db.query(ScheduledTask).filter(
-            ScheduledTask.next_run.isnot(None),
-            (ScheduledTask.status == None) | (ScheduledTask.status != "paused"),  # noqa: E711
-        )
+        t_q = db.query(ScheduledTask).filter(ScheduledTask.next_run.isnot(None))
         if owner:
             t_q = t_q.filter(ScheduledTask.owner == owner)
-        miss_cutoff = now - _td(hours=1)
-        for t in t_q.all():
-            nr = t.next_run
-            if nr is None:
-                continue
-            try:
-                nr_naive = nr.replace(tzinfo=None) if getattr(nr, "tzinfo", None) else nr
-            except Exception:
-                nr_naive = nr
-            try:
-                if nr_naive < miss_cutoff:
-                    missed_tasks.append({"name": t.name, "status": "missed"})
-            except Exception:
-                continue
+        nr = t_q.order_by(ScheduledTask.next_run.asc()).first()
+        if nr:
+            next_run = {
+                "name": nr.name,
+                "next_run": nr.next_run.isoformat() if nr.next_run else None,
+            }
 
         try:
             jobs = _jobs_for_brief(owner=owner)
@@ -1331,29 +1450,21 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
             run_q = (
                 db.query(TaskRun, ScheduledTask)
                 .join(ScheduledTask, TaskRun.task_id == ScheduledTask.id)
+                .filter(TaskRun.status == "success")
             )
             if owner:
                 run_q = run_q.filter(ScheduledTask.owner == owner)
-            for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(24).all():
+            for r, t in run_q.order_by(TaskRun.started_at.desc()).limit(8).all():
                 runs.append({
                     "name": t.name,
                     "status": r.status,
-                    "result": (r.result or "").strip()[:240],
-                    "error": (r.error or "").strip()[:240],
+                    "result": _excerpt((r.result or "").strip(), 400),
                     "at": r.started_at.isoformat() if r.started_at else None,
                 })
         except Exception as e:
             logger.debug(f"ceo_brief: runs gather failed: {e}")
     finally:
         db.close()
-
-    research_reports: list = []
-    try:
-        research_reports = list_recent_research_reports(
-            owner=owner or "", limit=3, include_excerpt=True,
-        )
-    except Exception as e:
-        logger.debug(f"ceo_brief: research gather failed: {e}")
 
     _progress("Composing CEO brief…")
     content = compose_ceo_brief_markdown(
@@ -1364,10 +1475,17 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
         overdue=overdue,
         jobs=jobs,
         handoffs=handoffs,
-        research=research_reports,
         runs=runs,
-        missed_tasks=missed_tasks,
-        harvest_flags=harvest_flags,
+        next_run=next_run,
+        substrate_txt=substrate_txt,
+        research_txt=research_txt,
+        ledger_txt=ledger_txt,
+        notes=fruit_notes,
+        documents=fruit_docs,
+        charter_txt=charter_txt,
+        comms_preview=comms_preview,
+        inbound_notes=inbound_notes,
+        inbound_docs=inbound_docs,
     )
 
     _progress("Saving CEO brief document…")
@@ -1399,15 +1517,7 @@ async def action_ceo_brief(owner: str, **kwargs) -> Tuple[str, bool]:
     finally:
         db.close()
 
-    _progress("Kicking off CEO audio brief…")
-    try:
-        state = _kickoff_audio(doc_id, title, content, owner=owner or "")
-        audio_status = state.get("status") or "generating"
-    except Exception as e:
-        logger.error(f"ceo_brief: audio kickoff failed: {e}")
-        audio_status = "failed"
-
-    result = f"CEO Brief saved ({doc_id}). Audio: {audio_status}."
+    result = f"CEO Brief saved ({doc_id})."
     _progress(result)
     return result, True
 
@@ -2613,7 +2723,7 @@ BUILTIN_ACTION_INFO = {
     "extract_email_events": "Scan emails for booking/meeting confirmations and auto-add to calendar",
     "classify_events": "Tag upcoming events with importance (low/normal/high/critical) and type (work/health/travel/etc.); colors them too",
     "daily_brief": "Build a morning digest: today's calendar, unread email count + top senders, active todos",
-    "ceo_brief": "Gather every chron task's latest output (Swarm Plan, Rhizo research, Fruit Ledger, calendar, jobs, handoffs, recent runs) into one CEO Brief document and convert it to a CEO-level audio brief (LLM synopsis → Open Notebook podcast MP3, browser-speech fallback)",
+    "ceo_brief": "Gather every chron task's latest output (Swarm Plan, Rhizo research, Fruit Ledger, calendar, jobs, handoffs, recent runs) into one full-picture CEO Brief document. Does not auto-start Open Notebook / Listen.",
     "learn_sender_signatures": "LLM learns each sender's signature from 3+ of their recent emails; cached per address so future renders fold sigs reliably without heuristics",
     "ssh_command": "Run a shell command on a local or remote host",
     "run_script": "Run a script locally or on ODYSSEUS_SCRIPT_HOST",

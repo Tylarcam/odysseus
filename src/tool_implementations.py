@@ -1830,6 +1830,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
     import uuid as _uuid
     from core.database import SessionLocal, Note
     from sqlalchemy.orm.attributes import flag_modified
+    from src.note_label import normalize_note_label
 
     try:
         args = _parse_tool_args(content)
@@ -1976,7 +1977,7 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
                 items=items_json,
                 note_type=note_type,
                 color=args.get("color"),
-                label=args.get("label"),
+                label=normalize_note_label(args.get("label")),
                 pinned=args.get("pinned", False),
                 due_date=due_iso,
                 source="agent",
@@ -2007,7 +2008,10 @@ async def do_manage_notes(content: str, owner: Optional[str] = None) -> Dict:
                 return {"error": "Note not found", "exit_code": 1}
             for field in ("title", "content", "note_type", "color", "label"):
                 if field in args and args[field] is not None:
-                    setattr(note, field, args[field])
+                    value = args[field]
+                    if field == "label":
+                        value = normalize_note_label(value)
+                    setattr(note, field, value)
             # Parse due_date the same way the `add` action does. The schema
             # advertises natural language ("tomorrow at 9am"), and naive ISO
             # strings need the user's tz offset attached so the frontend's

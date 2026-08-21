@@ -363,6 +363,7 @@ export function openPanel() {
       <button id="ff-minimize-btn" class="modal-minimize-btn" title="Minimize" aria-label="Minimize FormFlow" style="position:relative;left:2px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="18" x2="18" y2="18"/></svg>
       </button>
+      <button class="close-btn" id="ff-close" title="Close" aria-label="Close FormFlow">\u2716</button>
     </div>
 
     <div class="ff-exit-confirm" id="ff-exit-confirm">
@@ -749,6 +750,11 @@ function _wireEvents() {
   document.getElementById('ff-minimize-btn')?.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
     closePanel('down');
+  });
+  document.getElementById('ff-close')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closePanel();
   });
 
   // Exit (distinct from minimize — fully closes, confirms if answers exist)

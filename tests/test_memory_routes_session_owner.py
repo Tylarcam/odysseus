@@ -24,8 +24,8 @@ def _route(router, path, method):
 
 
 def _router(monkeypatch, caller):
-    monkeypatch.setattr(mr, "get_current_user", lambda request: caller, raising=False)
-    monkeypatch.setattr(mr, "require_user", lambda request: caller, raising=False)
+    monkeypatch.setattr(mr, "effective_user", lambda request: caller, raising=False)
+    monkeypatch.setattr(mr, "require_authenticated_request", lambda request: caller, raising=False)
     sm = MagicMock()
     sm.sessions = {}
     sm.get_session = lambda sid: SimpleNamespace(

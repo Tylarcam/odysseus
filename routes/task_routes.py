@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core.database import SessionLocal, ScheduledTask, TaskRun
 from core.constants import internal_api_base
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user
 from src.constants import DATA_DIR, EMAIL_URGENCY_CACHE_DIR
 from src.task_scheduler import compute_next_run, HOUSEKEEPING_DEFAULTS
 from routes.prefs_routes import _load_for_user, _save_for_user
@@ -291,7 +291,7 @@ def setup_task_routes(task_scheduler) -> APIRouter:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
     def _owner(request: Request):
-        return get_current_user(request)
+        return effective_user(request)
 
     async def _generate_task_name(prompt: str, owner: Optional[str] = None) -> str:
         """Use LLM to generate a short task name from the prompt."""

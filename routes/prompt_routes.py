@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, SavedPrompt
-from src.auth_helpers import get_current_user
+from src.auth_helpers import effective_user
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def setup_prompt_routes() -> APIRouter:
     router = APIRouter(prefix="/api/prompts", tags=["prompts"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        return effective_user(request)
 
     def _get_owned(db, prompt_id: str, user: Optional[str]) -> SavedPrompt:
         row = db.query(SavedPrompt).filter(SavedPrompt.id == prompt_id).first()

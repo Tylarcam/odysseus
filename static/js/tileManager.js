@@ -383,4 +383,45 @@ export function snapModalToZone(modal, zone) {
   _applySnap(content, zone.rect, zone.name);
 }
 
+export function getMaximizeZone() {
+  const safe = _viewportSafeRect();
+  return {
+    name: 'maximize',
+    rect: {
+      left: safe.left,
+      top: safe.top,
+      width: safe.right - safe.left,
+      height: safe.bottom - safe.top,
+    },
+  };
+}
+
+export function unsnapModal(modalOrContent) {
+  if (!modalOrContent) return;
+  const content = modalOrContent.querySelector
+    ? (modalOrContent.querySelector('.modal-content, .research-pane') || modalOrContent)
+    : modalOrContent;
+  _unsnap(content);
+}
+
+export function isTileMaximized(modalOrContent) {
+  if (!modalOrContent) return false;
+  const content = modalOrContent.querySelector
+    ? (modalOrContent.querySelector('.modal-content, .research-pane') || modalOrContent)
+    : modalOrContent;
+  const zone = content.dataset && content.dataset._tileZone;
+  return zone === 'maximize' || zone === 'fullscreen';
+}
+
+/** Header-button maximize. Uses the rail-safe maximize zone, not y<=0 true fullscreen. */
+export function toggleMaximize(modalOrContent) {
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) return;
+  if (!modalOrContent) return;
+  const content = modalOrContent.querySelector
+    ? (modalOrContent.querySelector('.modal-content, .research-pane') || modalOrContent)
+    : modalOrContent;
+  if (isTileMaximized(content)) unsnapModal(content);
+  else _applySnap(content, getMaximizeZone().rect, 'maximize');
+}
+
 export {};

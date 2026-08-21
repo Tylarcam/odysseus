@@ -22,6 +22,8 @@ def test_build_dav_client_disables_redirects():
     pytest.importorskip("caldav")
     client = caldav_sync._build_dav_client("https://calendar.example.com/dav", "u", "p")
     assert client.session.max_redirects == 0
+    assert client.timeout == caldav_sync._CALDAV_HTTP_TIMEOUT_SEC
+    assert caldav_sync._CALDAV_HTTP_TIMEOUT_SEC > 0
 
 
 def test_dav_client_does_not_follow_redirect_to_internal_host():

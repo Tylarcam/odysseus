@@ -246,7 +246,9 @@ class ChatHandler:
                                 except Exception:
                                     pass
                         if not vl_desc:
-                            vl_result = analyze_image_with_vl_result(file_info["path"], owner=owner)
+                            vl_result = await asyncio.to_thread(
+                                lambda: analyze_image_with_vl_result(file_info["path"], owner=owner)
+                            )
                             vl_desc = vl_result.get("text", "")
                             vl_model = vl_result.get("model", "")
                             if vl_desc and not vl_desc.startswith("["):

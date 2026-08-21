@@ -1,0 +1,4 @@
+﻿harper.js@2.7.0 (Apache-2.0)
+Vendored from npm package dist/ for CSP-safe same-origin loading.
+Files: index.js, slimBinary.js, BinaryModule-Aj1vLnwf.js, harper_wasm_slim_bg.wasm
+Upstream: https://www.npmjs.com/package/harper.js

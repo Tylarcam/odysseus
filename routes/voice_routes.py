@@ -153,13 +153,31 @@ def setup_voice_routes(gateway):
 
     @router.post("/cmd-action")
     async def voice_cmd_action(body: VoiceCmdActionRequest, request: Request):
-        """Validate a CMD Center navigate action for Jarvis voice shortcuts."""
+        """Validate a CMD Center navigate action; execute human-send confirms."""
         require_authenticated_request(request)
-        from services.voice.voice_tools import resolve_cmd_action
+        from services.voice.voice_tools import (
+            CONFIRM_SEND_ACTIONS,
+            confirm_human_send,
+            resolve_cmd_action,
+        )
 
         resolved = resolve_cmd_action(body.action, body.id)
         if not resolved.get("ok"):
             raise HTTPException(status_code=400, detail={"message": resolved.get("error")})
+        if resolved.get("action") in CONFIRM_SEND_ACTIONS:
+            result = confirm_human_send(resolved["action"], owner=effective_user(request))
+            if not result.get("ok"):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": result.get("error") or "could not log send"},
+                )
+            logger.info(
+                "voice cmd-action confirm user=%s action=%s id=%s submit=false",
+                _username(request),
+                result.get("action"),
+                result.get("id") or "",
+            )
+            return {**resolved, **result}
         logger.info(
             "voice cmd-action user=%s action=%s id=%s",
             _username(request),

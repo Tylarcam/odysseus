@@ -34,8 +34,11 @@ every poll after, since polls never re-fetch it.
 | `swarm_activity` | Left rail — Swarm Activity | `agent_activity[]` | Recent `task_runs`, registered swarm tasks first (`services/home/swarm_registry.py`), last 10 | See agents working | Row → `open_task` | Makes Mycelia visible without opening Tasks |
 | `documents` | Left rail — Documents | `documents[]` | 8 newest non-archived documents by `updated_at` | Recent intel / drafts | Row → `open_doc` | Fast path into library artifacts |
 | `globe_scene` | Center — Three.js mount | `globe_graph`, `branch_health` | `build_globe_graph()` — branch nodes + MemPalace content hits (`mempalace search`, preferred) with `status` wing/room fallback; cross-object edges from `lineage_edges` when both ends are rendered. MCP graph tools (`kg_query` / `traverse` / etc.) are **not** wired — deferred | Spatial system map | Node hover/click → branch action | Situation-room centerpiece |
+| `scene_legend` | Center — under AUTO | static | Attention triad (calm / due soon / overdue) matching data-node colors | Decode globe node colors | Informational | Keep globe readable without covering the constellation |
 | `stage_cards` | Center — float cards | `stage_cards[]` | CEO brief, morning/jobs, relay, plan today, vault sync, up-next from agenda | Ritual shortcuts | Card → `ceo_brief`, `jobs`, `agent_bin`, `open_note`, `refresh`, `calendar` | One-tap morning/ops moves |
-| `hero` | Center — primary overlay | `hero` | `_build_hero()` — relay → agency jobs → directives → notes | Primary directive | Overlay + CTA → top-ranked action | “Within 5s know what’s on fire” |
+| `hero` | Center — `#cmd-hero` overlay | `hero` | `_build_hero()` — relay → agency jobs → directives → notes; domain tabs overlay from stage cards | Primary directive banner | Overlay + CTA → top-ranked action | “Within 5s know what’s on fire”; independently togglable from glance / quick read |
+| `glance` | Center — chips above hero | `hero`, `counts`, `stage_cards`, `agenda` | Attention / in-flight / today chips | Instant counts | Informational | Keep chips visible when the hero banner is hidden |
+| `ceo_quick_read` | Center — Quick read under hero | `mycelia_feed.quick_read` | ≤5 scan bullets (Top 3, signals, research, fruit, hygiene) | CEO scan strip | Informational under hero | Ras brief pattern |
 | `command_deck` | Right rail — Command Deck | `commands[]`, `suggested_commands[]` | Fixed deck + Mycelia group (registry-backed swarm commands) + hero-branch suggestions | Do something now | Button → `_runAction` | Explicit operator controls |
 | `audio_io` | Right rail — Audio I/O | `audio` | Voice stats / standby from builder + live voice UI events | Voice delegate without leaving vault | Click, or hold `Space` 3s anywhere in the vault → activate voice agent mode | Hands-free operator loop |
 | `ai_wire` | Right rail — AI Wire | `wire[]` | Recent notes, docs, handoffs, jobs, sessions (newest first, max 16) | Live activity ticker | Row → open source item | Traceability — “what just happened” |
@@ -53,7 +56,6 @@ every poll after, since polls never re-fetch it.
 | `mycelia_signals` | MYCELIA left — Signals | `mycelia_feed.signals`, `mycelia_feed.health` | Parsed SIGNAL lines (Human/guild) + substrate hygiene strip | Act on swarm asks | Row → `open_note` / `open_doc` | Blackboard consolidation |
 | `mycelia_fruit` | MYCELIA right — Fruit | `mycelia_feed.fruit` | Pending-at-gate rows + recent FRUIT entries | Outcome loop | Open ledger → `open_doc` | Herald harvest surface |
 | `mycelia_stats` | MYCELIA right — Graph Stats | `globe_graph` meta + nodes | Nodes/edges/by-type + MemPalace status string from search/status bridge. No `kg_query` / `traverse` / `graph_stats` / `find_tunnels` parity — MCP-only, deferred | Graph capacity | Informational; Mycelia deck acts | Orbital MYCELIA right rail |
-| `ceo_quick_read` | CORE hero — Quick read | `mycelia_feed.quick_read` | ≤5 scan bullets (Top 3, signals, research, fruit, hygiene) | CEO scan strip | Informational under hero | Ras brief pattern |
 
 ---
 
