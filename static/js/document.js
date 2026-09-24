@@ -8773,13 +8773,34 @@ import { openHandoffTargetMenu } from './handoff.js';
     if (pane.classList.contains('doc-fullscreen')) {
       pane.classList.remove('doc-fullscreen');
       if (container) container.style.display = '';
+      // Restore the divider-drag size that was stashed on enter.
+      if (pane.dataset._preFsWidth != null) {
+        pane.style.width = pane.dataset._preFsWidth;
+        delete pane.dataset._preFsWidth;
+      }
+      if (pane.dataset._preFsFlex != null) {
+        pane.style.flex = pane.dataset._preFsFlex;
+        delete pane.dataset._preFsFlex;
+      }
     } else {
+      // Divider drag writes inline width + flex:none. Stash and clear
+      // them so the fullscreen CSS (width 100% / flex 1) can actually
+      // fill the workspace instead of staying at the last dragged size.
+      pane.dataset._preFsWidth = pane.style.width;
+      pane.dataset._preFsFlex = pane.style.flex;
+      pane.style.removeProperty('width');
+      pane.style.removeProperty('flex');
       pane.classList.add('doc-fullscreen');
       if (container) container.style.display = 'none';
     }
-    // Re-check md toolbar overflow after layout change
+    // Re-check md toolbar overflow + editor overlays after layout change
     const mdToolbar = document.getElementById('doc-md-toolbar');
-    if (mdToolbar?._syncOverflow) requestAnimationFrame(mdToolbar._syncOverflow);
+    requestAnimationFrame(() => {
+      if (mdToolbar?._syncOverflow) mdToolbar._syncOverflow();
+      syncHighlighting();
+      const ta = document.getElementById('doc-editor-textarea');
+      if (ta) updateLineNumbers(ta.value);
+    });
   }
 
   /** Toggle markdown preview */

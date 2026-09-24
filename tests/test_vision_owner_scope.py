@@ -24,6 +24,35 @@ def test_configured_vision_model_resolution_passes_owner(monkeypatch):
     assert seen == [("gpt-4o", "alice")]
 
 
+def test_configured_vision_model_uses_endpoint_id_when_provided(monkeypatch):
+    seen = []
+
+    def fake_by_id(ep_id, model="", owner=None):
+        seen.append((ep_id, model, owner))
+        return (
+            "https://inference.us-west.modal.direct/v1/chat/completions",
+            "tylarcam--ep-glm-5-3-flash-server.us-west.modal.direct",
+            {"Authorization": "Bearer token"},
+        )
+
+    def boom(*_a, **_k):
+        raise AssertionError("_resolve_model should not run when endpoint_id resolves")
+
+    monkeypatch.setattr("src.endpoint_resolver.resolve_endpoint_by_id", fake_by_id)
+    monkeypatch.setattr(ai_interaction, "_resolve_model", boom)
+
+    assert dp._resolve_vl_model(
+        "tylarcam--ep-glm-5-3-flash-server.us-west.modal.direct",
+        owner="alice",
+        endpoint_id="57786be9",
+    )[1] == "tylarcam--ep-glm-5-3-flash-server.us-west.modal.direct"
+    assert seen == [(
+        "57786be9",
+        "tylarcam--ep-glm-5-3-flash-server.us-west.modal.direct",
+        "alice",
+    )]
+
+
 def test_auto_detected_vision_model_resolution_passes_owner(monkeypatch):
     seen = []
 
@@ -47,8 +76,8 @@ def test_auto_detected_vision_model_resolution_passes_owner(monkeypatch):
 def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp_path):
     seen = {}
 
-    def fake_resolve_vl_model(configured, owner=None):
-        seen["primary"] = (configured, owner)
+    def fake_resolve_vl_model(configured, owner=None, endpoint_id=None):
+        seen["primary"] = (configured, owner, endpoint_id)
         return ("http://primary.test/chat/completions", "vision-primary", {"X-Test": "1"})
 
     def fake_fallbacks(owner=None):
@@ -74,7 +103,7 @@ def test_vision_analysis_uses_owner_scoped_primary_and_fallback(monkeypatch, tmp
         "text": "description",
         "model": "vision-primary",
     }
-    assert seen["primary"] == ("gpt-4o", "alice")
+    assert seen["primary"] == ("gpt-4o", "alice", "")
     assert seen["fallback_owner"] == "alice"
     assert seen["llm"][:4] == (
         "http://primary.test/chat/completions",

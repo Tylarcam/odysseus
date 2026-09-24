@@ -1,6 +1,6 @@
 /**
  * V.A.U.L.T. HQ audio — BRIEF ME TTS rundown + earcons.
- * Concept match: vault-hq-v2 (Web Speech + short WebAudio oscillators).
+ * Concept match: vault-hq-v2 (server Voice.ai TTS with Web Speech fallback + short WebAudio oscillators).
  */
 
 /** @typedef {'speaking'|'standby'} CmdAudioState */
@@ -16,6 +16,13 @@ let _voiceOn = true;
 let _briefing = false;
 let _briefToken = 0;
 let _audioCtx = null;
+
+/** @type {HTMLAudioElement | null} */
+let _currentAudio = null;
+/** @type {string | null} */
+let _currentAudioUrl = null;
+/** @type {((ok: boolean) => void) | null} */
+let _currentSpeakFinish = null;
 
 function _ac() {
   if (!_audioCtx) {
@@ -56,6 +63,44 @@ function _emitClear() {
     _onClearHighlight?.();
   } catch (_) {
     /* ignore */
+  }
+}
+
+/**
+ * Pause/tear down the current server-TTS Audio element (if any) and resolve its waiter.
+ * Mirrors speechSynthesis.cancel() so stopBrief does not leave a hung promise.
+ */
+function _stopServerAudio() {
+  const finish = _currentSpeakFinish;
+  _currentSpeakFinish = null;
+  const audio = _currentAudio;
+  const url = _currentAudioUrl;
+  _currentAudio = null;
+  _currentAudioUrl = null;
+  if (audio) {
+    try {
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load?.();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  if (url) {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  if (finish) {
+    try {
+      finish(true);
+    } catch (_) {
+      /* ignore */
+    }
   }
 }
 
@@ -150,11 +195,14 @@ export function destroyCmdCenterAudio() {
 
 export function setVoiceEnabled(on) {
   _voiceOn = !!on;
-  if (!_voiceOn && typeof window !== 'undefined' && window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel();
-    } catch (_) {
-      /* ignore */
+  if (!_voiceOn) {
+    _stopServerAudio();
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (_) {
+        /* ignore */
+      }
     }
   }
 }
@@ -162,6 +210,7 @@ export function setVoiceEnabled(on) {
 export function stopBrief() {
   _briefing = false;
   _briefToken += 1;
+  _stopServerAudio();
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     try {
       window.speechSynthesis.cancel();
@@ -174,7 +223,151 @@ export function stopBrief() {
 }
 
 /**
- * Speak one line; falls back to timed simulation when muted or Speech API missing.
+ * Browser Web Speech fallback (original path).
+ * @param {string} text
+ * @param {() => void} done
+ */
+function _speakViaSpeechSynthesis(text, done) {
+  const useSpeech =
+    typeof window !== 'undefined' &&
+    window.speechSynthesis &&
+    typeof SpeechSynthesisUtterance !== 'undefined';
+
+  if (!useSpeech) {
+    const ms = Math.max(1800, String(text || '').length * 55);
+    setTimeout(done, ms);
+    return;
+  }
+
+  try {
+    const u = new SpeechSynthesisUtterance(String(text || ''));
+    u.rate = 1.03;
+    u.pitch = 0.95;
+    u.onend = done;
+    u.onerror = done;
+    window.speechSynthesis.speak(u);
+  } catch (_) {
+    const ms = Math.max(1800, String(text || '').length * 55);
+    setTimeout(done, ms);
+  }
+}
+
+/**
+ * Fetch /api/tts/synthesize and play via a single HTMLAudioElement.
+ * @param {string} text
+ * @param {number} token
+ * @returns {Promise<boolean>} true if audio played to completion (or was stopped cleanly)
+ */
+function _speakViaServerTts(text, token) {
+  return new Promise((resolve) => {
+    if (
+      typeof window === 'undefined' ||
+      typeof Audio === 'undefined' ||
+      typeof fetch !== 'function' ||
+      typeof URL === 'undefined' ||
+      typeof URL.createObjectURL !== 'function'
+    ) {
+      resolve(false);
+      return;
+    }
+
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = setTimeout(() => {
+      try {
+        controller?.abort();
+      } catch (_) {
+        /* ignore */
+      }
+    }, 8000);
+
+    const settle = (ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    };
+
+    (async () => {
+      let objectUrl = null;
+      try {
+        const resp = await fetch('/api/tts/synthesize', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: String(text || ''), format: 'audio' }),
+          signal: controller ? controller.signal : undefined,
+        });
+
+        if (token !== _briefToken) {
+          settle(false);
+          return;
+        }
+        if (!resp.ok) {
+          settle(false);
+          return;
+        }
+
+        const blob = await resp.blob();
+        if (token !== _briefToken || !blob || !blob.size) {
+          settle(false);
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        const audio = new Audio(objectUrl);
+
+        // Replace any prior clip; stopBrief resolves hangers via _currentSpeakFinish.
+        _stopServerAudio();
+        if (token !== _briefToken) {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch (_) {
+            /* ignore */
+          }
+          settle(false);
+          return;
+        }
+
+        let settled = false;
+        const finish = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (_currentSpeakFinish === finish) _currentSpeakFinish = null;
+          if (_currentAudio === audio) _currentAudio = null;
+          if (_currentAudioUrl === objectUrl) _currentAudioUrl = null;
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch (_) {
+            /* ignore */
+          }
+          settle(ok);
+        };
+
+        _currentAudio = audio;
+        _currentAudioUrl = objectUrl;
+        _currentSpeakFinish = finish;
+
+        audio.onended = () => finish(true);
+        audio.onerror = () => finish(false);
+
+        const playResult = audio.play();
+        if (playResult && typeof playResult.then === 'function') {
+          playResult.catch(() => finish(false));
+        }
+      } catch (_) {
+        if (objectUrl) {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        settle(false);
+      }
+    })();
+  });
+}
+
+/**
+ * Speak one line via server TTS (Voice.ai); falls back to speechSynthesis, then timed simulation.
  * @param {string} text
  * @param {number} token
  * @returns {Promise<void>}
@@ -182,36 +375,35 @@ export function stopBrief() {
 function _speakLine(text, token) {
   return new Promise((resolve) => {
     const done = () => {
-      if (token !== _briefToken) {
-        resolve();
-        return;
-      }
       resolve();
     };
 
-    const useSpeech =
-      _voiceOn &&
-      typeof window !== 'undefined' &&
-      window.speechSynthesis &&
-      typeof SpeechSynthesisUtterance !== 'undefined';
-
-    if (!useSpeech) {
+    // Muted / voice-off: keep the timed fake so brief timing still advances.
+    if (!_voiceOn) {
       const ms = Math.max(1800, String(text || '').length * 55);
       setTimeout(done, ms);
       return;
     }
 
-    try {
-      const u = new SpeechSynthesisUtterance(String(text || ''));
-      u.rate = 1.03;
-      u.pitch = 0.95;
-      u.onend = done;
-      u.onerror = done;
-      window.speechSynthesis.speak(u);
-    } catch (_) {
-      const ms = Math.max(1800, String(text || '').length * 55);
-      setTimeout(done, ms);
-    }
+    _speakViaServerTts(text, token)
+      .then((ok) => {
+        if (token !== _briefToken) {
+          done();
+          return;
+        }
+        if (ok) {
+          done();
+          return;
+        }
+        _speakViaSpeechSynthesis(text, done);
+      })
+      .catch(() => {
+        if (token !== _briefToken) {
+          done();
+          return;
+        }
+        _speakViaSpeechSynthesis(text, done);
+      });
   });
 }
 

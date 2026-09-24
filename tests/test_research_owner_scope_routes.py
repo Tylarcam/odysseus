@@ -19,6 +19,8 @@ def _redirect_research_dir(tmp_path, monkeypatch):
         "routes.research_routes.DEEP_RESEARCH_DIR",
         str(tmp_path / "data" / "deep_research"),
     )
+    from routes.research_routes import library_cache_invalidate
+    library_cache_invalidate()
 
 
 def _request(user: str):
@@ -68,6 +70,40 @@ def test_library_returns_only_caller_owned_unarchived_reports(tmp_path, monkeypa
 
     assert [item["id"] for item in out["research"]] == ["alice-live"]
     assert out["total"] == 1
+
+
+def test_library_tolerates_null_stats_and_sources(tmp_path, monkeypatch):
+    """Reports with JSON null stats/sources must not 500 the library scan."""
+    from routes.research_routes import _scan_research_library, library_cache_invalidate
+
+    monkeypatch.chdir(tmp_path)
+    data_dir = tmp_path / "data" / "deep_research"
+    _write_research(
+        data_dir,
+        "null-fields",
+        owner="alice",
+        query="Null stats",
+        stats=None,
+        sources=None,
+        completed_at=10,
+    )
+    library_cache_invalidate()
+    items = _scan_research_library()
+    row = next(i for i in items if i["id"] == "null-fields")
+    assert row["source_count"] == 0
+    assert row["duration"] == ""
+    assert row["rounds"] == ""
+
+    router = setup_research_routes(_research_handler())
+    target = _route(router, "/api/research/library", "GET")
+    out = asyncio.run(target(
+        request=_request("alice"),
+        search=None,
+        sort="recent",
+        limit=50,
+        archived=False,
+    ))
+    assert [item["id"] for item in out["research"]] == ["null-fields"]
 
 
 def test_detail_rejects_cross_owner_and_null_owner_reports(tmp_path, monkeypatch):

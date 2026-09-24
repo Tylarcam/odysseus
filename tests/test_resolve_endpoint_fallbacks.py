@@ -147,6 +147,35 @@ def test_returns_explicit_fallback_when_no_endpoint_id_configured(monkeypatch):
     ) == fallback
 
 
+def test_task_candidates_fall_through_to_default_when_utility_is_set(monkeypatch):
+    """Tidy/auto-sort must not die on a configured-but-dead utility (local
+    Ollama at host.docker.internal) when a working default chat model exists.
+    utility_model_fallbacks is often empty, so the default chat endpoint has
+    to be appended as a last-resort candidate."""
+    settings = {
+        "task_endpoint_id": "",
+        "task_model": "",
+        "utility_endpoint_id": "utility",
+        "utility_model": "utility-chat",
+        "utility_model_fallbacks": [],
+        "default_endpoint_id": "default",
+        "default_model": "default-chat",
+        "default_model_fallbacks": [],
+    }
+    _install_resolver_fakes(
+        monkeypatch,
+        settings,
+        [_endpoint("utility", "utility-chat"), _endpoint("default", "default-chat")],
+    )
+
+    from src.endpoint_resolver import resolve_task_candidates
+
+    cands = resolve_task_candidates()
+    models = [c[1] for c in cands]
+    assert models[0] == "utility-chat"
+    assert "default-chat" in models
+
+
 def test_hidden_configured_model_selects_first_enabled_chat_model(monkeypatch):
     settings = {
         "default_endpoint_id": "default",

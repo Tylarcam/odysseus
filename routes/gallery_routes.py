@@ -1812,8 +1812,11 @@ def setup_gallery_routes() -> APIRouter:
             if not vl_settings.get("vision_enabled", True):
                 return {"error": "Vision is disabled — enable it in Settings → Vision"}
             configured = vl_settings.get("vision_model", "")
+            configured_ep = vl_settings.get("vision_endpoint_id", "")
             try:
-                chat_url, model_name, headers = _resolve_vl_model(configured, owner=user)
+                chat_url, model_name, headers = _resolve_vl_model(
+                    configured, owner=user, endpoint_id=configured_ep
+                )
             except ValueError:
                 return {"error": "No vision model configured — set one in Settings → Vision"}
             if not chat_url:

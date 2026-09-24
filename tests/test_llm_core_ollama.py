@@ -240,3 +240,65 @@ def test_stream_llm_threads_discovered_num_ctx(monkeypatch):
     assert seen["num_ctx"] == 32768
     assert seen["stream"] is True
     assert out  # we got the SSE error chunk
+
+
+# ---------------------------------------------------------------------------
+# host.docker.internal dual-stack: extra_hosts host-gateway injects an IPv6
+# mapping with no route from the compose network (Errno 101 ENETUNREACH).
+# httpx then tries AAAA after IPv4 and reports the IPv6 error, which is what
+# Tidy surfaces as "Auto-sort: POST failed: [Errno 101] Network is unreachable".
+# Force the A record so a reachable IPv4 host path is used.
+# ---------------------------------------------------------------------------
+
+def test_prefer_ipv4_docker_host_rewrites_to_a_record(monkeypatch):
+    import socket
+
+    def fake_gai(host, port, family=0, type=0, proto=0, flags=0):
+        assert host == "host.docker.internal"
+        assert family == socket.AF_INET
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.65.254", port))]
+
+    monkeypatch.setattr(llm_core.socket, "getaddrinfo", fake_gai)
+    assert (
+        llm_core._prefer_ipv4_docker_host(
+            "http://host.docker.internal:11434/v1/chat/completions"
+        )
+        == "http://192.168.65.254:11434/v1/chat/completions"
+    )
+
+
+def test_prefer_ipv4_docker_host_leaves_other_hosts_alone():
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    assert llm_core._prefer_ipv4_docker_host(url) == url
+
+
+def test_llm_call_posts_to_ipv4_for_docker_internal(monkeypatch):
+    import socket
+
+    seen = {}
+
+    def fake_gai(host, port, family=0, type=0, proto=0, flags=0):
+        if host == "host.docker.internal" and family == socket.AF_INET:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.65.254", port))]
+        raise socket.gaierror("unexpected getaddrinfo")
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        seen["url"] = url
+        request = httpx.Request("POST", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": "sorted"}}]},
+        )
+
+    monkeypatch.setattr(llm_core.socket, "getaddrinfo", fake_gai)
+    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+
+    result = llm_core.llm_call(
+        "http://host.docker.internal:11434/v1/chat/completions",
+        "llama3.2",
+        [{"role": "user", "content": "sort these"}],
+    )
+
+    assert result == "sorted"
+    assert seen["url"].startswith("http://192.168.65.254:11434/")

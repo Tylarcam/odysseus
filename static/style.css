@@ -4953,16 +4953,79 @@ body.bg-pattern-sparkles {
       .section-header-flex h4::before {
         height: 18px;
       }
-      /* Compact top bar on mobile — align with sidebar header */
-      .chat-top-bar {
-        padding: 1px 8px;
-        min-height: 14px;
-        margin-top: -31px;
-        padding-top: 31px;
+      /* Chat title sits in its own row under the fixed hamburger controls.
+         The old strip was 14px tall, 0.65em, and capped at 55% width, so the
+         session name and message count were clipped between those buttons. */
+      .chat-top-bar,
+      body.sidebar-collapsed.hamburger-left .chat-top-bar,
+      body.sidebar-collapsed.hamburger-right .chat-top-bar {
+        position: relative;
+        margin: 10px 0 8px;
+        padding: 0 10px;
+        min-height: 44px;
+        background: color-mix(in srgb, var(--panel, var(--bg)) 82%, var(--fg));
+        border: 1px solid color-mix(in srgb, var(--fg) 16%, transparent);
+        border-radius: 12px;
       }
       .chat-top-bar .chat-new-btn { display: none; }
-      .chat-meta-overlay { font-size: 0.65em; max-width: 55%; overflow: visible; left: 50%; top: 50%; transform: translate(-50%, -50%); position: absolute; }
-      .chat-meta-overlay .export-dl-btn { display: inline-flex; }
+      .chat-meta-overlay {
+        position: relative;
+        left: auto;
+        right: auto;
+        top: auto;
+        transform: none;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.25;
+        color: var(--fg);
+        max-width: 100%;
+        width: 100%;
+        overflow: hidden;
+        gap: 8px;
+        pointer-events: auto;
+        min-height: 44px;
+        padding: 4px 2px;
+        box-sizing: border-box;
+        justify-content: center;
+      }
+      .chat-meta-overlay .export-dl-btn {
+        display: inline-flex;
+        flex-shrink: 0;
+        min-width: 36px;
+        min-height: 36px;
+        padding: 6px;
+      }
+      .chat-meta-overlay #current-meta {
+        touch-action: pan-y;
+        user-select: none;
+        -webkit-user-select: none;
+        will-change: transform;
+        display: block;
+        min-height: 0;
+        min-width: 0;
+        flex: 0 1 auto;
+        padding: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .chat-meta-overlay #current-meta.chat-title-swiping {
+        transition: none;
+      }
+      .chat-meta-overlay .chat-meta-count {
+        flex-shrink: 0;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--fg);
+        background: color-mix(in srgb, var(--accent, var(--fg)) 22%, transparent);
+        border-radius: 999px;
+        padding: 3px 8px;
+        margin-left: 0;
+        line-height: 1.3;
+      }
       /* Incognito — smaller on mobile */
       .incognito-btn {
         padding: 4px 10px;
@@ -14578,10 +14641,22 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
 
 /* ---- Doc fullscreen ---- */
 .doc-editor-pane.doc-fullscreen {
-  flex: 1;
-  max-width: 100%;
+  /* !important beats leftover divider-drag inline width/flex
+     (`width: 626px; flex: 0 0 auto`) which otherwise keep the pane
+     locked to the last dragged size after the chevron expands it. */
+  flex: 1 1 auto !important;
+  max-width: 100% !important;
   width: 100% !important;
   border-left: none;
+}
+/* The side-pane editor is a centered ~820px writing column (Bear /
+   iA Writer). Fullscreen is a request for the rest of the screen —
+   drop the cap so text, scrollbar, and overlays use the full pane. */
+.doc-editor-pane.doc-fullscreen .doc-editor-wrap {
+  max-width: none;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
 }
 /* Keep the hamburger reachable in fullscreen — version history can still
    hide it (the panel covers that area). */
@@ -34811,7 +34886,7 @@ body.notes-mobile-mode.notes-drag-mode .note-card-pin.active {
   border-color: color-mix(in srgb, var(--red, #e06c75) 25%, transparent);
 }
 
-/* ── Selection action bar (highlight → Handoff / Search / Listen / Cal / Fork / Gen) ── */
+/* ── Selection action bar (highlight → Handoff / Form / Search / Listen / Cal / Fork / Gen) ── */
 .selection-action-bar {
   position: fixed;
   z-index: 1200;

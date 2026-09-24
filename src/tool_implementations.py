@@ -1140,6 +1140,20 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
                 items.append({"id": s.id, "name": s.name, "transport": s.transport,
                               "is_enabled": s.is_enabled, "status": status,
                               "tool_count": tool_count})
+            seen = {row["id"] for row in items}
+            from src.builtin_mcp import builtin_status_entries
+            for entry in builtin_status_entries(mcp):
+                if entry["id"] in seen:
+                    continue
+                items.append({
+                    "id": entry["id"],
+                    "name": entry["name"],
+                    "transport": entry["transport"],
+                    "is_enabled": entry["is_enabled"],
+                    "status": entry["status"],
+                    "tool_count": entry["tool_count"],
+                    "builtin": True,
+                })
             return {"response": f"{len(items)} MCP servers", "servers": items, "exit_code": 0}
         finally:
             db.close()
@@ -1227,6 +1241,15 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
                     )
                     st = mcp.get_server_status(sid)
                     return {"response": f"Reconnected '{srv.name}' ({st.get('tool_count', 0)} tools)", "exit_code": 0}
+                if mcp.is_builtin(sid):
+                    ok = await mcp._reconnect_builtin(sid)
+                    st = mcp.get_server_status(sid)
+                    if not ok:
+                        return {"error": f"Failed to reconnect builtin '{sid}'", "exit_code": 1}
+                    return {
+                        "response": f"Reconnected builtin '{sid}' ({st.get('tool_count', 0)} tools)",
+                        "exit_code": 0,
+                    }
                 return {"error": f"Server {sid} not found", "exit_code": 1}
             finally:
                 db2.close()

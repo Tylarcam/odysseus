@@ -1926,6 +1926,282 @@ export async function materializePendingSession() {
 
 export function hasPendingChat() { return !!_pendingChat; }
 export function getPendingChat() { return _pendingChat; }
+
+function _starPartitionCopy(arr) {
+  const starred = arr.filter(s => s.is_important);
+  const rest = arr.filter(s => !s.is_important);
+  return [...starred, ...rest];
+}
+
+/** Base filter + manual drag-order used by the sidebar list. */
+function _getBaseOrderedSessions() {
+  let orderedSessions = sessions.filter(s =>
+    !s.archived
+    && s.folder !== 'Assistant'
+    && !_isIncognitoSession(s.id)
+    && (s.name || '').trim() !== 'Nobody'
+    && (s.name || '').trim() !== 'Incognito'
+  );
+  const savedOrder = Storage.get('session-order');
+  if (savedOrder) {
+    try {
+      const orderIds = JSON.parse(savedOrder);
+      const sessionMap = new Map(orderedSessions.map(s => [s.id, s]));
+      const ordered = [];
+      orderIds.forEach(id => {
+        if (sessionMap.has(id)) {
+          ordered.push(sessionMap.get(id));
+          sessionMap.delete(id);
+        }
+      });
+      sessionMap.forEach(s => ordered.push(s));
+      orderedSessions = ordered;
+    } catch (e) {
+      console.warn('Failed to restore session order:', e);
+    }
+  }
+  return orderedSessions;
+}
+
+/**
+ * Full navigable chat list in sidebar order (not truncated by Show more).
+ * Flat sort modes: starred first, then sort. Group/manual: folders then unfiled.
+ */
+export function getNavigableSessions() {
+  const orderedSessions = _getBaseOrderedSessions().slice();
+
+  if (_sortMode && _sortMode !== 'group') {
+    orderedSessions.sort((a, b) => {
+      if (_sortMode === 'newest') return (b.created_at || '').localeCompare(a.created_at || '');
+      if (_sortMode === 'active') {
+        const av = a.last_message_at || a.updated_at || a.created_at || '';
+        const bv = b.last_message_at || b.updated_at || b.created_at || '';
+        return bv.localeCompare(av);
+      }
+      return 0;
+    });
+    return _starPartitionCopy(orderedSessions);
+  }
+
+  const folders = {};
+  const unfiled = [];
+  orderedSessions.forEach(s => {
+    if (s.folder) {
+      if (!folders[s.folder]) folders[s.folder] = [];
+      folders[s.folder].push(s);
+    } else {
+      unfiled.push(s);
+    }
+  });
+  Object.keys(folders).forEach(name => {
+    folders[name] = _starPartitionCopy(folders[name]);
+  });
+  const unfiledOrdered = _starPartitionCopy(unfiled);
+
+  const savedFolderOrder = loadFolderOrder();
+  const allFolderNames = Object.keys(folders);
+  const orderedFolderNames = [];
+  savedFolderOrder.forEach(name => {
+    if (allFolderNames.includes(name)) orderedFolderNames.push(name);
+  });
+  allFolderNames.forEach(name => {
+    if (!orderedFolderNames.includes(name)) orderedFolderNames.push(name);
+  });
+
+  const flat = [];
+  orderedFolderNames.forEach(name => {
+    flat.push(...(folders[name] || []));
+  });
+  flat.push(...unfiledOrdered);
+  return flat;
+}
+
+/** Adjacent session id in navigable order. direction: 'next' | 'prev'. */
+export function getAdjacentSessionId(direction) {
+  if (!currentSessionId) return null;
+  const list = getNavigableSessions();
+  const idx = list.findIndex(s => s.id === currentSessionId);
+  if (idx < 0) return null;
+  const nextIdx = direction === 'next' ? idx + 1 : idx - 1;
+  if (nextIdx < 0 || nextIdx >= list.length) return null;
+  return list[nextIdx].id;
+}
+
+let _titleSwipeDidSwipe = false;
+
+/** True once after a title swipe so the tap-open-export click is suppressed. */
+export function consumeTitleSwipeClick() {
+  if (!_titleSwipeDidSwipe) return false;
+  _titleSwipeDidSwipe = false;
+  return true;
+}
+
+/** Mobile horizontal swipe on chat title to switch chats. */
+export function initChatTitleSwipe() {
+  const metaEl = document.getElementById('current-meta');
+  const surface = document.querySelector('.chat-meta-overlay') || metaEl;
+  if (!metaEl || !surface || surface._titleSwipeInit) return;
+  surface._titleSwipeInit = true;
+  metaEl._titleSwipeInit = true;
+
+  const SWIPE_LOCK = 12;
+  const SWIPE_COMMIT = 50;
+  const EDGE_RUBBER = 24;
+  const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  let locked = null; // null | 'h' | 'v'
+  let lastX = 0;
+  let lastT = 0;
+  let velX = 0;
+  let pointerId = null;
+  let startNavToken = 0;
+  let inputMode = null; // 'pointer' | 'touch'
+
+  const resetTransform = () => {
+    metaEl.classList.remove('chat-title-swiping');
+    metaEl.style.transition = 'transform 0.2s ease';
+    metaEl.style.transform = '';
+    const clear = () => { metaEl.style.transition = ''; };
+    metaEl.addEventListener('transitionend', clear, { once: true });
+    setTimeout(clear, 250);
+  };
+
+  const ignoreTarget = (target) => {
+    if (!target || !target.closest) return true;
+    if (target.closest('.export-dl-btn, .export-dropdown-wrap, .export-dropdown-menu, input')) return true;
+    if (metaEl.querySelector('input')) return true;
+    return false;
+  };
+
+  const begin = (x, y, mode, id) => {
+    if (!isMobile()) return false;
+    if (!currentSessionId) return false;
+    tracking = true;
+    locked = null;
+    inputMode = mode;
+    _titleSwipeDidSwipe = false;
+    startX = lastX = x;
+    startY = y;
+    lastT = performance.now();
+    velX = 0;
+    pointerId = id;
+    startNavToken = _sessionNavToken;
+    return true;
+  };
+
+  const move = (x, y, mode, id, evt) => {
+    if (!tracking || inputMode !== mode) return;
+    if (mode === 'pointer' && id != null && pointerId !== id) return;
+    const dx = x - startX;
+    const dy = y - startY;
+    const now = performance.now();
+    const dt = Math.max(1, now - lastT);
+    velX = (x - lastX) / dt;
+    lastX = x;
+    lastT = now;
+
+    if (!locked) {
+      if (Math.abs(dx) < SWIPE_LOCK && Math.abs(dy) < SWIPE_LOCK) return;
+      if (Math.abs(dx) >= Math.abs(dy)) locked = 'h';
+      else {
+        locked = 'v';
+        tracking = false;
+        return;
+      }
+    }
+    if (locked !== 'h') return;
+    if (evt && evt.cancelable) evt.preventDefault();
+
+    const dir = dx < 0 ? 'next' : 'prev';
+    const adj = getAdjacentSessionId(dir);
+    let tx = dx;
+    if (!adj) {
+      tx = Math.sign(dx) * Math.min(Math.abs(dx) * 0.35, EDGE_RUBBER);
+    } else {
+      tx = Math.max(-80, Math.min(80, dx * 0.5));
+    }
+    metaEl.classList.add('chat-title-swiping');
+    metaEl.style.transition = 'none';
+    metaEl.style.transform = `translateX(${tx}px)`;
+  };
+
+  const end = (x, y, mode, id) => {
+    if (inputMode && inputMode !== mode) return;
+    if (mode === 'pointer' && pointerId != null && id != null && pointerId !== id) return;
+    const wasH = locked === 'h';
+    const dx = x - startX;
+    tracking = false;
+    locked = null;
+    inputMode = null;
+    if (mode === 'pointer') {
+      try {
+        if (pointerId != null) surface.releasePointerCapture(pointerId);
+      } catch {}
+    }
+    pointerId = null;
+
+    if (!wasH) {
+      resetTransform();
+      return;
+    }
+
+    const commit = Math.abs(dx) >= SWIPE_COMMIT || Math.abs(velX) > 0.45;
+    const dir = dx < 0 ? 'next' : 'prev';
+    const adj = commit ? getAdjacentSessionId(dir) : null;
+    if (adj && startNavToken === _sessionNavToken) {
+      _titleSwipeDidSwipe = true;
+      resetTransform();
+      selectSession(adj, { keepSidebar: true });
+    } else {
+      resetTransform();
+    }
+  };
+
+  surface.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (ignoreTarget(e.target)) return;
+    // Prefer touch* path for finger input — more reliable than pointer capture on mobile WebKit.
+    if (e.pointerType === 'touch') return;
+    if (!begin(e.clientX, e.clientY, 'pointer', e.pointerId)) return;
+    try { surface.setPointerCapture(e.pointerId); } catch {}
+  });
+
+  surface.addEventListener('pointermove', (e) => {
+    move(e.clientX, e.clientY, 'pointer', e.pointerId, e);
+  }, { passive: false });
+
+  surface.addEventListener('pointerup', (e) => end(e.clientX, e.clientY, 'pointer', e.pointerId));
+  surface.addEventListener('pointercancel', (e) => end(e.clientX, e.clientY, 'pointer', e.pointerId));
+
+  surface.addEventListener('touchstart', (e) => {
+    if (ignoreTarget(e.target)) return;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    begin(t.clientX, t.clientY, 'touch', null);
+  }, { passive: true });
+
+  surface.addEventListener('touchmove', (e) => {
+    if (!tracking || inputMode !== 'touch') return;
+    if (!e.touches.length) return;
+    const t = e.touches[0];
+    move(t.clientX, t.clientY, 'touch', null, e);
+  }, { passive: false });
+
+  surface.addEventListener('touchend', (e) => {
+    if (inputMode !== 'touch') return;
+    const t = e.changedTouches[0];
+    end(t ? t.clientX : lastX, t ? t.clientY : startY, 'touch', null);
+  });
+
+  surface.addEventListener('touchcancel', () => {
+    if (inputMode !== 'touch') return;
+    end(lastX, startY, 'touch', null);
+  });
+}
+
 // Getters for external access
 export function getCurrentSessionId() {
   return currentSessionId;
@@ -3155,10 +3431,14 @@ const sessionModule = {
   getPendingChat,
   getCurrentSessionId,
   getSessions,
+  getNavigableSessions,
+  getAdjacentSessionId,
   getCurrentModel,
   getCurrentEndpointUrl,
   setCurrentSessionId,
   initDragSort,
+  initChatTitleSwipe,
+  consumeTitleSwipeClick,
   updateModelPicker,
   markResearching,
   clearResearching,

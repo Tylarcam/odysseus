@@ -1523,3 +1523,48 @@ def test_cmd_center_money_hero_uses_brief_top3_without_replacing_default_hero():
     assert "Can wait" in blob
     assert "Search as Code" not in blob
     assert "What changed" not in blob
+
+
+def test_cmd_center_money_move_uses_pinned_docket_without_changing_default_hero():
+    """Opt-in Money Move / BRIEF ME speak the pinned triage docket; Full picture stays."""
+    from services.documents.ceo_brief_store import date_label, canonical_title
+
+    today = date_label()
+    data = build_cmd_center(
+        notes=[_search_as_code_note()],
+        documents=[{
+            "id": "ceo-today",
+            "title": canonical_title(),
+            "content": (
+                f"# CEO Brief — {today}\n\n"
+                "## Top 3 actions that move the needle\n"
+                "1. Ship Loom pack `9ee7b1d6` — convert the demo\n"
+                "2. Protect focus\n"
+                "3. Capture inbound\n"
+            ),
+            "language": "markdown",
+            "archived": False,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }],
+        tasks=[],
+        sessions=[],
+        include_globe=False,
+        pinned_facts=[
+            "Odyssey Triage 2026-07-24: 5 Upwork proposals still unsent. "
+            "NPR Panel 2 thank-yous ready to send."
+        ],
+        **_quiet_agency(),
+    )
+    assert data["hero"]["unit"] == "DIRECTIVES"
+    assert "Search as Code" in (data["hero"].get("title") or "")
+    assert len(data["stage_cards"]) == 5
+    assert data["core_lenses"] == ["full_picture", "money_move"]
+    money = data["money_hero"]
+    assert money["unit"] == "TOP 3"
+    assert "Upwork" in (money.get("title") or "") or "Triage" in (money.get("title") or "")
+    assert str(money.get("target_id") or "").startswith("4f9a694f")
+    assert money.get("action") == "open_doc"
+    assert money.get("confirm_action") == "confirm_pack_sent"
+    blob = " ".join(line.get("text") or "" for line in (data.get("brief_script") or []))
+    assert "Upwork" in blob or "Triage" in blob
+    assert "Search as Code" not in blob

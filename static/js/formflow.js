@@ -443,7 +443,8 @@ export function openPanel() {
         <div class="ff-review-actions">
           <button class="ff-review-btn primary" id="ff-handoff-btn">Continue to handoffs →</button>
           <button class="ff-review-btn" id="ff-copy-btn">Copy all</button>
-          <button class="ff-review-btn" id="ff-download-btn">Download .txt</button>
+          <button class="ff-review-btn" id="ff-download-md-btn">Download .md</button>
+          <button class="ff-review-btn" id="ff-download-pdf-btn">Download .pdf</button>
         </div>
         <div id="ff-review-list"></div>
         <div class="ff-restart-row">
@@ -843,7 +844,8 @@ function _wireEvents() {
 
   // Review actions
   document.getElementById('ff-copy-btn').addEventListener('click', _copyAnswers);
-  document.getElementById('ff-download-btn').addEventListener('click', _downloadAnswers);
+  document.getElementById('ff-download-md-btn').addEventListener('click', _downloadMarkdown);
+  document.getElementById('ff-download-pdf-btn').addEventListener('click', _downloadPdf);
   document.getElementById('ff-handoff-btn').addEventListener('click', () => {
     _clearDraft();
     _renderHandoffs();
@@ -1505,6 +1507,18 @@ function _buildExport() {
   ).join('\n\n');
 }
 
+function _buildMarkdownExport() {
+  const parts = ['# FormFlow answers', ''];
+  _visibleQs().forEach((q, i) => {
+    const phase = q.phase ? ` · ${q.phase}` : '';
+    parts.push(`## Q${i + 1}${phase}. ${q.label}`);
+    parts.push('');
+    parts.push(_answerDisplay(q) || '*(not answered)*');
+    parts.push('');
+  });
+  return parts.join('\n').trim() + '\n';
+}
+
 function _copyAnswers() {
   const text = _buildExport();
   const btn  = document.getElementById('ff-copy-btn');
@@ -1521,12 +1535,75 @@ function _copyAnswers() {
   });
 }
 
-function _downloadAnswers() {
-  const blob = new Blob([_buildExport()], { type: 'text/plain' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = 'formflow-answers.txt'; a.click();
+function _triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
   URL.revokeObjectURL(url);
+}
+
+function _downloadMarkdown() {
+  const blob = new Blob([_buildMarkdownExport()], { type: 'text/markdown;charset=utf-8' });
+  _triggerDownload(blob, 'formflow-answers.md');
+}
+
+let _html2pdfReady = null;
+function _ensureHtml2Pdf() {
+  if (_html2pdfReady) return _html2pdfReady;
+  if (typeof window !== 'undefined' && window.html2pdf) {
+    return (_html2pdfReady = Promise.resolve());
+  }
+  _html2pdfReady = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/static/lib/html2pdf.bundle.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load PDF library'));
+    document.head.appendChild(s);
+  });
+  return _html2pdfReady;
+}
+
+async function _downloadPdf() {
+  const btn = document.getElementById('ff-download-pdf-btn');
+  const orig = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Preparing…'; }
+  try {
+    await _ensureHtml2Pdf();
+    const md = _buildMarkdownExport();
+    const html = md
+      .split('\n')
+      .map((line) => {
+        if (line.startsWith('# ')) return `<h1>${_esc(line.slice(2))}</h1>`;
+        if (line.startsWith('## ')) return `<h2>${_esc(line.slice(3))}</h2>`;
+        if (line.startsWith('*(') && line.endsWith(')*')) {
+          return `<p><em>${_esc(line.slice(1, -1))}</em></p>`;
+        }
+        if (!line.trim()) return '';
+        return `<p>${_esc(line)}</p>`;
+      })
+      .filter(Boolean)
+      .join('');
+    const container = document.createElement('div');
+    container.style.cssText = 'padding:20px;font-family:Georgia,serif;font-size:12px;color:#111;background:#fff;line-height:1.55;';
+    container.innerHTML = html;
+    await window.html2pdf().set({
+      margin: 12,
+      filename: 'formflow-answers.pdf',
+      image: { type: 'jpeg', quality: 0.95 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    }).from(container).save();
+  } catch (err) {
+    const errEl = document.getElementById('ff-input-error');
+    if (errEl) errEl.textContent = err?.message || 'PDF export failed';
+    if (typeof window.showToast === 'function') {
+      window.showToast(err?.message || 'PDF export failed');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = orig || 'Download .pdf'; }
+  }
 }
 
 function _restart() {

@@ -36,6 +36,7 @@ class MemoryManager:
     def __init__(self, data_dir: str):
         self.memory_file = os.path.join(data_dir, "memory.json")
         self.ensure_file_exists()
+        self._persist_money_pin_backfill()
         
     def extract_memory_from_chat(self, chat_history: List[Dict], session_id: str = None) -> List[Dict]:
         """
@@ -119,12 +120,40 @@ class MemoryManager:
             with open(self.memory_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, list):
+                    self._persist_money_pin_backfill(data)
                     return self._validate_entries(data)
         except (json.JSONDecodeError, PermissionError) as e:
             logger.error("Error loading memory.json: %s", e)
             return self._migrate_from_legacy()
 
         return []
+
+    def _load_raw_list(self) -> list:
+        """Disk JSON array as stored, including non-dict rows. Empty on error."""
+        if not os.path.exists(self.memory_file):
+            return []
+        try:
+            with open(self.memory_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+        except (json.JSONDecodeError, PermissionError, OSError):
+            return []
+
+    def _atomic_write(self, entries: list) -> None:
+        tmp_file = self.memory_file + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(entries, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, self.memory_file)
+
+    def _persist_money_pin_backfill(self, entries: list = None) -> int:
+        """Pin existing money facts in-place and persist. Idempotent."""
+        if entries is None:
+            entries = self._load_raw_list()
+        n = backfill_money_prosperity_pins(entries)
+        if n:
+            self._atomic_write(entries)
+            logger.info("Reconciled %d money/prosperity memory pins", n)
+        return n
 
     def load(self, owner: str = None) -> List[Dict]:
         """Load memory entries, optionally filtered by owner."""
@@ -195,6 +224,11 @@ class MemoryManager:
     
     def save(self, entries: List[Dict]):
         """Save memory entries to JSON file."""
+        prev_by_id = {}
+        for prev in self._load_raw_list():
+            if isinstance(prev, dict) and prev.get("id"):
+                prev_by_id[prev["id"]] = prev
+
         # Validate entries before saving
         for entry in entries:
             if "id" not in entry:
@@ -205,15 +239,14 @@ class MemoryManager:
                 entry["source"] = "user"
             if "category" not in entry:
                 entry["category"] = "fact"
-        
-        # Use atomic write
-        tmp_file = self.memory_file + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_file, self.memory_file)
+            prev = prev_by_id.get(entry.get("id"))
+            if prev is not None and (prev.get("text") or "") != (entry.get("text") or ""):
+                apply_money_pin_on_edit(entry)
+
+        self._atomic_write(entries)
     
     def add_entry(self, text: str, source: str = "user", category: str = "fact", owner: str = None) -> Dict:
-        """Add a new memory entry."""
+        """Add a new memory entry. Money/prosperity facts are auto-pinned."""
         if not text.strip():
             raise ValueError("Memory text cannot be empty")
 
@@ -227,6 +260,7 @@ class MemoryManager:
         }
         if owner:
             entry["owner"] = owner
+        apply_auto_money_pin(entry)
         return entry
 
     def increment_uses(self, ids: List[str]) -> None:
@@ -387,6 +421,126 @@ class MemoryManager:
         return [mem for _, mem in relevant[:max_items]]
 
 
+_MAX_PINNED_MEMORY_FACTS = 20
+
+# Fact-shaped prosperity detector — not bare revenue/fruit/upwork in prefs, ids, or archives.
+# Extract already auto-pins category=identity; this covers add + extract money facts.
+_MONEY_PROSPERITY_RE = re.compile(
+    r"""
+    (?:
+        \binvoices?\b
+        | send[\s-]*pack
+        | grant\s+nomination
+        | \bretainer\b
+        | \bhonorarium\b
+        | FRUIT\s*:
+        | proposal(?:s)?\s+(?:sent|unsent|still\s+unsent|to\s+send)
+        | (?:unsent|to\s+send).{0,80}(?:proposals?|upwork|send[\s-]*pack)
+        | (?:proposals?|upwork).{0,80}(?:unsent|to\s+send|\bsent\b)
+        | q3.{0,80}(?:\$|usd|cad|\d[\d,]*(?:\.\d+)?\s*[km]\b|retainer|honorarium|invoice|forecast)
+    )
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+PIN_ORIGIN_AUTO_MONEY = "auto_money"
+PIN_ORIGIN_USER = "user"
+
+
+def is_money_prosperity_fact(text: str, category: str = None) -> bool:
+    """True for a clearly money/prosperity fact. Does not invent amounts."""
+    blob = f"{category or ''} {text or ''}".strip()
+    return bool(blob and _MONEY_PROSPERITY_RE.search(blob))
+
+
+def apply_auto_money_pin(entry: Dict) -> bool:
+    """Pin an unpinned money/prosperity fact. Skip user-controlled unpins.
+
+    Returns True if the entry was mutated. Does not touch unrelated fields.
+    """
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("pinned"):
+        return False
+    if entry.get("pin_origin") == PIN_ORIGIN_USER:
+        return False
+    if not is_money_prosperity_fact(entry.get("text") or "", entry.get("category")):
+        return False
+    entry["pinned"] = True
+    entry["pin_origin"] = PIN_ORIGIN_AUTO_MONEY
+    return True
+
+
+def backfill_money_prosperity_pins(entries: List) -> int:
+    """Pin existing money facts; unpin stale auto_money pins that no longer match.
+
+    Idempotent. Does not rewrite unrelated fields. Skips entries the user
+    explicitly pinned or unpinned (``pin_origin=user``). Does not unpin
+    pinned entries with no origin.
+    """
+    if not isinstance(entries, list):
+        return 0
+    n = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        before = (bool(entry.get("pinned")), entry.get("pin_origin"))
+        if apply_auto_money_pin(entry):
+            n += 1
+            continue
+        if entry.get("pin_origin") == PIN_ORIGIN_AUTO_MONEY:
+            apply_money_pin_on_edit(entry)
+        after = (bool(entry.get("pinned")), entry.get("pin_origin"))
+        if after != before:
+            n += 1
+    return n
+
+
+def apply_money_pin_on_edit(entry: Dict) -> None:
+    """Re-evaluate pin after memory text changes.
+
+    Money-like and unpinned → pin (same as add). Auto-money pin that is no
+    longer money-like → unpin. User pin or unknown origin → leave pinned.
+    """
+    if not isinstance(entry, dict):
+        return
+    money = is_money_prosperity_fact(entry.get("text") or "", entry.get("category"))
+    pinned = bool(entry.get("pinned"))
+    origin = entry.get("pin_origin")
+    if money and not pinned:
+        entry["pinned"] = True
+        entry["pin_origin"] = PIN_ORIGIN_AUTO_MONEY
+    elif (not money) and pinned and origin == PIN_ORIGIN_AUTO_MONEY:
+        entry["pinned"] = False
+        entry.pop("pin_origin", None)
+
+
+
+def load_pinned_memory_facts(owner: str = None, memory_manager=None, max_items: int = None) -> List[str]:
+    """Pinned user facts for always-on Jarvis context (chat, voice, agent).
+
+    Best-effort: never raises. Empty list if memory is unavailable.
+    Empty/anonymous owner loads all (single-user / auth-off).
+    """
+    if max_items is None:
+        max_items = _MAX_PINNED_MEMORY_FACTS
+    try:
+        if memory_manager is None:
+            from src.constants import DATA_DIR
+            memory_manager = MemoryManager(DATA_DIR)
+        effective_owner = None if not owner or owner == "anonymous" else owner
+        entries = memory_manager.load(owner=effective_owner)
+        return [
+            (e.get("text") or "").strip()
+            for e in entries
+            if e.get("pinned") and (e.get("text") or "").strip()
+        ][:max_items]
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("failed to load pinned memories: %s", e)
+        return []
+
+
 def pin_memory_item(memory_manager, memory_id: str, pinned: bool = True, owner: str = None) -> Dict:
     """Pin or unpin a memory. Same write path as POST /api/memory/{id}/pin.
 
@@ -420,6 +574,7 @@ def pin_memory_item(memory_manager, memory_id: str, pinned: bool = True, owner: 
         return {"ok": False, "error": "Memory not found"}
 
     all_mem[idx]["pinned"] = bool(pinned)
+    all_mem[idx]["pin_origin"] = PIN_ORIGIN_USER
     memory_manager.save(all_mem)
     return {
         "ok": True,

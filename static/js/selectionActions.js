@@ -1,5 +1,5 @@
 /**
- * Global text-selection toolbar — Handoff, Search, Listen, Cal, Fork, Gen, and Save on readable surfaces.
+ * Global text-selection toolbar — Handoff, Form, Search, Listen, Cal, Fork, Gen, and Save on readable surfaces.
  * Singleton bar (Notion/Medium pattern): one DOM node, show/hide, pointerdown dismiss.
  */
 
@@ -8,6 +8,7 @@ import { registerMenuDismiss, dismissOrRemove } from './escMenuStack.js';
 import { openCalTargetMenu } from './selectionCalendar.js';
 import { openSearchAgentMenu } from './selectionSearch.js';
 import { openGenTargetMenu } from './selectionPromptGen.js';
+import { FORMFLOW_BTN_ICON, sendMessageToFormFlow } from './formflowFromChat.js';
 
 const MIN_CHARS = 8;
 const SHOW_DEBOUNCE_MS = 200;
@@ -46,6 +47,7 @@ const EXCLUDED_ANCESTORS = [
 let _mods = null;
 let _barEl = null;
 let _handoffBtn = null;
+let _formBtn = null;
 let _forkBtn = null;
 let _calBtn = null;
 let _searchBtn = null;
@@ -739,6 +741,20 @@ async function _onForkClick(ev) {
   });
 }
 
+async function _onFormClick(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const selection = _current;
+  if (!selection?.text?.trim()) return;
+  const text = selection.text.trim();
+  _hideBar({ clearSelection: true });
+  try {
+    await sendMessageToFormFlow(text);
+  } catch (err) {
+    uiModule?.showError?.(err?.message || 'Failed to open FormFlow');
+  }
+}
+
 function _ensureBar() {
   if (_barEl) return _barEl;
 
@@ -752,6 +768,12 @@ function _ensureBar() {
   _handoffBtn.type = 'button';
   _handoffBtn.className = 'selection-action-btn selection-action-handoff';
   _handoffBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg><span>Handoff</span>';
+
+  _formBtn = document.createElement('button');
+  _formBtn.type = 'button';
+  _formBtn.className = 'selection-action-btn selection-action-form';
+  _formBtn.title = 'Send selection to FormFlow';
+  _formBtn.innerHTML = `${FORMFLOW_BTN_ICON}<span>Form</span>`;
 
   _forkBtn = document.createElement('button');
   _forkBtn.type = 'button';
@@ -790,10 +812,11 @@ function _ensureBar() {
   _saveBtn.title = 'Quick-save selection to prompt library';
   _saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Save</span>';
 
-  for (const btn of [_handoffBtn, _searchBtn, _listenBtn, _forkBtn, _calBtn, _genBtn, _saveBtn]) {
+  for (const btn of [_handoffBtn, _formBtn, _searchBtn, _listenBtn, _forkBtn, _calBtn, _genBtn, _saveBtn]) {
     btn.addEventListener('mousedown', (e) => e.preventDefault());
   }
   _handoffBtn.addEventListener('click', _onHandoffClick);
+  _formBtn.addEventListener('click', _onFormClick);
   _searchBtn.addEventListener('click', _onSearchClick);
   _listenBtn.addEventListener('click', _onListenClick);
   _forkBtn.addEventListener('click', _onForkClick);
@@ -802,6 +825,7 @@ function _ensureBar() {
   _saveBtn.addEventListener('click', _onSaveClick);
 
   _barEl.appendChild(_handoffBtn);
+  _barEl.appendChild(_formBtn);
   _barEl.appendChild(_searchBtn);
   _barEl.appendChild(_listenBtn);
   _barEl.appendChild(_calBtn);

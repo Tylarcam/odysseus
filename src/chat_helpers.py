@@ -62,8 +62,9 @@ _VISION_MODEL_KEYWORDS = (
     # Microsoft Phi-4 ships a dedicated multimodal variant ("phi-4-multimodal-instruct")
     # but users often load it under the bare "phi-4" or "phi4" Ollama tag.
     "phi-4", "phi4",
-    # zhipu / glm (glm-4.5v, glm-4.6v, glm-5v-turbo, etc.)
+    # zhipu / glm (glm-4.5v, glm-4.6v, glm-5v-turbo, glm-5.3-flash, etc.)
     "glm-4.5v", "glm-4.6v", "glm-5v",
+    "glm-5.3", "glm-5-3-flash",
 )
 # Catches the "*-VL-*" / "*VL*" family not covered by a literal keyword above
 # (e.g. Qwen2.5-VL and various tags): a standalone "vl" token, plus "vlm".

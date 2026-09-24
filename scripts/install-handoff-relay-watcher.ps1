@@ -28,11 +28,14 @@ if (-not (Test-Path $Watcher)) {
 }
 
 $startupDir = [Environment]::GetFolderPath("Startup")
-$startupLink = Join-Path $startupDir "Odysseus-HandoffRelay-$Target.cmd"
+$startupCmd = Join-Path $startupDir "Odysseus-HandoffRelay-$Target.cmd"
+$startupVbs = Join-Path $startupDir "Odysseus-HandoffRelay-$Target.vbs"
 
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
-    if (Test-Path $startupLink) { Remove-Item $startupLink -Force }
+    foreach ($startupLink in @($startupCmd, $startupVbs)) {
+        if (Test-Path $startupLink) { Remove-Item $startupLink -Force }
+    }
     $wrapperPath = Join-Path $Root "scripts\.handoff-relay-$Target.cmd"
     if (Test-Path $wrapperPath) { Remove-Item $wrapperPath -Force }
     Write-Host "Removed handoff-relay autostart for target=$Target"
@@ -49,7 +52,7 @@ $url = if ($env:ODYSSEUS_URL) { $env:ODYSSEUS_URL } else { "http://127.0.0.1:700
 
 # Wrap so the task can set env vars even when they are not in the machine profile.
 $wrapper = Join-Path $Root "scripts\.handoff-relay-$Target.cmd"
-$psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$Watcher`" -Target $Target -RunAgent -IntervalSeconds $IntervalSeconds"
+$psArgs = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Watcher`" -Target $Target -RunAgent -IntervalSeconds $IntervalSeconds"
 $cmdLines = @(
     "@echo off",
     "set ODYSSEUS_URL=$url",
@@ -59,15 +62,21 @@ $cmdLines = @(
 )
 Set-Content -Path $wrapper -Value ($cmdLines -join "`r`n") -Encoding ASCII
 
-# Prefer the user Startup folder (no admin). Fall back to Task Scheduler.
+# Prefer the user Startup folder (no admin). A .cmd there allocates a console,
+# so logon runs a hidden wscript launcher instead.
 if (Test-Path $startupDir) {
-    Copy-Item -Path $wrapper -Destination $startupLink -Force
-    Write-Host "Installed logon startup entry: $startupLink"
-    Write-Host "  Starts at logon, polls every ${IntervalSeconds}s, runs agent CLI on queued handoffs."
+    $vbs = @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run "cmd.exe /c ""$wrapper""", 0, False
+"@
+    Set-Content -Path $startupVbs -Value $vbs.TrimEnd() -Encoding ASCII
+    if (Test-Path $startupCmd) { Remove-Item $startupCmd -Force }
+    Write-Host "Installed hidden logon startup entry: $startupVbs"
+    Write-Host "  Starts at logon with no console, polls every ${IntervalSeconds}s, runs agent CLI on queued handoffs."
     Write-Host "  Wrapper: $wrapper"
     Write-Host ""
-    Write-Host "Start now (new window):"
-    Write-Host "  Start-Process cmd.exe -ArgumentList '/c `"$wrapper`"'"
+    Write-Host "Start now (hidden):"
+    Write-Host "  wscript.exe //B //Nologo `"$startupVbs`""
     Write-Host "Or run in this terminal:"
     Write-Host "  .\scripts\handoff-relay-watcher.ps1 -Target $Target -RunAgent"
     exit 0
@@ -77,6 +86,7 @@ if (Test-Path $startupDir) {
 $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$wrapper`"" -WorkingDirectory $Root
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet `
+    -Hidden `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -StartWhenAvailable `

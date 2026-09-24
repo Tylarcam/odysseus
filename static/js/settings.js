@@ -366,8 +366,20 @@ async function _fetchModelEndpoints() {
   return Array.isArray(endpoints) ? endpoints : [];
 }
 
+function _endpointHost(ep) {
+  try { return new URL(ep.base_url || '').host; } catch (_) { return ''; }
+}
+
 function _endpointLabel(ep) {
-  return ep.name + (ep.online ? '' : ' (offline)');
+  var host = _endpointHost(ep);
+  var name = ep.name || '';
+  var label = name;
+  if (host && name && name !== host && name.toLowerCase().indexOf(host.toLowerCase()) === -1) {
+    label = name + ' · ' + host;
+  } else if (!label) {
+    label = host;
+  }
+  return label + (ep.online ? '' : ' (offline)');
 }
 
 function _fillEndpointSelect(selectEl, endpoints, selected, keepBlank) {
@@ -936,12 +948,13 @@ async function initImageSettings() {
 
 /* ── Vision ── */
 async function initVisionSettings() {
+  const epSel = el('set-vlEpSelect');
   const vlSel = el('set-vlModelSelect');
   const msg = el('set-visionSettingsMsg');
   const enabledToggle = el('set-visionEnabledToggle');
   const ocrEnabledToggle = el('set-ocrEnabledToggle');
   const ocrLangInput = el('set-ocrLangInput');
-  const configWrap = vlSel ? vlSel.closest('div[style*="flex-direction"]') : null;
+  const configWrap = vlSel ? vlSel.closest('.settings-col') : null;
   var _visionEndpoints = [];
   var visionFallbackWidget = null;
   var _vlExclude = ['audio', 'realtime', 'tts', 'dall-e', 'embedding', 'search', 'whisper'];
@@ -949,31 +962,40 @@ async function initVisionSettings() {
     var lower = String(mid || '').toLowerCase();
     return !_vlExclude.some(function(kw) { return lower.includes(kw); });
   }
-  try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    const visionModels = [];
-    (modelsData.items || []).forEach(item => {
-      if (item.offline) return;
-      (item.models || []).forEach(mid => {
-        if (_isVisionModel(mid)) {
-          visionModels.push(mid);
-        }
-      });
-    });
-    sortModelIds(visionModels).forEach(mid => {
-      var opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; vlSel.appendChild(opt);
-    });
-  } catch (e) { console.warn('Failed to load models for vision settings', e); }
-  // Also pull the raw endpoint list so the fallback widget can resolve
-  // endpoint-id → models the same way the other cards do.
+  function visionModelsFor(epId) {
+    var ep = _visionEndpoints.find(function(e) { return e.id === epId; });
+    return (ep && ep.models) ? ep.models.filter(_isVisionModel) : [];
+  }
+  function refreshModels(selectedModel) {
+    if (!vlSel) return;
+    if (!epSel || !epSel.value) {
+      while (vlSel.options.length) vlSel.remove(0);
+      var blank = document.createElement('option');
+      blank.value = '';
+      blank.textContent = 'Auto-detect';
+      vlSel.appendChild(blank);
+      return;
+    }
+    _fillModelSelect(vlSel, visionModelsFor(epSel.value), selectedModel, false);
+  }
   try {
     _visionEndpoints = await _fetchModelEndpoints();
-  } catch (e) { console.warn('Failed to load endpoints for vision fallback', e); }
+    if (epSel) _fillEndpointSelect(epSel, _visionEndpoints, epSel.value, true);
+  } catch (e) { console.warn('Failed to load endpoints for vision settings', e); }
   try {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await settingsRes.json();
-    if (settings.vision_model) vlSel.value = settings.vision_model;
+    if (epSel) {
+      var epId = settings.vision_endpoint_id || '';
+      if (!epId && settings.vision_model) {
+        var match = _visionEndpoints.find(function(e) {
+          return (e.models || []).indexOf(settings.vision_model) !== -1;
+        });
+        if (match) epId = match.id;
+      }
+      if (epId) epSel.value = epId;
+    }
+    refreshModels(settings.vision_model || '');
     if (enabledToggle) enabledToggle.checked = settings.vision_enabled !== false;
     if (ocrEnabledToggle) ocrEnabledToggle.checked = settings.ocr_enabled !== false;
     if (ocrLangInput) ocrLangInput.value = settings.ocr_lang || 'en';
@@ -1004,20 +1026,24 @@ async function initVisionSettings() {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vision_enabled: enabledToggle ? enabledToggle.checked : true,
-          vision_model: vlSel.value,
+          vision_endpoint_id: epSel ? epSel.value : '',
+          vision_model: vlSel ? vlSel.value : '',
           ocr_enabled: ocrEnabledToggle ? ocrEnabledToggle.checked : true,
           ocr_lang: ocrLangInput ? (ocrLangInput.value.trim() || 'en') : 'en',
         }) });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
-  vlSel.addEventListener('change', saveSettings);
+  if (epSel) epSel.addEventListener('change', function() { refreshModels(''); saveSettings(); });
+  if (vlSel) vlSel.addEventListener('change', saveSettings);
   if (enabledToggle) enabledToggle.addEventListener('change', function() { syncVisionDisabled(); saveSettings(); });
   if (ocrEnabledToggle) ocrEnabledToggle.addEventListener('change', saveSettings);
   if (ocrLangInput) ocrLangInput.addEventListener('change', saveSettings);
 
   _registerAiEndpointRefresh(function(endpoints) {
     _visionEndpoints = endpoints;
+    if (epSel) _fillEndpointSelect(epSel, _visionEndpoints, epSel.value, true);
+    refreshModels(vlSel ? vlSel.value : '');
     if (visionFallbackWidget && visionFallbackWidget.refresh) visionFallbackWidget.refresh();
   });
 }

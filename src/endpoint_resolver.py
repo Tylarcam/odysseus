@@ -433,6 +433,25 @@ def resolve_utility_fallback_candidates(owner: Optional[str] = None) -> list:
     return _resolve_fallback_candidates("utility_model_fallbacks", owner=owner)
 
 
+def resolve_task_candidates(owner: Optional[str] = None) -> list:
+    """Ordered (url, model, headers) chain for background tasks such as Tidy.
+
+    Primary is task → utility → default. Then configured utility (or default)
+    fallbacks. Finally the default chat model, so a dead local Ollama utility
+    does not brick Tidy when the user already chats with another model.
+    """
+    from src.llm_core import _dedupe_candidates
+    cands = []
+    url, model, headers = resolve_endpoint("task", owner=owner)
+    if url and model:
+        cands.append((url, model, headers))
+    cands.extend(resolve_utility_fallback_candidates(owner=owner))
+    d_url, d_model, d_headers = resolve_endpoint("default", owner=owner)
+    if d_url and d_model:
+        cands.append((d_url, d_model, d_headers))
+    return _dedupe_candidates(cands)
+
+
 def resolve_vision_fallback_candidates(owner: Optional[str] = None) -> list:
     """Configured fallback chain for the Vision model (`vision_model_fallbacks`)."""
     return _resolve_fallback_candidates("vision_model_fallbacks", owner=owner)

@@ -6,6 +6,7 @@ import time
 from collections import Counter
 from typing import List, Dict, Any, Optional, Tuple
 from src.chat_helpers import extract_urls
+from src.memory import load_pinned_memory_facts
 from src.youtube_handler import is_youtube_url
 from src.search import comprehensive_web_search, fetch_webpage_content
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
@@ -203,23 +204,32 @@ class ChatProcessor:
             "content": UNTRUSTED_CONTEXT_POLICY,
         })
 
-        # Memory: pinned (always included) + extended (RAG-retrieved when relevant)
+        # Memory: pinned (always included via shared helper) + extended RAG
         self._last_used_memories = []  # track what was injected
         if use_memory:
             mem_entries = self.memory_manager.load(owner=owner)
-
-            pinned = [m for m in mem_entries if m.get("pinned")]
+            pinned_facts = load_pinned_memory_facts(
+                owner=owner, memory_manager=self.memory_manager
+            )
             extended = [m for m in mem_entries if not m.get("pinned")]
 
             _used_ids: list = []
-            if pinned:
-                pinned_text = "\n- ".join([m["text"] for m in pinned])
+            if pinned_facts:
+                pinned_text = "\n- ".join(pinned_facts)
                 preface.append(untrusted_context_message(
                     "saved memory: pinned user facts",
                     f"Core facts about the user:\n- {pinned_text}",
                 ))
-                for m in pinned:
-                    self._last_used_memories.append({"text": m["text"], "category": m.get("category", "fact"), "type": "pinned"})
+                fact_set = set(pinned_facts)
+                for m in mem_entries:
+                    text = (m.get("text") or "").strip()
+                    if text not in fact_set:
+                        continue
+                    self._last_used_memories.append({
+                        "text": text,
+                        "category": m.get("category", "fact"),
+                        "type": "pinned",
+                    })
                     if m.get("id"):
                         _used_ids.append(m["id"])
 

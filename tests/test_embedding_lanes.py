@@ -513,6 +513,45 @@ def test_index_builtin_tools_skips_encode_when_already_present(monkeypatch):
     assert encodes == []
 
 
+def test_index_builtin_tools_reencodes_when_description_changes(monkeypatch):
+    fake = FakeChroma()
+    _patch_chroma(monkeypatch, fake)
+
+    import src.embedding_lanes as lanes
+
+    encodes = []
+
+    class Counting(FakeEmbedder):
+        def encode(self, texts, normalize_embeddings=True):
+            encodes.append(len(texts))
+            return super().encode(texts, normalize_embeddings)
+
+    monkeypatch.setattr(lanes, "_build_custom_client", lambda: Counting(768, "nomic", "http://embeddings/v1"))
+    monkeypatch.setattr(lanes, "_build_fastembed_client", lambda: Counting(384, "mini", "local://fastembed"))
+
+    from src.tool_index import ToolIndex
+
+    index = ToolIndex()
+    index.index_builtin_tools()
+    encodes.clear()
+    stale = "Tool: manage_memory\nMemory management: list, add, edit, delete, or search persistent memories."
+    for coll in fake.collections.values():
+        row = coll.rows.get("builtin_manage_memory")
+        if row is not None:
+            row["document"] = stale
+    index.index_builtin_tools()
+    assert encodes, "description change must re-encode so pin/unpin land in RAG"
+    mem_docs = [
+        coll.rows["builtin_manage_memory"]["document"]
+        for coll in fake.collections.values()
+        if "builtin_manage_memory" in coll.rows
+    ]
+    assert mem_docs
+    for doc in mem_docs:
+        assert "pin" in doc.lower()
+        assert "unpin" in doc.lower()
+
+
 def test_memory_vector_store_writes_both_lanes_and_prefers_custom(monkeypatch):
     fake = FakeChroma()
     _patch_chroma(monkeypatch, fake)

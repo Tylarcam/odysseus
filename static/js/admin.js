@@ -1840,6 +1840,178 @@ async function loadBuiltinTools() {
   }
 }
 
+async function loadSkillPlugins() {
+  const list = el('adm-skill-plugins-list');
+  const msg = el('adm-skill-plugins-msg');
+  if (!list) return;
+  try {
+    const res = await fetch('/api/skills/plugins', { credentials: 'same-origin' });
+    if (!res.ok) {
+      list.innerHTML = '<div class="admin-empty">Failed to load skill plugins</div>';
+      return;
+    }
+    const data = await res.json();
+    const plugins = data.plugins || [];
+    if (!plugins.length) {
+      list.innerHTML = '<div class="admin-empty">No skills found — sync Cursor plugins or create skills in the Skills panel</div>';
+      return;
+    }
+
+    let html = '';
+    for (const plugin of plugins) {
+      const skills = plugin.skills || [];
+      const enabledCount = skills.filter(s => s.enabled).length;
+      const totalCount = skills.length;
+      const catId = 'skill-plugin-' + String(plugin.id || 'x').replace(/[^a-zA-Z0-9_-]/g, '');
+      const allEnabled = totalCount > 0 && enabledCount === totalCount;
+      const version = plugin.version ? ` v${esc(plugin.version)}` : '';
+      html += `<div class="admin-tool-category" data-skill-plugin="${esc(plugin.id)}">
+        <div class="admin-tool-cat-header" data-skill-plugin-cat="${catId}" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+          <span>${esc(plugin.display_name || plugin.id)}${version}</span>
+          <span style="display:flex;align-items:center;gap:6px;" class="admin-tool-cat-right">
+            <span class="admin-tool-cat-count" style="font-size:10px;opacity:0.5;">${enabledCount}/${totalCount}</span>
+            <label class="admin-switch" style="flex-shrink:0;" title="Toggle all ${esc(plugin.display_name || plugin.id)} skills">
+              <input type="checkbox" data-skill-plugin-toggle="${catId}" ${allEnabled ? 'checked' : ''}>
+              <span class="admin-slider"></span>
+            </label>
+            <svg class="admin-tool-cat-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
+          </span>
+        </div>
+        <div class="admin-tool-cat-body hidden" id="${catId}">`;
+      for (const sk of skills) {
+        const badge = sk.installed === false
+          ? '<span class="admin-badge" style="font-size:9px;opacity:0.7;">not synced</span>'
+          : '';
+        html += `
+        <div class="admin-tool-row" title="${esc(sk.description || '')}">
+          <div class="admin-tool-info">
+            <span class="admin-tool-name">/${esc(sk.name)}</span>
+            <span class="admin-tool-desc">${esc((sk.description || '').slice(0, 140))}${badge}</span>
+          </div>
+          <label class="admin-switch" style="flex-shrink:0;">
+            <input type="checkbox" data-skill-name="${esc(sk.name)}" ${sk.enabled ? 'checked' : ''} ${sk.installed === false ? 'disabled' : ''}>
+            <span class="admin-slider"></span>
+          </label>
+        </div>`;
+      }
+      html += '</div></div>';
+    }
+    list.innerHTML = html;
+
+    list.querySelectorAll('.admin-tool-cat-right').forEach(span => {
+      span.addEventListener('click', e => e.stopPropagation());
+    });
+    list.querySelectorAll('[data-skill-plugin-cat]').forEach(header => {
+      header.addEventListener('click', () => {
+        const body = el(header.dataset.skillPluginCat);
+        if (!body) return;
+        body.classList.toggle('hidden');
+        const chevron = header.querySelector('.admin-tool-cat-chevron');
+        const isOpen = !body.classList.contains('hidden');
+        if (chevron) {
+          chevron.style.transform = isOpen ? 'rotate(180deg)' : '';
+          chevron.style.opacity = isOpen ? '0.7' : '0.3';
+        }
+      });
+    });
+
+    async function _saveSkillState() {
+      const disabled = [];
+      list.querySelectorAll('input[data-skill-name]').forEach(c => {
+        if (!c.disabled && !c.checked) disabled.push(c.dataset.skillName);
+      });
+      const saveRes = await fetch('/api/skills/plugins/disabled', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ disabled }),
+      });
+      if (!saveRes.ok) throw new Error('save failed');
+      if (msg) {
+        msg.textContent = `${disabled.length ? disabled.length + ' disabled' : 'All enabled'} — slash catalog updates immediately`;
+      }
+      // Refresh autocomplete cache if present
+      try {
+        window.dispatchEvent(new CustomEvent('odysseus-skills-changed'));
+      } catch (_) {}
+    }
+
+    function _updatePluginCounter(catEl) {
+      if (!catEl) return;
+      const catChecks = [...catEl.querySelectorAll('input[data-skill-name]')].filter(c => !c.disabled);
+      const catEnabled = catChecks.filter(c => c.checked).length;
+      const counter = catEl.querySelector('.admin-tool-cat-count');
+      if (counter) counter.textContent = catEnabled + '/' + catChecks.length;
+      const catToggle = catEl.querySelector('input[data-skill-plugin-toggle]');
+      if (catToggle) {
+        catToggle.checked = catChecks.length > 0 && catEnabled === catChecks.length;
+        catToggle.indeterminate = catEnabled > 0 && catEnabled < catChecks.length;
+      }
+    }
+
+    list.querySelectorAll('input[data-skill-name]').forEach(chk => {
+      chk.addEventListener('change', async () => {
+        await _saveSkillState();
+        _updatePluginCounter(chk.closest('.admin-tool-category'));
+      });
+    });
+    list.querySelectorAll('input[data-skill-plugin-toggle]').forEach(chk => {
+      chk.addEventListener('change', async () => {
+        const catEl = chk.closest('.admin-tool-category');
+        if (!catEl) return;
+        const checked = chk.checked;
+        catEl.querySelectorAll('input[data-skill-name]').forEach(c => {
+          if (!c.disabled) c.checked = checked;
+        });
+        chk.indeterminate = false;
+        await _saveSkillState();
+        _updatePluginCounter(catEl);
+      });
+    });
+  } catch (e) {
+    console.error('Failed to load skill plugins:', e);
+    list.innerHTML = '<div class="admin-empty">Failed to load skill plugins</div>';
+  }
+}
+
+function initSkillPluginsSync() {
+  const btn = el('adm-skill-plugins-sync');
+  const msg = el('adm-skill-plugins-msg');
+  if (!btn || btn.dataset.bound === '1') return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', async () => {
+    const prev = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    if (msg) msg.textContent = 'Importing from .cursor/plugins…';
+    try {
+      const res = await fetch('/api/skills/plugins/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (msg) msg.textContent = data.detail || 'Sync failed';
+      } else {
+        if (msg) {
+          msg.textContent = `Synced ${data.count || 0} skills`
+            + (data.added ? ` (${data.added} new` : '')
+            + (data.updated ? `${data.added ? ', ' : ' ('}${data.updated} updated)` : (data.added ? ')' : ''))
+            + (data.errors?.length ? ` — ${data.errors.length} error(s)` : '');
+        }
+        await loadSkillPlugins();
+        try { window.dispatchEvent(new CustomEvent('odysseus-skills-changed')); } catch (_) {}
+      }
+    } catch (e) {
+      if (msg) msg.textContent = 'Sync failed: ' + e.message;
+    }
+    btn.disabled = false;
+    btn.textContent = prev;
+  });
+}
+
 async function loadMcpServers() {
   const list = el('adm-mcpList');
   if (!list) return;  // MCP section not visible / not yet rendered
@@ -2598,7 +2770,7 @@ function initDangerZone() {
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTokenForm, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTokenForm, initSkillPluginsSync, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
@@ -2610,6 +2782,7 @@ function refreshAll() {
   loadUsers();
   loadEndpoints();
   loadBuiltinTools();
+  loadSkillPlugins();
   loadMcpServers();
   loadTokens();
 }

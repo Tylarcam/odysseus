@@ -1389,8 +1389,9 @@ def setup_document_routes(session_manager, upload_handler=None) -> APIRouter:
         # Resolve VL model (admin-configured or auto-detected vision-capable)
         settings = _load_vl_settings()
         vl_model = settings.get("vision_model", "")
+        vl_ep = settings.get("vision_endpoint_id", "")
         try:
-            url, model_id, headers = _resolve_vl_model(vl_model, owner=user)
+            url, model_id, headers = _resolve_vl_model(vl_model, owner=user, endpoint_id=vl_ep)
         except Exception as e:
             raise HTTPException(503, f"No vision model available: {e}")
 

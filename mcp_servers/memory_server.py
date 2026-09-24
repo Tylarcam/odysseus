@@ -1,7 +1,7 @@
 """
 memory_server.py
 
-MCP server exposing memory management (list, add, edit, delete, search).
+MCP server exposing memory management (list, add, edit, delete, search, pin, unpin).
 Imports MemoryManager and MemoryVectorStore from the Odysseus codebase.
 """
 
@@ -49,21 +49,29 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="manage_memory",
-            description="Manage the user's memory system: list, add, edit, delete, or search memories.",
+            description=(
+                "Manage the user's memory system: list, add, edit, delete, search, pin, or unpin. "
+                "pin/unpin flags a filed money fact for always-on Jarvis context "
+                "(same as POST /api/memory/{id}/pin). Pin does not delete."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "add", "edit", "delete", "search"],
-                        "description": "The action to perform",
+                        "enum": ["list", "add", "edit", "delete", "search", "pin", "unpin"],
+                        "description": "The action. pin/unpin toggle always-on context; pin does not delete.",
                     },
                     "text": {"type": "string", "description": "Memory text (add/edit) or search query (search)"},
-                    "memory_id": {"type": "string", "description": "Memory ID (edit/delete)"},
+                    "memory_id": {"type": "string", "description": "Memory ID (edit/delete/pin/unpin)"},
                     "category": {
                         "type": "string",
                         "enum": ["fact", "event", "contact", "preference"],
                         "description": "Memory category (add/list filter)",
+                    },
+                    "pinned": {
+                        "type": "boolean",
+                        "description": "For action=pin: true pins, false unpins (default true).",
                     },
                 },
                 "required": ["action"],
@@ -81,7 +89,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if not _memory_manager:
         return [TextContent(type="text", text="Error: Memory manager not available")]
 
-    action = arguments.get("action", "")
+    action = str(arguments.get("action") or "").strip().lower()
 
     if action == "list":
         category_filter = arguments.get("category", "")
@@ -97,10 +105,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         for m in memories[:100]:
             cat = m.get("category", "fact")
             mid = m.get("id", "?")[:8]
+            pin = " [PINNED]" if m.get("pinned") else ""
             text = m.get("text", "")
             if len(text) > 150:
                 text = text[:150] + "..."
-            lines.append(f"- [{cat}] `{mid}` — {text}")
+            lines.append(f"- [{cat}] `{mid}`{pin} — {text}")
         if len(memories) > 100:
             lines.append(f"... and {len(memories) - 100} more")
         return [TextContent(type="text", text="\n".join(lines))]
@@ -190,12 +199,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         for m in results:
             cat = m.get("category", "fact")
             mid = m.get("id", "?")[:8]
+            pin = " [PINNED]" if m.get("pinned") else ""
             text = m.get("text", "")
-            lines.append(f"- [{cat}] `{mid}` — {text}")
+            lines.append(f"- [{cat}] `{mid}`{pin} — {text}")
         return [TextContent(type="text", text="\n".join(lines))]
 
+    elif action in ("pin", "unpin"):
+        from src.memory import pin_memory_item
+        memory_id = str(arguments.get("memory_id") or arguments.get("id") or "").strip()
+        if not memory_id:
+            return [TextContent(type="text", text="Error: pin/unpin needs memory_id. Call action=list or search first.")]
+        want_pin = action != "unpin"
+        if action == "pin" and "pinned" in arguments:
+            flag = arguments.get("pinned")
+            if isinstance(flag, bool):
+                want_pin = flag
+            elif str(flag).strip().lower() in ("false", "0", "no", "off", "unpin", "unpinned"):
+                want_pin = False
+        result = pin_memory_item(_memory_manager, memory_id, pinned=want_pin)
+        if not result.get("ok"):
+            return [TextContent(type="text", text=f"Error: {result.get('error') or 'could not pin memory'}")]
+        state = "pinned" if result.get("pinned") else "unpinned"
+        mid = result.get("memory_id") or memory_id
+        return [TextContent(type="text", text=f"Memory {mid} is now {state}. Pin does not delete.")]
+
     else:
-        return [TextContent(type="text", text=f"Error: Unknown action '{action}'. Use: list, add, edit, delete, search")]
+        return [TextContent(type="text", text=f"Error: Unknown action '{action}'. Use: list, add, edit, delete, search, pin, unpin")]
 
 
 async def run():

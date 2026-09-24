@@ -57,6 +57,14 @@ class SkillImportUrlRequest(BaseModel):
     url: str = Field(..., min_length=8, max_length=2000)
 
 
+class DisabledSkillsUpdate(BaseModel):
+    disabled: List[str] = Field(default_factory=list)
+
+
+class PluginSkillsSyncRequest(BaseModel):
+    plugins: Optional[List[str]] = None
+
+
 class SkillUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -1084,6 +1092,10 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
         # let any user mutate/read a skill that happened to have no owner
         # field (legacy or un-stamped writes), since the truthiness guard
         # short-circuited the comparison. Treat missing owner as not-owned.
+        # Shared plugin packs (`source: plugin:<id>`) are an intentional exception.
+        from services.memory.skills import _is_shared_plugin_skill
+        if _is_shared_plugin_skill(skill.get("source")):
+            return
         if skill.get("owner") != user:
             raise HTTPException(404, "Skill not found")
 
@@ -1137,6 +1149,74 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
             })
         entries.sort(key=lambda row: row["name"])
         return {"skills": entries, "count": len(entries)}
+
+    @router.get("/plugins")
+    async def list_skill_plugins(request: Request):
+        """Plugin-grouped slash skills with enable/disable state.
+
+        Combines discovered Cursor plugin packs (``.cursor/plugins``, OpenSpec)
+        with skills already installed under ``data/skills/``. Disabled names
+        come from ``settings.disabled_skills``.
+        """
+        from src.settings import get_setting
+        from services.memory.skill_plugins import discover_plugins, group_skills_by_plugin
+
+        user = _owner(request)
+        disabled = {
+            str(n).strip()
+            for n in (get_setting("disabled_skills", []) or [])
+            if str(n).strip()
+        }
+        packs = discover_plugins()
+        groups = group_skills_by_plugin(skills_manager.load(owner=user), packs)
+        for g in groups:
+            for sk in g.get("skills") or []:
+                sk["enabled"] = sk.get("name") not in disabled
+            skills = g.get("skills") or []
+            g["enabled_count"] = sum(1 for s in skills if s.get("enabled"))
+            g["skill_count"] = len(skills)
+        return {
+            "plugins": groups,
+            "disabled": sorted(disabled),
+            "count": len(groups),
+            "discovered": [{"id": p.id, "display_name": p.display_name, "version": p.version, "skill_count": len(p.skills)} for p in packs],
+        }
+
+    @router.post("/plugins/disabled")
+    async def update_disabled_skills(request: Request, body: DisabledSkillsUpdate):
+        """Persist which skill/slash names are turned off (admin)."""
+        require_admin(request)
+        from src.settings import load_settings, save_settings
+
+        cleaned = []
+        seen = set()
+        for raw in body.disabled or []:
+            name = str(raw or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            cleaned.append(name)
+        settings = load_settings()
+        settings["disabled_skills"] = cleaned
+        save_settings(settings)
+        return {"ok": True, "disabled": cleaned}
+
+    @router.post("/plugins/sync")
+    async def sync_skill_plugins(request: Request, body: Optional[PluginSkillsSyncRequest] = None):
+        """Copy Cursor plugin skills into ``data/skills/<plugin>/`` as published slash skills."""
+        require_admin(request)
+        from services.memory.skill_plugins import sync_plugins_into_skills
+
+        user = _owner(request)
+        payload = body or PluginSkillsSyncRequest()
+        result = sync_plugins_into_skills(
+            skills_manager,
+            plugin_ids=payload.plugins,
+            owner=user,
+        )
+        if result.get("added") or result.get("updated"):
+            _fire_skill_added(user)
+        return result
 
     @router.get("/builtin")
     async def list_builtin_skills(request: Request):

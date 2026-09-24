@@ -84,6 +84,34 @@ def _preview_text(text: str, max_len: int = 140) -> str:
     return collapsed[: max_len - 1].rstrip() + "…"
 
 
+def _recap_for_session(db, sid: str) -> str:
+    """First user ask plus last assistant reply — enough to title the chat."""
+    from core.database import ChatMessage as DbMsg
+
+    first_user = (
+        db.query(DbMsg.content)
+        .filter(DbMsg.session_id == sid, DbMsg.role == "user")
+        .order_by(DbMsg.timestamp.asc())
+        .first()
+    )
+    last_asst = (
+        db.query(DbMsg.content)
+        .filter(DbMsg.session_id == sid, DbMsg.role == "assistant")
+        .order_by(DbMsg.timestamp.desc())
+        .first()
+    )
+    parts = []
+    if first_user:
+        preview = _preview_text(_content_to_text(first_user[0]), 160)
+        if preview:
+            parts.append("User: " + preview)
+    if last_asst:
+        preview = _preview_text(_content_to_text(last_asst[0]), 160)
+        if preview:
+            parts.append("Assistant: " + preview)
+    return " | ".join(parts)
+
+
 def _recent_session_activity(row) -> str | None:
     if row.last_message_at:
         return row.last_message_at.isoformat()
@@ -1077,7 +1105,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         after Phase 1 — used by the "Tidy (no AI)" UI affordance so
         users can clean junk without spending tokens.
         """
-        from src.llm_core import llm_call
+        from src.llm_core import llm_call_with_fallback
         user = effective_user(request)
         user_sessions = session_manager.get_sessions_for_user(user)
 
@@ -1216,13 +1244,14 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                 }
             return {"status": "skipped", "reason": "No unfiled sessions to sort"}
 
-        # Pick an endpoint — prefer admin-configured task endpoint
-        from src.task_endpoint import resolve_task_endpoint
-        url, model, headers = resolve_task_endpoint(owner=user)
-        if not url:
-            url, model, headers = _pick_endpoint_for_sort(owner=user)
-        if not url:
+        # Pick an endpoint — prefer admin-configured task endpoint, then
+        # utility/default fallbacks so a dead local Ollama does not 502 Tidy
+        # when another configured model (Groq, OpenRouter, …) can answer.
+        from src.endpoint_resolver import resolve_task_candidates
+        candidates = resolve_task_candidates(owner=user)
+        if not candidates:
             raise HTTPException(503, "No available model endpoint for auto-sort")
+        url, model, _headers = candidates[0]
 
         # Build prompt
         names_text = "\n".join(f'  "{s["id"][:8]}": "{s["name"]}"' for s in session_list)
@@ -1239,12 +1268,17 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         )
 
         try:
-            logger.info(f"Auto-sort: using model={model} at {url}")
+            logger.info(
+                f"Auto-sort: using model={model} at {url}"
+                + (f" (+{len(candidates) - 1} fallbacks)" if len(candidates) > 1 else "")
+            )
             # 16384 (was 4096): with many chats the folder JSON is large, and a
             # reasoning model spends tokens thinking first — 4096 truncated the
             # JSON mid-output, so it never parsed ("invalid JSON for auto-sort").
-            raw = llm_call(url, model, [{"role": "user", "content": prompt}],
-                           temperature=0.3, max_tokens=16384, headers=headers, timeout=120)
+            raw = llm_call_with_fallback(
+                candidates, [{"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=16384, timeout=120,
+            )
             logger.info(f"Auto-sort raw response ({len(raw)} chars): {raw[:300]}")
             # Extract JSON from response — handle markdown fences, leading text,
             # reasoning-model <think> blocks, and trailing commas.
@@ -1342,6 +1376,197 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             "deleted_throwaway": deleted_throwaway,
             "unfiled_remaining": unfiled_remaining_after,
         }
+
+    @router.post("/sessions/auto-sort/rename")
+    def auto_rename_sessions(request: Request):
+        """Retitle placeholder-named chats from a recap of subject, task, or objective.
+
+        Batches the 15 most-recent untitled sessions (same cap as Tidy) so
+        the LLM call stays small. Hidden, archived, empty, and already-named
+        chats are skipped. The Tidy-options "Rename" row calls this.
+        """
+        from routes.chat_helpers import build_rename_prompt, needs_auto_name, parse_session_rename_map
+        from src.endpoint_resolver import resolve_task_candidates
+        from src.llm_core import llm_call_with_fallback
+
+        user = effective_user(request)
+        batch_size = 15
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(DbSession)
+                .filter(DbSession.archived == False, DbSession.owner == user)
+                .order_by(DbSession.updated_at.desc())
+                .limit(2000)
+                .all()
+            )
+            all_candidates = []
+            for row in rows:
+                if _is_hidden_session_name(row.name):
+                    continue
+                if not needs_auto_name(row.name or ""):
+                    continue
+                recap = _recap_for_session(db, row.id)
+                if not recap:
+                    continue
+                all_candidates.append({
+                    "id": row.id,
+                    "name": row.name or "(unnamed)",
+                    "recap": recap,
+                })
+            session_list = all_candidates[:batch_size]
+            remaining_after_batch = max(0, len(all_candidates) - len(session_list))
+        finally:
+            db.close()
+
+        if not session_list:
+            return {"status": "ok", "renamed": 0, "remaining": 0}
+
+        candidates = resolve_task_candidates(owner=user)
+        if not candidates:
+            raise HTTPException(503, "No available model endpoint for rename")
+        url, model, _headers = candidates[0]
+        prompt = build_rename_prompt(session_list)
+        try:
+            logger.info(
+                f"Auto-rename: using model={model} at {url}"
+                + (f" (+{len(candidates) - 1} fallbacks)" if len(candidates) > 1 else "")
+            )
+            raw = llm_call_with_fallback(
+                candidates, [{"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=2048, timeout=120,
+            )
+            logger.info(f"Auto-rename raw response ({len(raw)} chars): {raw[:300]}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Auto-rename LLM call failed: {e}")
+            raise HTTPException(502, f"Rename failed: {str(e)}")
+
+        names_map = parse_session_rename_map(raw, session_list)
+        if not names_map:
+            return {
+                "status": "skipped",
+                "reason": "AI returned no usable titles",
+                "renamed": 0,
+                "remaining": len(all_candidates),
+            }
+
+        renamed = 0
+        db = SessionLocal()
+        try:
+            for sid, title in names_map.items():
+                db_session = db.query(DbSession).filter(
+                    DbSession.id == sid, DbSession.owner == user,
+                ).first()
+                if not db_session:
+                    continue
+                if _is_hidden_session_name(db_session.name):
+                    continue
+                if not needs_auto_name(db_session.name or ""):
+                    continue
+                db_session.name = title
+                db_session.updated_at = utcnow_naive()
+                mem = getattr(session_manager, "sessions", {}).get(sid)
+                if mem is not None:
+                    mem.name = title
+                renamed += 1
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Auto-rename DB update failed: {e}")
+            raise HTTPException(500, "Failed to apply new names")
+        finally:
+            db.close()
+
+        leftover_in_batch = max(0, len(session_list) - renamed)
+        return {
+            "status": "ok",
+            "renamed": renamed,
+            "remaining": remaining_after_batch + leftover_in_batch,
+        }
+
+    @router.post("/session/{sid}/auto-rename")
+    def auto_rename_one_session(request: Request, sid: str):
+        """Retitle the current chat from a recap using the task model.
+
+        Unlike batch Tidy rename, this runs even when the session already has
+        a human-ish name — the user asked for a better title from the header.
+        """
+        from routes.chat_helpers import build_rename_prompt, parse_session_rename_map
+        from src.endpoint_resolver import resolve_task_candidates
+        from src.llm_core import llm_call_with_fallback
+
+        _verify_session_owner(request, sid)
+        user = effective_user(request)
+        db = SessionLocal()
+        try:
+            q = db.query(DbSession).filter(DbSession.id == sid)
+            if user:
+                q = q.filter(DbSession.owner == user)
+            row = q.first()
+            if not row:
+                raise HTTPException(404, "Session not found")
+            if _is_hidden_session_name(row.name):
+                raise HTTPException(400, "Cannot auto-rename this session")
+            recap = _recap_for_session(db, sid)
+            if not recap:
+                return {"status": "skipped", "reason": "No messages to recap"}
+            session_list = [{
+                "id": row.id,
+                "name": row.name or "(unnamed)",
+                "recap": recap,
+            }]
+        finally:
+            db.close()
+
+        candidates = resolve_task_candidates(owner=user)
+        if not candidates:
+            raise HTTPException(503, "No available model endpoint for rename")
+        prompt = build_rename_prompt(session_list)
+        try:
+            raw = llm_call_with_fallback(
+                candidates, [{"role": "user", "content": prompt}],
+                temperature=0.3, max_tokens=256, timeout=60,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Single auto-rename LLM call failed: {e}")
+            raise HTTPException(502, f"Rename failed: {str(e)}")
+
+        names_map = parse_session_rename_map(raw, session_list)
+        title = names_map.get(sid)
+        if not title:
+            return {"status": "skipped", "reason": "AI returned no usable title"}
+
+        db = SessionLocal()
+        try:
+            q = db.query(DbSession).filter(DbSession.id == sid)
+            if user:
+                q = q.filter(DbSession.owner == user)
+            db_session = q.first()
+            if not db_session:
+                raise HTTPException(404, "Session not found")
+            if _is_hidden_session_name(db_session.name):
+                raise HTTPException(400, "Cannot auto-rename this session")
+            db_session.name = title
+            db_session.updated_at = utcnow_naive()
+            mem = getattr(session_manager, "sessions", {}).get(sid)
+            if mem is not None:
+                mem.name = title
+            db.commit()
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Single auto-rename DB update failed: {e}")
+            raise HTTPException(500, "Failed to apply new name")
+        finally:
+            db.close()
+
+        return {"status": "ok", "name": title}
 
     @router.get("/session/{session_id}/context_info")
     async def get_context_info(request: Request, session_id: str):

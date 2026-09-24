@@ -33,6 +33,7 @@ DEFAULT_SETTINGS = {
     "image_model": "",
     "image_quality": "medium",
     "vision_model": "",
+    "vision_endpoint_id": "",
     "vision_enabled": True,
     # Ordered fallback chain for the Vision model (image analysis, OCR, tagging).
     "vision_model_fallbacks": [],
@@ -169,6 +170,10 @@ DEFAULT_SETTINGS = {
     # Max relevant skills injected into the prompt for one request. The skills
     # library can grow beyond this; cleanup/retirement is an explicit review flow.
     "skill_max_injected": 3,
+    # Skill / slash-command names the user turned off in Settings → Agent Tools.
+    # Mirrored after disabled_tools: listed names are hidden from the agent
+    # skills index, slash catalog, and relevance injection.
+    "disabled_skills": [],
     # Reminders
     "reminder_channel": "browser",   # "browser" | "email" | "ntfy" | "webhook"
     "reminder_llm_synthesis": False,
@@ -268,7 +273,7 @@ def is_setting_overridden(key: str) -> bool:
 # model + image-generation model. The owner argument is the authed username
 # resolved by FastAPI deps; an empty/None owner falls through to the global.
 _PER_USER_KEYS = {
-    "vision_model", "vision_enabled", "vision_model_fallbacks",
+    "vision_model", "vision_endpoint_id", "vision_enabled", "vision_model_fallbacks",
     "ocr_enabled", "ocr_lang",
     "image_model", "image_gen_enabled", "image_quality",
     # Default chat endpoint / model — without per-user resolution every new

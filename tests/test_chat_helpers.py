@@ -163,6 +163,47 @@ def test_needs_auto_name(name, expected):
     assert needs_auto_name(name) == expected, f"needs_auto_name({name!r}) should be {expected}"
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("Fix the STM32 CW decoder", "Fix the STM32 CW decoder"),
+    ('  "Grant proposal recap"  ', "Grant proposal recap"),
+    ("<think>noise</think>Rename sidebar chats", "Rename sidebar chats"),
+    ("", ""),
+    ("Chat: leftover", ""),
+    ("x" * 81, ""),
+    ("A short title.", "A short title"),
+])
+def test_sanitize_generated_title(raw, expected):
+    from routes.chat_helpers import sanitize_generated_title
+    assert sanitize_generated_title(raw) == expected
+
+
+def test_parse_session_rename_map_matches_id_prefix():
+    from routes.chat_helpers import parse_session_rename_map
+    sessions = [
+        {"id": "abc12345-ffff", "name": "Chat: leftover"},
+        {"id": "def67890-aaaa", "name": "Chat: other"},
+    ]
+    raw = '{"names": {"abc12345": "STM32 decoder", "def67890": "Grant recap"}}'
+    assert parse_session_rename_map(raw, sessions) == {
+        "abc12345-ffff": "STM32 decoder",
+        "def67890-aaaa": "Grant recap",
+    }
+
+
+def test_build_rename_prompt_includes_recap_and_id_prefix():
+    from routes.chat_helpers import build_rename_prompt
+    prompt = build_rename_prompt([
+        {
+            "id": "abc12345-ffff",
+            "name": "Chat: leftover",
+            "recap": "User: fix the decoder | Assistant: here is the patch",
+        }
+    ])
+    assert "abc12345" in prompt
+    assert "fix the decoder" in prompt
+    assert '{"names":' in prompt
+
+
 def test_clean_thinking_for_save_extracts_gemma4_thought_channel():
     content, metadata = clean_thinking_for_save(
         "<|channel>thought\ninternal reasoning<channel|>Final answer.",

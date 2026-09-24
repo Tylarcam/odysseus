@@ -95,6 +95,8 @@ def test_endpoint_cleanup_removes_primary_and_fallback_references():
             {"endpoint_id": "keep", "model": "fallback-b"},
         ],
         "utility_model_fallbacks": [{"endpoint_id": "dead", "model": "utility"}],
+        "vision_endpoint_id": "dead",
+        "vision_model": "vl",
         "vision_model_fallbacks": [{"endpoint_id": "dead", "model": "vision"}],
         "stt_provider": "endpoint:dead",
         "stt_model": "whisper",
@@ -102,6 +104,7 @@ def test_endpoint_cleanup_removes_primary_and_fallback_references():
 
     assert _endpoint_settings_using_endpoint(settings, "dead", include_speech=True) == [
         "Default Model",
+        "Vision Model",
         "Default Model Fallbacks",
         "Utility Model Fallbacks",
         "Vision Model Fallbacks",
@@ -109,6 +112,7 @@ def test_endpoint_cleanup_removes_primary_and_fallback_references():
     ]
     assert _clear_endpoint_settings_for_endpoint(settings, "dead", include_speech=True) == [
         "Default Model",
+        "Vision Model",
         "Default Model Fallbacks",
         "Utility Model Fallbacks",
         "Vision Model Fallbacks",
@@ -116,6 +120,8 @@ def test_endpoint_cleanup_removes_primary_and_fallback_references():
     ]
     assert settings["default_endpoint_id"] == ""
     assert settings["default_model"] == ""
+    assert settings["vision_endpoint_id"] == ""
+    assert settings["vision_model"] == ""
     assert settings["default_model_fallbacks"] == [
         {"endpoint_id": "keep", "model": "fallback-b"},
     ]

@@ -55,15 +55,17 @@ def _scan_research_library():
             d = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
+        stats = d.get("stats") or {}
+        sources = d.get("sources") or []
         items.append({
             "id": p.stem,
             "owner": d.get("owner"),
             "query": d.get("query", ""),
             "category": d.get("category") or "",
-            "source_count": len(d.get("sources", [])),
+            "source_count": len(sources) if isinstance(sources, list) else 0,
             "status": d.get("status", "done"),
-            "duration": d.get("stats", {}).get("Duration", ""),
-            "rounds": d.get("stats", {}).get("Rounds", ""),
+            "duration": stats.get("Duration", "") if isinstance(stats, dict) else "",
+            "rounds": stats.get("Rounds", "") if isinstance(stats, dict) else "",
             "started_at": d.get("started_at", 0),
             "completed_at": d.get("completed_at", 0),
             "archived": bool(d.get("archived")),

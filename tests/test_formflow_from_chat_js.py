@@ -51,11 +51,36 @@ def test_chat_renderer_wires_fork_to_formflow_action():
     assert "id: 'formflow'" in src
 
 
+def test_selection_bar_wires_form_action():
+    src = (_REPO / "static/js/selectionActions.js").read_text(encoding="utf-8")
+    assert "formflowFromChat.js" in src
+    assert "sendMessageToFormFlow" in src
+    assert "_onFormClick" in src
+    assert "selection-action-form" in src
+    assert "<span>Form</span>" in src
+
+
 def test_formflow_exports_open_with_helpers():
     src = (_REPO / "static/js/formflow.js").read_text(encoding="utf-8")
     assert "export function openWithQuestions" in src
     assert "export async function openWithText" in src
     assert "openWithQuestions, openWithText" in src
+
+
+def test_formflow_review_downloads_md_and_pdf_not_txt():
+    src = (_REPO / "static/js/formflow.js").read_text(encoding="utf-8")
+    assert 'id="ff-download-md-btn"' in src
+    assert 'id="ff-download-pdf-btn"' in src
+    assert "Download .md" in src
+    assert "Download .pdf" in src
+    assert "_downloadMarkdown" in src
+    assert "_downloadPdf" in src
+    assert "_buildMarkdownExport" in src
+    assert "formflow-answers.md" in src
+    assert "formflow-answers.pdf" in src
+    assert 'id="ff-download-btn"' not in src
+    assert "Download .txt" not in src
+    assert "formflow-answers.txt" not in src
 
 
 def test_document_export_menu_wires_fork_to_formflow():

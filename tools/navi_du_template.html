@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NAVI-DU</title>
+<style>
+  :root{
+    --pet-body:#0d1030; --pet-body-2:#171b4a; --pet-edge:#3a3fa0;
+    --screen-bg:#170f3a; --screen-edge:#5a4ee0;
+    --cream:#eef6ff; --ink:#dfe6ff; --dim:#8f97c9;
+    --ok:#3dffb0; --bug:#ff4d6d; --amber:#ffcf6b;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#05061a;color:var(--ink);
+    font-family:"Consolas","Courier New",monospace;overflow:hidden;}
+  #pet{
+    width:100%;height:100%;display:flex;flex-direction:column;
+    background:linear-gradient(160deg,var(--pet-body),var(--pet-body-2));
+    padding:14px;gap:10px;
+  }
+  .bezel{
+    border:3px solid var(--pet-edge);border-radius:10px;background:#0a0c28;
+    box-shadow:inset 0 0 24px rgba(58,63,160,.35), 0 0 18px rgba(58,63,160,.2);
+    padding:10px 14px;display:flex;align-items:center;gap:14px;
+  }
+  .title{font-size:20px;font-weight:bold;letter-spacing:2px;color:var(--cream);}
+  .subtitle{font-size:11px;color:var(--dim);}
+  .pill{
+    margin-left:auto;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:bold;
+    letter-spacing:1px;border:1px solid currentColor;
+  }
+  .pill.ok{color:var(--ok);} .pill.bug{color:var(--bug);}
+
+  .main{flex:1;display:grid;grid-template-columns:230px 1fr 260px;gap:10px;min-height:0;}
+  .panel{
+    border:2px solid var(--pet-edge);border-radius:8px;background:#0a0c28;
+    padding:10px;overflow:auto;min-height:0;
+  }
+  .panel h3{margin:0 0 8px;font-size:11px;letter-spacing:1.5px;color:var(--dim);font-weight:normal;
+    border-bottom:1px dashed #2a2f6e;padding-bottom:6px;}
+
+  .prog-row{display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:4px;cursor:pointer;font-size:12px;}
+  .prog-row:hover{background:#161a4a;}
+  .prog-row.back{color:var(--amber);}
+  .dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
+  .prog-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .prog-bytes{color:var(--dim);font-size:11px;}
+
+  .map-wrap{
+    position:relative;border:2px solid var(--screen-edge);border-radius:8px;
+    background:var(--screen-bg);display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 0 30px rgba(90,78,224,.35);min-height:0;
+  }
+  canvas#map{image-rendering:pixelated;}
+  .cmdline{
+    position:absolute;left:6%;right:6%;bottom:34px;height:0;
+    border-top:2px dashed #ff9d47;opacity:.85;pointer-events:none;
+  }
+  .cmdline::after{
+    content:"COMMAND LINE \2014 must-touch: home / AppData";
+    position:absolute;right:0;top:-18px;font-size:9px;color:#ff9d47;letter-spacing:.5px;
+    background:rgba(10,12,40,.85);padding:2px 6px;border-radius:3px;
+  }
+  .breadcrumb{position:absolute;top:8px;left:10px;font-size:11px;color:var(--dim);}
+
+  .info h3{margin:0 0 8px;}
+  .info .name{color:var(--cream);font-weight:bold;font-size:13px;word-break:break-word;}
+  .info .path{color:var(--dim);font-size:10px;word-break:break-all;margin:4px 0 10px;}
+  .info .stat{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;
+    border-bottom:1px dotted #23285e;}
+  .legend{margin-top:12px;}
+  .legend .prog-row{cursor:default;}
+  .legend .prog-row:hover{background:none;}
+
+  .navi-sprite{image-rendering:pixelated;flex:0 0 auto;}
+
+  .bottombar{display:flex;gap:10px;align-items:stretch;}
+  .meter{flex:1;border:2px solid var(--pet-edge);border-radius:8px;background:#0a0c28;padding:8px 12px;}
+  .meter .label{font-size:10px;color:var(--dim);letter-spacing:1px;display:flex;justify-content:space-between;}
+  .bar{height:10px;border-radius:5px;background:#141838;margin-top:6px;overflow:hidden;border:1px solid #262b66;}
+  .bar > i{display:block;height:100%;border-radius:5px;}
+  #hpfill{background:linear-gradient(90deg,#ff4d6d,#ffcf6b);}
+  #gaugefill{background:linear-gradient(90deg,#3dffb0,#37c9ff);}
+</style>
+</head>
+<body>
+<div id="pet">
+  <div class="bezel">
+    <canvas id="navi" class="navi-sprite" width="102" height="126"></canvas>
+    <div>
+      <div class="title">NAVI-DU</div>
+      <div class="subtitle" id="hostline">scanning...</div>
+    </div>
+    <div class="pill" id="runok">...</div>
+  </div>
+
+  <div class="main">
+    <div class="panel" id="ownedList">
+      <h3>OWNED PROGRAM LIST</h3>
+      <div id="listBody"></div>
+    </div>
+
+    <div class="map-wrap">
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <canvas id="map"></canvas>
+      <div class="cmdline"></div>
+    </div>
+
+    <div class="panel info" id="infoPanel">
+      <h3>PROGRAM INFORMATION</h3>
+      <div class="name" id="infoName">Memory Map</div>
+      <div class="path" id="infoPath">Hover or click a block.</div>
+      <div class="stat"><span>Bytes</span><span id="infoBytes">—</span></div>
+      <div class="stat"><span>% of drive</span><span id="infoPctDrive">—</span></div>
+      <div class="stat"><span>% of view</span><span id="infoPctView">—</span></div>
+      <div class="legend" id="legend"><h3 style="margin-top:14px;">FAMILY / STYLE COLORS</h3></div>
+    </div>
+  </div>
+
+  <div class="bottombar">
+    <div class="meter">
+      <div class="label"><span>HP (drive capacity)</span><span id="hpLabel">—</span></div>
+      <div class="bar"><i id="hpfill" style="width:0%"></i></div>
+    </div>
+    <div class="meter">
+      <div class="label"><span>CUSTOM GAUGE (scan freshness)</span><span id="gaugeLabel">0%</span></div>
+      <div class="bar"><i id="gaugefill" style="width:0%"></i></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DATA = __NAVI_DU_DATA__;
+
+// ---------- family palette ----------
+const FAMILIES = {
+  appdata:  {cream:"#bff3ff", weight:0.62, label:"AppData"},
+  programs: {cream:"#e2c9ff", weight:0.70, label:"Programs"},
+  user:     {cream:"#d8ffb0", weight:0.55, label:"User files"},
+  dev:      {cream:"#ffe0a0", weight:0.68, label:"Dev / code"},
+  wsl:      {cream:"#ffc9f0", weight:0.50, label:"WSL"},
+  system:   {cream:"#d8d8d8", weight:0.35, label:"System (Plus Part)"},
+  other:    {cream:"#f4f4f4", weight:0.50, label:"Other"},
+};
+const FAMILY_KEYS = Object.keys(FAMILIES);
+
+function human(n){
+  const units=["B","KB","MB","GB","TB"]; let i=0; n=Number(n);
+  while(n>=1024 && i<units.length-1){n/=1024;i++;}
+  return (i===0? n.toFixed(0) : n.toFixed(1))+units[i];
+}
+
+// ---------- squarify treemap ----------
+function worstRatio(row,length){
+  const sum=row.reduce((a,b)=>a+b.area,0);
+  const rmax=Math.max(...row.map(r=>r.area));
+  const rmin=Math.min(...row.map(r=>r.area));
+  return Math.max((length*length*rmax)/(sum*sum), (sum*sum)/(length*length*rmin));
+}
+function layoutRow(row,x,y,w,h,vertical,results){
+  const sum=row.reduce((a,b)=>a+b.area,0);
+  if(vertical){
+    const rw=sum/h; let cy=y;
+    for(const it of row){ const rh=it.area/rw; results.push({item:it,x,y:cy,w:rw,h:rh}); cy+=rh; }
+    return {x:x+rw,y,w:w-rw,h};
+  }else{
+    const rh=sum/w; let cx=x;
+    for(const it of row){ const rw=it.area/rh; results.push({item:it,x:cx,y,w:rw,h:rh}); cx+=rw; }
+    return {x,y:y+rh,w,h:h-rh};
+  }
+}
+function squarify(items,x,y,w,h){
+  const results=[];
+  let list=items.slice();
+  let rect={x,y,w,h};
+  let row=[];
+  while(list.length){
+    const vertical = rect.w < rect.h;
+    const length = vertical ? rect.h : rect.w;
+    const candidate = list[0];
+    const newRow = row.concat([candidate]);
+    if(row.length===0 || worstRatio(row,length) >= worstRatio(newRow,length)){
+      row=newRow; list.shift();
+    }else{
+      rect = layoutRow(row, rect.x, rect.y, rect.w, rect.h, vertical, results);
+      row=[];
+    }
+  }
+  if(row.length){
+    const vertical = rect.w < rect.h;
+    layoutRow(row, rect.x, rect.y, rect.w, rect.h, vertical, results);
+  }
+  return results;
+}
+function layoutItems(items, w, h){
+  const withBytes = items.filter(i=>i.bytes>0);
+  const total = withBytes.reduce((a,b)=>a+b.bytes,0) || 1;
+  const withArea = withBytes.map(i=>({...i, area: (i.bytes/total)*(w*h)}));
+  withArea.sort((a,b)=>b.area-a.area);
+  return squarify(withArea, 0, 0, w, h);
+}
+
+// ---------- map geometry ----------
+const CELL = 6, SS = 4; // visible cell px, offscreen supersample factor
+let mapW = 576, mapH = 360; // recomputed on layout()
+let cols, rows;
+const mapCanvas = document.getElementById("map");
+const mctx = mapCanvas.getContext("2d");
+const off = document.createElement("canvas");
+const octx = off.getContext("2d", {willReadFrequently:true});
+
+function sizeMap(){
+  const wrap = document.querySelector(".map-wrap");
+  const availW = wrap.clientWidth - 24, availH = wrap.clientHeight - 24;
+  cols = Math.max(20, Math.floor(availW / CELL));
+  rows = Math.max(14, Math.floor(availH / CELL));
+  mapW = cols*CELL; mapH = rows*CELL;
+  mapCanvas.width = mapW; mapCanvas.height = mapH;
+  off.width = cols*SS; off.height = rows*SS;
+}
+
+// ---------- state ----------
+let stack = [{label:"ROOT", items: DATA.roots.map(r=>({...r}))}];
+let coverage, familyIdx, itemIdx, layoutItemsCache;
+let hovered = null, selected = null;
+const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function familyForItem(it, parentFamily){
+  return it.family || parentFamily || "other";
+}
+
+function currentLayer(){ return stack[stack.length-1]; }
+
+function relayout(){
+  const layer = currentLayer();
+  const items = layer.items.map((it,idx)=>({...it, _idx: idx, family: familyForItem(it, layer.family)}));
+  layoutItemsCache = items;
+  const placed = layoutItems(items, mapW, mapH);
+
+  octx.clearRect(0,0,off.width,off.height);
+  const scale = SS/CELL;
+  for(const p of placed){
+    const idx = p.item._idx;
+    const famIdx = FAMILY_KEYS.indexOf(p.item.family);
+    // encode: R = family code (1..7), G/B = item index (supports up to 65k)
+    octx.fillStyle = `rgb(${(famIdx+1)*30}, ${(idx%255)+1}, ${Math.floor(idx/255)})`;
+    octx.fillRect(p.x*scale, p.y*scale, Math.max(1,p.w*scale), Math.max(1,p.h*scale));
+  }
+  const img = octx.getImageData(0,0,off.width,off.height).data;
+
+  coverage = new Float32Array(cols*rows);
+  familyIdx = new Int16Array(cols*rows).fill(-1);
+  itemIdx = new Int32Array(cols*rows).fill(-1);
+
+  for(let cy=0; cy<rows; cy++){
+    for(let cx=0; cx<cols; cx++){
+      let covered=0; const famVotes={}; const idVotes={};
+      for(let sy=0; sy<SS; sy++){
+        for(let sx=0; sx<SS; sx++){
+          const px = cx*SS+sx, py = cy*SS+sy;
+          const o = (py*off.width+px)*4;
+          const a = img[o+3];
+          if(a>0){
+            covered++;
+            const fCode = Math.round(img[o]/30)-1;
+            const id = img[o+1]-1 + img[o+2]*255;
+            famVotes[fCode]=(famVotes[fCode]||0)+1;
+            idVotes[id]=(idVotes[id]||0)+1;
+          }
+        }
+      }
+      const ci = cy*cols+cx;
+      coverage[ci] = covered/(SS*SS);
+      if(covered>0){
+        familyIdx[ci] = Number(Object.entries(famVotes).sort((a,b)=>b[1]-a[1])[0][0]);
+        itemIdx[ci] = Number(Object.entries(idVotes).sort((a,b)=>b[1]-a[1])[0][0]);
+      }
+    }
+  }
+  updateBreadcrumb();
+  renderList();
+  renderLegend();
+}
+
+// ---------- hash dither + draw loop ----------
+function hash(x,y){
+  const s = Math.sin(x*12.9898 + y*78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+let t0 = performance.now();
+function draw(now){
+  const t = reduceMotion ? 0 : (now - t0)/1000;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--screen-bg").trim();
+  mctx.fillStyle = bg;
+  mctx.fillRect(0,0,mapW,mapH);
+  for(let cy=0; cy<rows; cy++){
+    for(let cx=0; cx<cols; cx++){
+      const ci = cy*cols+cx;
+      const cov = coverage[ci];
+      if(cov<=0) continue;
+      const fam = FAMILY_KEYS[familyIdx[ci]] || "other";
+      const base = FAMILIES[fam].weight;
+      let density = (0.47 + 0.28*base) * (0.4 + 0.6*cov);
+      const wave = 0.85 + 0.15*Math.sin(t*0.6 + (cx+cy)*0.06);
+      density *= wave;
+      const h = hash(cx, cy);
+      if(h < density){
+        const sel = itemIdx[ci] === (selected ? selected._idx : hovered ? hovered._idx : -1);
+        mctx.fillStyle = sel ? "#ffffff" : FAMILIES[fam].cream;
+        mctx.fillRect(cx*CELL+1, cy*CELL+1, CELL-2, CELL-2);
+      }
+    }
+  }
+  const gauge = ((Math.sin(t*0.6)+1)/2*100);
+  document.getElementById("gaugefill").style.width = gauge.toFixed(0)+"%";
+  document.getElementById("gaugeLabel").textContent = gauge.toFixed(0)+"%";
+  if(!reduceMotion) requestAnimationFrame(draw);
+}
+
+// ---------- interaction ----------
+function cellAt(evt){
+  const r = mapCanvas.getBoundingClientRect();
+  const scaleX = mapCanvas.width / r.width, scaleY = mapCanvas.height / r.height;
+  const x = (evt.clientX - r.left) * scaleX, y = (evt.clientY - r.top) * scaleY;
+  const cx = Math.floor(x/CELL), cy = Math.floor(y/CELL);
+  if(cx<0||cy<0||cx>=cols||cy>=rows) return null;
+  const ci = cy*cols+cx;
+  const id = itemIdx[ci];
+  if(id<0) return null;
+  return layoutItemsCache.find(i=>i._idx===id) || null;
+}
+mapCanvas.addEventListener("mousemove", (e)=>{
+  hovered = cellAt(e);
+  updateInfo(hovered || selected);
+});
+mapCanvas.addEventListener("mouseleave", ()=>{ hovered=null; updateInfo(selected); });
+mapCanvas.addEventListener("click", (e)=>{
+  const item = cellAt(e);
+  if(!item) return;
+  if(item.children && item.children.length){
+    stack.push({label:item.name, items:item.children, family:item.family});
+    selected = null;
+    relayout();
+    updateInfo(null);
+  }else{
+    selected = item;
+    updateInfo(item);
+  }
+});
+
+function updateInfo(item){
+  const nameEl=document.getElementById("infoName"), pathEl=document.getElementById("infoPath"),
+        bytesEl=document.getElementById("infoBytes"), pdEl=document.getElementById("infoPctDrive"),
+        pvEl=document.getElementById("infoPctView");
+  if(!item){
+    nameEl.textContent = currentLayer().label==="ROOT" ? "Memory Map" : currentLayer().label;
+    pathEl.textContent = "Hover or click a block.";
+    bytesEl.textContent = "—"; pdEl.textContent = "—"; pvEl.textContent = "—";
+    return;
+  }
+  nameEl.textContent = item.name;
+  pathEl.textContent = item.path || "";
+  bytesEl.textContent = human(item.bytes);
+  pdEl.textContent = ((item.bytes/DATA.drive_total)*100).toFixed(2)+"%";
+  const viewTotal = layoutItemsCache.reduce((a,b)=>a+b.bytes,0) || 1;
+  pvEl.textContent = ((item.bytes/viewTotal)*100).toFixed(1)+"%";
+}
+
+function updateBreadcrumb(){
+  document.getElementById("breadcrumb").textContent =
+    stack.map(s=>s.label).join(" ▸ ");
+}
+
+function renderList(){
+  const body = document.getElementById("listBody");
+  body.innerHTML = "";
+  if(stack.length>1){
+    const back = document.createElement("div");
+    back.className = "prog-row back";
+    back.innerHTML = `<span class="prog-name">◄ BACK</span>`;
+    back.onclick = ()=>{ stack.pop(); selected=null; relayout(); updateInfo(null); };
+    body.appendChild(back);
+  }
+  for(const item of layoutItemsCache){
+    const row = document.createElement("div");
+    row.className = "prog-row";
+    const fam = FAMILIES[item.family] || FAMILIES.other;
+    row.innerHTML = `<span class="dot" style="background:${fam.cream}"></span>
+      <span class="prog-name">${item.name}</span><span class="prog-bytes">${human(item.bytes)}</span>`;
+    row.onclick = ()=>{
+      if(item.children && item.children.length){
+        stack.push({label:item.name, items:item.children, family:item.family});
+        selected = null;
+        relayout();
+        updateInfo(null);
+      }else{
+        selected = item; updateInfo(item);
+      }
+    };
+    body.appendChild(row);
+  }
+}
+
+function renderLegend(){
+  const el = document.getElementById("legend");
+  el.innerHTML = '<h3 style="margin-top:14px;">FAMILY / STYLE COLORS</h3>';
+  const used = new Set(layoutItemsCache.map(i=>i.family));
+  for(const key of FAMILY_KEYS){
+    if(!used.has(key)) continue;
+    const f = FAMILIES[key];
+    const row = document.createElement("div");
+    row.className = "prog-row";
+    row.innerHTML = `<span class="dot" style="background:${f.cream}"></span><span class="prog-name">${f.label}</span>`;
+    el.appendChild(row);
+  }
+}
+
+// ---------- chrome: header, HP, Run/OK ----------
+document.getElementById("hostline").textContent =
+  `${DATA.hostname}  ·  scanned ${DATA.generated_at}  ·  ${DATA.scan_seconds}s`;
+const runok = document.getElementById("runok");
+if(DATA.had_errors){
+  runok.textContent = "BUG"; runok.className="pill bug";
+  runok.title = `${DATA.error_count} paths were access-denied during the scan`;
+}else{
+  runok.textContent = "OK!"; runok.className="pill ok";
+}
+const usedPct = (DATA.drive_used/DATA.drive_total)*100;
+document.getElementById("hpfill").style.width = usedPct.toFixed(1)+"%";
+document.getElementById("hpLabel").textContent =
+  `${human(DATA.drive_used)} / ${human(DATA.drive_total)} (${usedPct.toFixed(1)}% used)`;
+
+// ---------- MegaMan-style NetNavi pixel sprite (stylized, 2-frame blink) ----------
+const naviCanvas = document.getElementById("navi");
+const nctx = naviCanvas.getContext("2d");
+const PAL = {B:"#1c3fae", b:"#3a63e0", C:"#37f0ff", K:"#0a1020", W:"#eef6ff", S:"#b9c9e6", R:"#ff3b4e"};
+// half-rows, index0 = center column outward to the edge; mirrored at draw time
+const HALF_OPEN = [
+ ".B.......",
+ ".BB......",
+ "BBBB.....",
+ "RbbBB....",
+ "BbCbBB...",
+ "BbCCbBB..",
+ "BKKKbBBB.",
+ "BKKKbBBB.",
+ "BbCCbBBB.",
+ "BbbbbBB..",
+ "WWWWWBB..",
+ "WSWWWB...",
+ "WWWWWB...",
+ "WWWWWB...",
+ ".WWWW....",
+ "..WWW....",
+ "..BBB....",
+ ".BBBB....",
+ "BBBBB....",
+];
+const HALF_BLINK = HALF_OPEN.map((row,i)=> (i===6||i===7) ? row.replaceAll("K","b").replaceAll("C","b") : row);
+const PIXEL = 6;
+function drawSprite(half){
+  nctx.clearRect(0,0,naviCanvas.width,naviCanvas.height);
+  const halfW = half[0].length;
+  for(let row=0; row<half.length; row++){
+    for(let hx=0; hx<halfW; hx++){
+      const ch = half[row][hx];
+      if(ch===".") continue;
+      const color = PAL[ch]; if(!color) continue;
+      nctx.fillStyle = color;
+      const cxRight = halfW-1+hx, cxLeft = halfW-1-hx;
+      nctx.fillRect(cxRight*PIXEL, row*PIXEL, PIXEL, PIXEL);
+      nctx.fillRect(cxLeft*PIXEL, row*PIXEL, PIXEL, PIXEL);
+    }
+  }
+}
+drawSprite(HALF_OPEN);
+if(!reduceMotion){
+  setInterval(()=>{
+    drawSprite(Math.random()<0.5 ? HALF_OPEN : HALF_BLINK);
+    setTimeout(()=>drawSprite(HALF_OPEN), 180);
+  }, 3200);
+}
+
+// ---------- boot ----------
+function boot(){
+  sizeMap();
+  relayout();
+  updateInfo(null);
+  t0 = performance.now();
+  if(reduceMotion){ draw(t0); } else { requestAnimationFrame(draw); }
+}
+window.addEventListener("resize", ()=>{ sizeMap(); relayout(); });
+boot();
+</script>
+</body>
+</html>

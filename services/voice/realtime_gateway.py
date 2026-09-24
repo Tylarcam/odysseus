@@ -64,21 +64,9 @@ _MAX_INSTRUCTIONS_CHARS = 4000
 
 def _load_pinned_memory_facts(owner: Optional[str]) -> List[str]:
     """Pinned user facts from memory.json, best-effort (never blocks connect)."""
-    try:
-        from src.constants import DATA_DIR
-        from src.memory import MemoryManager
+    from src.memory import load_pinned_memory_facts
 
-        # Single-user installs (auth off) have no meaningful owner — load all.
-        effective_owner = None if not owner or owner == "anonymous" else owner
-        entries = MemoryManager(DATA_DIR).load(owner=effective_owner)
-        return [
-            (e.get("text") or "").strip()
-            for e in entries
-            if e.get("pinned") and (e.get("text") or "").strip()
-        ][:_MAX_MEMORY_FACTS]
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning("voice: failed to load pinned memories: %s", e)
-        return []
+    return load_pinned_memory_facts(owner, max_items=_MAX_MEMORY_FACTS)
 
 
 class VoiceSessionRegistry:

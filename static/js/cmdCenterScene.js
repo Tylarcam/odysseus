@@ -93,6 +93,69 @@ const ATTENTION = {
   },
 };
 
+function _isLightVault() {
+  return document.documentElement.dataset.themeLuma === 'light';
+}
+
+function _themeFgChannels() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim();
+  const hex = raw.charAt(0) === '#' ? raw.slice(1) : '';
+  const full = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex.slice(0, 6);
+  if (full.length === 6) {
+    const r = parseInt(full.slice(0, 2), 16);
+    const g = parseInt(full.slice(2, 4), 16);
+    const b = parseInt(full.slice(4, 6), 16);
+    if ([r, g, b].every((n) => Number.isFinite(n))) return `${r},${g},${b}`;
+  }
+  return '59,56,54';
+}
+
+const _DARK_SCENE = {
+  halo0: 'rgba(235,255,238,0.18)',
+  halo1: 'rgba(148,255,165,0.16)',
+  halo2: 'rgba(64,220,96,0.12)',
+  halo3: 'rgba(0,0,0,0)',
+  star: '140,255,165',
+  wire: '110,255,136',
+  nodeGlowFront: 'rgba(198,255,205,0.95)',
+  nodeGlowBack: 'rgba(120,255,145,0.7)',
+  nodeFront: '238,255,241',
+  nodeBack: '120,255,145',
+  linkGlow: 'rgba(166,226,46,0.55)',
+  link: '186,240,80',
+  plug: '210,255,190',
+  pulseGlow: 'rgba(166,226,46,0.85)',
+  tendril: '90,255,120',
+  coreRing: 'rgba(198,255,205,0.35)',
+  particleGlow: 'rgba(127,255,0,0.9)',
+  particle: 'rgba(200,255,210,0.95)',
+};
+
+function _sceneTone() {
+  if (!_isLightVault()) return _DARK_SCENE;
+  const ink = _themeFgChannels();
+  return {
+    halo0: `rgba(${ink},0.06)`,
+    halo1: `rgba(${ink},0.09)`,
+    halo2: `rgba(${ink},0.05)`,
+    halo3: 'rgba(0,0,0,0)',
+    star: ink,
+    wire: ink,
+    nodeGlowFront: `rgba(${ink},0.35)`,
+    nodeGlowBack: `rgba(${ink},0.2)`,
+    nodeFront: ink,
+    nodeBack: ink,
+    linkGlow: `rgba(${ink},0.28)`,
+    link: ink,
+    plug: ink,
+    pulseGlow: `rgba(${ink},0.4)`,
+    tendril: ink,
+    coreRing: `rgba(${ink},0.35)`,
+    particleGlow: `rgba(${ink},0.45)`,
+    particle: `rgba(${ink},0.9)`,
+  };
+}
+
 const HIGHLIGHT_MS_DEFAULT = 3000;
 const HIGHLIGHT_MS_MIN = 2000;
 const HIGHLIGHT_MS_MAX = 4000;
@@ -146,11 +209,25 @@ function _stableHash(text) {
 }
 
 function _stateRgb(state) {
-  return STATE_RGB[state] || STATE_RGB.idle;
+  const base = STATE_RGB[state] || STATE_RGB.idle;
+  if (!_isLightVault()) return base;
+  if (state === 'busy') return { fill: '163,59,59', glow: '163,59,59' };
+  const ink = _themeFgChannels();
+  return { fill: ink, glow: ink };
 }
 
 function _toneRgb(tone) {
-  return NODE_TONES[tone] || NODE_TONES.idle;
+  const base = NODE_TONES[tone] || NODE_TONES.idle;
+  if (!_isLightVault()) return base;
+  const ink = _themeFgChannels();
+  const light = {
+    urgent: { fill: '156,42,34', glow: '156,42,34', alpha: 0.95 },
+    scheduled: { fill: '122,84,16', glow: '122,84,16', alpha: 0.92 },
+    agent: { fill: '122,96,20', glow: '122,96,20', alpha: 0.9 },
+    memory: { fill: '26,92,102', glow: '26,92,102', alpha: 0.88 },
+  };
+  if (light[tone]) return light[tone];
+  return { fill: ink, glow: ink, alpha: base.alpha };
 }
 
 /**
@@ -179,7 +256,13 @@ function _attentionStatus(node) {
 
 function _attentionStyle(node) {
   const key = _attentionStatus(node);
-  return key ? ATTENTION[key] : null;
+  if (!key) return null;
+  const base = ATTENTION[key];
+  if (!_isLightVault()) return base;
+  if (key === 'due') return { ...base, fill: '122,84,16', glow: '122,84,16', hex: '#7a5410' };
+  if (key === 'overdue') return { ...base, fill: '156,42,34', glow: '156,42,34', hex: '#9c2a22' };
+  const ink = _themeFgChannels();
+  return { ...base, fill: ink, glow: ink, hex: getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() || '#3b3836' };
 }
 
 function _statusChipText(node) {
@@ -378,7 +461,7 @@ function _projectDataNode(node, t) {
   );
 }
 
-function _drawArc(a, b, intensity, rgb = '110,255,136') {
+function _drawArc(a, b, intensity, rgb = _sceneTone().wire) {
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
   const nx = mx - _cx;
@@ -479,6 +562,7 @@ function _drawDataNodes(t) {
 
 function _drawCardConnectors(t) {
   if (!_cardAnchors.length) return;
+  const tone = _sceneTone();
   for (const anchor of _cardAnchors) {
     const branch = _branches[anchor.branch];
     if (!branch) continue;
@@ -501,8 +585,8 @@ function _drawCardConnectors(t) {
 
     // Bold, readable network line from the card edge to its data point.
     _ctx.shadowBlur = behind ? 0 : 7;
-    _ctx.shadowColor = 'rgba(166,226,46,0.55)';
-    _ctx.strokeStyle = `rgba(186,240,80,${lineAlpha})`;
+    _ctx.shadowColor = tone.linkGlow;
+    _ctx.strokeStyle = `rgba(${tone.link},${lineAlpha})`;
     _ctx.lineWidth = 1.5;
     _ctx.beginPath();
     _ctx.moveTo(a.x, a.y);
@@ -511,14 +595,14 @@ function _drawCardConnectors(t) {
     _ctx.shadowBlur = 0;
 
     // Endpoint plug at the card edge.
-    _ctx.fillStyle = `rgba(210,255,190,${behind ? 0.4 : 0.95})`;
+    _ctx.fillStyle = `rgba(${tone.plug},${behind ? 0.4 : 0.95})`;
     _ctx.beginPath();
     _ctx.arc(a.x, a.y, 2.4, 0, Math.PI * 2);
     _ctx.fill();
 
     // Target ring around the data point so the eye lands on the right node.
     const ringR = Math.max(6, (bp.size || 4) + 4);
-    _ctx.strokeStyle = `rgba(210,255,190,${behind ? 0.25 : 0.8})`;
+    _ctx.strokeStyle = `rgba(${tone.plug},${behind ? 0.25 : 0.8})`;
     _ctx.lineWidth = 1.2;
     _ctx.beginPath();
     _ctx.arc(b.x, b.y, ringR, 0, Math.PI * 2);
@@ -531,8 +615,8 @@ function _drawCardConnectors(t) {
     const qy = mt * mt * a.y + 2 * mt * phase * cpy + phase * phase * b.y;
 
     _ctx.shadowBlur = 8;
-    _ctx.shadowColor = 'rgba(166,226,46,0.85)';
-    _ctx.fillStyle = `rgba(210,255,190,${behind ? 0.45 : 0.95})`;
+    _ctx.shadowColor = tone.pulseGlow;
+    _ctx.fillStyle = `rgba(${tone.plug},${behind ? 0.45 : 0.95})`;
     _ctx.beginPath();
     _ctx.arc(qx, qy, 1.8, 0, Math.PI * 2);
     _ctx.fill();
@@ -549,7 +633,7 @@ function _drawRootTendrils(t) {
   const rootCount = 7;
   for (let i = 0; i < rootCount; i++) {
     const spread = (i - (rootCount - 1) / 2) * 0.22;
-    _ctx.strokeStyle = `rgba(90,255,120,${0.04 + (i % 2) * 0.02})`;
+    _ctx.strokeStyle = `rgba(${_sceneTone().tendril},${0.04 + (i % 2) * 0.02})`;
     _ctx.lineWidth = 0.7;
     _ctx.beginPath();
     _ctx.moveTo(base.x, base.y + base.size * 0.5);
@@ -573,19 +657,20 @@ function _draw(t) {
   if (_paused) return;
 
   _ctx.clearRect(0, 0, _w, _h);
+  const tone = _sceneTone();
 
   const halo = _ctx.createRadialGradient(_cx, _cy, 10, _cx, _cy, _globeRadius * 1.65);
-  halo.addColorStop(0, 'rgba(235,255,238,0.18)');
-  halo.addColorStop(0.18, 'rgba(148,255,165,0.16)');
-  halo.addColorStop(0.52, 'rgba(64,220,96,0.12)');
-  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  halo.addColorStop(0, tone.halo0);
+  halo.addColorStop(0.18, tone.halo1);
+  halo.addColorStop(0.52, tone.halo2);
+  halo.addColorStop(1, tone.halo3);
   _ctx.fillStyle = halo;
   _ctx.beginPath();
   _ctx.arc(_cx, _cy, _globeRadius * 1.65, 0, Math.PI * 2);
   _ctx.fill();
 
   for (const s of _stars) {
-    _ctx.fillStyle = `rgba(140,255,165,${s.a})`;
+    _ctx.fillStyle = `rgba(${tone.star},${s.a})`;
     _ctx.beginPath();
     _ctx.arc(s.x, s.y, s.s, 0, Math.PI * 2);
     _ctx.fill();
@@ -593,7 +678,7 @@ function _draw(t) {
 
   const pts = _sphereNodes.map((node) => _projectNode(node, t)).sort((a, b) => a.z - b.z);
 
-  _ctx.strokeStyle = 'rgba(110,255,136,0.08)';
+  _ctx.strokeStyle = `rgba(${tone.wire},0.08)`;
   _ctx.lineWidth = 1;
   _ctx.beginPath();
   _ctx.arc(_cx, _cy, _globeRadius, 0, Math.PI * 2);
@@ -610,7 +695,7 @@ function _draw(t) {
       const d = Math.hypot(dx, dy);
       if (d < 34) {
         const alpha = (1 - d / 34) * 0.14 * ((a.depth + b.depth) / 2);
-        _ctx.strokeStyle = `rgba(110,255,136,${alpha})`;
+        _ctx.strokeStyle = `rgba(${tone.wire},${alpha})`;
         _ctx.lineWidth = 0.7;
         _ctx.beginPath();
         _ctx.moveTo(a.x, a.y);
@@ -632,7 +717,7 @@ function _draw(t) {
   const meridians = 6;
   for (let m = 0; m < meridians; m++) {
     const meridianRotation = rotY + (m / meridians) * Math.PI / 3;
-    _ctx.strokeStyle = 'rgba(110,255,136,0.05)';
+    _ctx.strokeStyle = `rgba(${tone.wire},0.05)`;
     _ctx.lineWidth = 0.8;
     _ctx.beginPath();
     for (let s = 0; s <= 60; s++) {
@@ -656,10 +741,10 @@ function _draw(t) {
   for (const p of pts) {
     const glow = p.z > 0 ? 14 : 8;
     _ctx.shadowBlur = _isNarrow ? 0 : glow;
-    _ctx.shadowColor = p.z > 0 ? 'rgba(198,255,205,0.95)' : 'rgba(120,255,145,0.7)';
+    _ctx.shadowColor = p.z > 0 ? tone.nodeGlowFront : tone.nodeGlowBack;
     _ctx.fillStyle = p.z > 0
-      ? `rgba(238,255,241,${0.68 + p.alpha * 0.24})`
-      : `rgba(120,255,145,${0.3 + p.alpha * 0.34})`;
+      ? `rgba(${tone.nodeFront},${0.68 + p.alpha * 0.24})`
+      : `rgba(${tone.nodeBack},${0.3 + p.alpha * 0.34})`;
     _ctx.beginPath();
     _ctx.arc(p.x, p.y, Math.max(0.8, p.size), 0, Math.PI * 2);
     _ctx.fill();
@@ -701,7 +786,7 @@ function _draw(t) {
     _ctx.arc(bp.x, bp.y, r, 0, Math.PI * 2);
     _ctx.fill();
     if (branch.id === 'core') {
-      _ctx.strokeStyle = 'rgba(198,255,205,0.35)';
+      _ctx.strokeStyle = tone.coreRing;
       _ctx.lineWidth = 1;
       _ctx.beginPath();
       _ctx.arc(bp.x, bp.y, r + 3, 0, Math.PI * 2);
@@ -722,8 +807,8 @@ function _draw(t) {
         const px = mt * mt * relay.x + 2 * mt * phase * mx + phase * phase * agency.x;
         const py = mt * mt * relay.y + 2 * mt * phase * my + phase * phase * agency.y;
         _ctx.shadowBlur = 10;
-        _ctx.shadowColor = 'rgba(127,255,0,0.9)';
-        _ctx.fillStyle = 'rgba(200,255,210,0.95)';
+        _ctx.shadowColor = tone.particleGlow;
+        _ctx.fillStyle = tone.particle;
         _ctx.beginPath();
         _ctx.arc(px, py, 2.2, 0, Math.PI * 2);
         _ctx.fill();

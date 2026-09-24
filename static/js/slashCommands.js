@@ -353,6 +353,14 @@ async function _loadSkillSlashCatalog(force = false) {
   }
 }
 
+if (typeof window !== 'undefined' && !window.__odySkillCatalogInvalidateBound) {
+  window.__odySkillCatalogInvalidateBound = true;
+  window.addEventListener('odysseus-skills-changed', () => {
+    _skillCatalogCache = { at: 0, items: [] };
+    _loadSkillSlashCatalog(true).catch(() => {});
+  });
+}
+
 function _submitComposedMessage(text) {
   const msgInput = document.getElementById('message');
   const form = document.getElementById('chat-form');

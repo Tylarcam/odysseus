@@ -45,6 +45,7 @@ from services.documents.ceo_brief_script import (
     find_grant_packet,
     find_objectives_charter,
     human_gate_cleared,
+    is_objectives_charter_title,
     is_upwork_send_gate,
     rank_money_candidates,
 )
@@ -66,6 +67,10 @@ _PACK_REF = re.compile(
 
 # NPR Panel 2 thank-you drafts (notes). First unsent is Money Move Do-it when NPR is the needle.
 _NPR_THANKYOU_DRAFT_IDS = ("4be22ee3", "8504c427", "80aa4a73")
+# Always-on prosperity residue. Pins rank these; they do not invent a new send.
+_SEND_PACK_PREFIX = "4f9a694f"
+_SEND_CHECKLIST_PREFIX = "f1cf1f16"
+_IMPACT_PACKET_PREFIX = "08e7c105"
 _NPR_SENT = re.compile(
     r"\((sent|cleared|done)\)|marked sent|already sent",
     re.IGNORECASE,
@@ -1442,6 +1447,197 @@ def _resolve_npr_draft(notes: Optional[List[Dict[str, Any]]]) -> Optional[str]:
     return None
 
 
+def _load_pinned_prosperity_facts(owner: str = "") -> List[str]:
+    """Always-on Jarvis pins. Empty owner skips disk so tests stay isolated."""
+    if not owner:
+        return []
+    try:
+        from src.memory import load_pinned_memory_facts
+
+        return list(load_pinned_memory_facts(owner) or [])
+    except Exception:
+        logger.debug("cmd_center: pinned memory facts unavailable", exc_info=True)
+        return []
+
+
+def _id8(rid: Any) -> str:
+    return str(rid or "").strip().lower()[:8]
+
+
+def _find_rec_by_prefix(
+    rows: Optional[Iterable[Dict[str, Any]]],
+    prefix: str,
+) -> Optional[Dict[str, Any]]:
+    stub = _id8(prefix)
+    if not stub:
+        return None
+    for rec in rows or []:
+        if isinstance(rec, dict) and _id8(rec.get("id")) == stub:
+            return rec
+    return None
+
+
+def _pin_title(fact: str) -> str:
+    first = re.split(r"[.\n]", (fact or "").strip(), maxsplit=1)[0].strip()
+    return (first or (fact or "").strip())[:90]
+
+
+def _money_cand_from_rec(
+    rec: Dict[str, Any],
+    *,
+    source: str,
+    action: str,
+    rationale: str,
+) -> Optional[Dict[str, Any]]:
+    title = str(rec.get("title") or rec.get("name") or "").strip()
+    if not title or is_objectives_charter_title(title):
+        return None
+    rid = str(rec.get("id") or "").strip()
+    id8 = rid[:8]
+    raw = title + (f" (`{id8}`)" if id8 else "")
+    return {
+        "title": title,
+        "raw": raw,
+        "rationale": rationale,
+        "source": source,
+        "action": action,
+        "target_id": rid,
+        "id": rid,
+    }
+
+
+def _money_cand_from_pin(
+    fact: str,
+    *,
+    prefix: str,
+    source: str,
+    action: str,
+) -> Dict[str, Any]:
+    title = _pin_title(fact)
+    raw = f"{title} (`{prefix}`)"
+    return {
+        "title": title,
+        "raw": raw,
+        "rationale": "Pinned prosperity fact — execute named residue, don't invent a send.",
+        "source": source,
+        "action": action,
+        "target_id": prefix,
+        "id": prefix,
+    }
+
+
+def _pin_mentions_send_pack(low: str) -> bool:
+    if "upwork" in low or "send pack" in low or "triage" in low:
+        return True
+    return "unsent" in low and "proposal" in low
+
+
+def _pin_mentions_impact(low: str) -> bool:
+    return "impact+" in low or "cihr" in low
+
+
+def _pin_mentions_npr(low: str) -> bool:
+    if "npr" not in low:
+        return False
+    return "thank" in low or "unsent" in low or "ready to send" in low
+
+
+def _pinned_money_candidates(
+    pinned_facts: Optional[List[str]],
+    *,
+    notes_list: Optional[List[Dict[str, Any]]] = None,
+    documents: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Map pinned prosperity facts onto existing send-pack / packet IDs.
+
+    Pins inform ranking and copy. They never invent dollar amounts or a new
+    send action — Do-it / Confirm stay on open_doc / open_note / confirm_*.
+    """
+    notes = [n for n in (notes_list or []) if isinstance(n, dict)]
+    docs = [d for d in (documents or []) if isinstance(d, dict)]
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(cand: Optional[Dict[str, Any]]) -> None:
+        if not cand:
+            return
+        key = _id8(cand.get("target_id") or cand.get("id")) or re.sub(
+            r"\s+", " ", str(cand.get("raw") or "").lower()
+        )
+        if not key or key in seen:
+            return
+        seen.add(key)
+        out.append(cand)
+
+    rationale = "Pinned prosperity fact — execute named residue, don't invent a send."
+    for fact in pinned_facts or []:
+        text = str(fact or "").strip()
+        if not text:
+            continue
+        low = text.lower()
+        id_hits = {_id8(m.group(1)) for m in re.finditer(
+            r"\b([0-9a-f]{8})(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\b",
+            text,
+            re.I,
+        )}
+
+        pack_doc = _find_rec_by_prefix(docs, _SEND_PACK_PREFIX)
+        pack_note = _find_rec_by_prefix(notes, _SEND_CHECKLIST_PREFIX)
+        if not pack_doc:
+            for rec in docs:
+                title = str(rec.get("title") or rec.get("name") or "")
+                if is_upwork_send_gate(title) or "send pack" in title.lower():
+                    pack_doc = rec
+                    break
+        if not pack_note:
+            for rec in notes:
+                title = str(rec.get("title") or "")
+                if is_upwork_send_gate(title):
+                    pack_note = rec
+                    break
+
+        want_pack = (
+            _pin_mentions_send_pack(low)
+            or _SEND_PACK_PREFIX in id_hits
+            or _SEND_CHECKLIST_PREFIX in id_hits
+        )
+        if want_pack:
+            if pack_doc:
+                _add(_money_cand_from_rec(pack_doc, source="doc", action="open_doc", rationale=rationale))
+            elif pack_note:
+                _add(_money_cand_from_rec(pack_note, source="note", action="open_note", rationale=rationale))
+            else:
+                _add(_money_cand_from_pin(
+                    text, prefix=_SEND_PACK_PREFIX, source="doc", action="open_doc",
+                ))
+
+        want_impact = _pin_mentions_impact(low) or _IMPACT_PACKET_PREFIX in id_hits
+        if want_impact:
+            impact = _find_rec_by_prefix(notes, _IMPACT_PACKET_PREFIX)
+            if impact:
+                _add(_money_cand_from_rec(impact, source="note", action="open_note", rationale=rationale))
+            elif _IMPACT_PACKET_PREFIX in id_hits:
+                _add(_money_cand_from_pin(
+                    text, prefix=_IMPACT_PACKET_PREFIX, source="note", action="open_note",
+                ))
+
+        if _pin_mentions_npr(low):
+            npr_id = _resolve_npr_draft(notes)
+            rec = _find_rec_by_prefix(notes, npr_id) if npr_id else None
+            if rec:
+                _add(_money_cand_from_rec(rec, source="note", action="open_note", rationale=rationale))
+
+        for rec, source, action in (
+            *((d, "doc", "open_doc") for d in docs),
+            *((n, "note", "open_note") for n in notes),
+        ):
+            rid8 = _id8(rec.get("id"))
+            if rid8 and rid8 in id_hits:
+                _add(_money_cand_from_rec(rec, source=source, action=action, rationale=rationale))
+
+    return out
+
+
 def _build_money_hero(
     *,
     ceo_brief: Optional[Dict[str, Any]] = None,
@@ -1451,6 +1647,7 @@ def _build_money_hero(
     comms_preview: Optional[List[Dict[str, Any]]] = None,
     charter_txt: str = "",
     today: Optional[date] = None,
+    pinned_facts: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """CORE Money Move lens — not the default full-picture hero."""
     brief = ceo_brief or {}
@@ -1475,7 +1672,16 @@ def _build_money_hero(
         return not (is_upwork_send_gate(blob) or "send pack" in blob.lower())
 
     inbound_items = [c for c in inbound_items if _keep_open_gate(c)]
-    if status in ("stale", "missing"):
+    pin_cands = [
+        c
+        for c in _pinned_money_candidates(
+            pinned_facts,
+            notes_list=notes_list,
+            documents=documents,
+        )
+        if _keep_open_gate(c)
+    ]
+    if status in ("stale", "missing") and not pin_cands:
         title = brief.get("title") or "CEO Brief"
         return _money_pack({
             "label": "Primary Directive — Needle",
@@ -1498,13 +1704,14 @@ def _build_money_hero(
             "charter_title": (charter or {}).get("title"),
         })
 
-    items = parse_top3(str(brief.get("content") or ""))
+    items = parse_top3(str(brief.get("content") or "")) if status not in ("stale", "missing") else []
     mycelia_top3 = list((mycelia_feed or {}).get("top3") or [])
     ranked = rank_money_candidates(
         [
             c
             for c in (
-                list(inbound_items)
+                list(pin_cands)
+                + list(inbound_items)
                 + list(items)
                 + list(charter_needles(charter_body))
                 + mycelia_top3
@@ -1920,6 +2127,7 @@ def build_cmd_center(
     inbox_account_id: str = "",
     owner: str = "",
     include_globe: bool = True,
+    pinned_facts: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     from routes.home_routes import HUD_PINNED_NOTE_PREFIXES
 
@@ -2250,12 +2458,15 @@ def build_cmd_center(
         overdue_count=overdue_count,
         mycelia_feed=mycelia_feed,
     )
+    if pinned_facts is None:
+        pinned_facts = _load_pinned_prosperity_facts(owner)
     money_hero = _build_money_hero(
         ceo_brief=ceo_brief,
         mycelia_feed=mycelia_feed,
         notes_list=notes_list,
         documents=docs_list,
         comms_preview=comms_preview,
+        pinned_facts=pinned_facts,
     )
     money_hero = _attach_fruit_scoreboard(money_hero, (mycelia_feed or {}).get("fruit"))
 

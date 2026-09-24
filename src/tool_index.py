@@ -109,7 +109,7 @@ BUILTIN_TOOL_DESCRIPTIONS: Dict[str, str] = {
     "pipeline": "Run a multi-step AI pipeline with multiple models. Chain tasks together in sequence.",
     "list_models": "List all available AI models and their endpoints.",
     "manage_session": "Chat management: rename, archive, delete, or fork chats (the UI calls these 'chats'; internally 'sessions'). Use for 'rename my chats', 'rename this chat', 'archive/delete a chat'.",
-    "manage_memory": "Memory management: list, add, edit, delete, or search persistent memories.",
+    "manage_memory": "Memory management: list, add, edit, delete, search, pin, or unpin persistent memories (facts, identity, preferences, money facts). pin/unpin flags a filed money fact for always-on Jarvis context — 'pin that money fact', 'keep this in memory', 'pin that'. Pin does not delete. unpin removes always-on context. pin/unpin need memory_id from list or search.",
     "manage_skills": "Skill management: add, update, publish, or search reusable skills/presets.",
     "manage_tasks": "Manage SCHEDULED BACKGROUND AI JOBS (recurring automations in the Tasks panel) — NOT the user's todo list. An empty list here does NOT mean the user has no todos; call manage_notes action=list for user todos/checklists. Use for: list, create, edit, delete, pause, resume, or run cron tasks.",
     "manage_endpoints": "Endpoint management: list, add, delete, enable, or disable model API endpoints.",
@@ -217,16 +217,29 @@ class ToolIndex:
         indexed = False
         encoded = False
         wanted = set(ids)
+        current_docs = dict(zip(ids, docs))
         for lane in self._lanes:
             try:
-                existing = lane.collection.get(where={"tool_type": "builtin"})
+                existing = lane.collection.get(
+                    where={"tool_type": "builtin"},
+                    include=["metadatas", "documents"],
+                )
                 existing_ids = (existing or {}).get("ids") or []
+                existing_doc_list = (existing or {}).get("documents") or []
                 stale = [i for i in existing_ids if i not in wanted]
                 if stale:
                     lane.collection.delete(ids=stale)
                     logger.info(f"Pruned {len(stale)} stale builtin tool entries from {lane.name} index")
                 remaining = set(existing_ids) - set(stale)
-                if remaining >= wanted:
+                existing_docs = {
+                    eid: edoc
+                    for eid, edoc in zip(existing_ids, existing_doc_list)
+                    if eid in wanted
+                }
+                # Skip encode only when every builtin id is present AND the
+                # indexed text matches (so pin/unpin copy updates on restart
+                # without a docker-exec FastEmbed rebuild).
+                if remaining >= wanted and existing_docs == current_docs:
                     indexed = True
                     continue
             except Exception as e:
@@ -247,7 +260,9 @@ class ToolIndex:
             self._healthy = False
             raise RuntimeError("Builtin tool indexing failed in all embedding lanes")
         self._fingerprint = hashlib.sha256(
-            ",".join(sorted(BUILTIN_TOOL_DESCRIPTIONS.keys())).encode()
+            "\n".join(
+                f"{k}={v}" for k, v in sorted(BUILTIN_TOOL_DESCRIPTIONS.items())
+            ).encode()
         ).hexdigest()
         if encoded:
             logger.info(f"Indexed {len(docs)} built-in tools")
@@ -389,6 +404,13 @@ class ToolIndex:
             {"manage_calendar"},
         frozenset({"note", "todo", "reminder", "remind", "checklist", "remember to"}):
             {"manage_notes"},
+        # Memory pin/unpin — "pin that money fact" must not RAG-miss to notes.
+        # Phrase-level only; bare "pin" would collide with manage_notes pin.
+        frozenset({"pin that", "unpin that", "unpin", "money fact",
+                   "pin that money", "keep this in memory",
+                   "always-on context", "always on context",
+                   "pin memory", "unpin memory"}):
+            {"manage_memory"},
         frozenset({"todo list", "to-do list", "to do list", "my todos", "todo items",
                    "analyze todos", "list todos", "check todos", "categorize todos",
                    "what's on my todo", "what is on my todo"}):

@@ -17,6 +17,10 @@ services:
       - ./routes:/app/routes:z
       - ./src:/app/src:z
       - ./services:/app/services:z
+      # Cursor plugin/skill packs (pstack, OpenSpec, …) so Settings can sync
+      # them into data/skills/ as Odysseus slash skills without a host-side copy.
+      - ./.cursor/plugins:/app/.cursor/plugins:ro,z
+      - ./.cursor/skills:/app/.cursor/skills:ro,z
       # Cookbook remote-server SSH identity. Odysseus can generate a key here;
       # add the shown public key to each remote server's authorized_keys.
       - ./data/ssh:/app/.ssh:z

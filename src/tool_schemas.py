@@ -388,16 +388,22 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_memory",
-            "description": "Manage the user's memory system: list, add, edit, delete, or search memories. Memories persist across sessions.",
+            "description": (
+                "Manage the user's memory system: list, add, edit, delete, search, pin, or unpin. "
+                "Memories persist across sessions. pin/unpin flags a filed money fact for always-on "
+                "Jarvis context (same as POST /api/memory/{id}/pin). Pin does not delete."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["list", "add", "edit", "delete", "search"],
-                               "description": "The action to perform"},
+                    "action": {"type": "string", "enum": ["list", "add", "edit", "delete", "search", "pin", "unpin"],
+                               "description": "The action. pin/unpin toggle always-on Jarvis context; pin does not delete."},
                     "text": {"type": "string", "description": "Memory text (for add/edit) or search query (for search)"},
-                    "memory_id": {"type": "string", "description": "Memory ID (for edit/delete)"},
+                    "memory_id": {"type": "string", "description": "Memory ID (for edit/delete/pin/unpin)"},
                     "category": {"type": "string", "enum": ["fact", "event", "contact", "preference"],
-                                 "description": "Memory category (for add/list filter)"}
+                                 "description": "Memory category (for add/list filter)"},
+                    "pinned": {"type": "boolean",
+                               "description": "For action=pin: true pins, false unpins (default true)."}
                 },
                 "required": ["action"]
             }
@@ -1490,6 +1496,10 @@ def function_call_to_tool_block(name: str, arguments: str) -> Optional[ToolBlock
             content = "edit\n" + args.get("memory_id", "") + "\n" + args.get("text", "")
         elif action == "delete":
             content = "delete\n" + args.get("memory_id", "")
+        elif action in ("pin", "unpin"):
+            content = action + "\n" + str(args.get("memory_id") or "")
+            if action == "pin" and args.get("pinned") is False:
+                content += "\nfalse"
         elif action == "search":
             content = "search\n" + args.get("text", "")
         elif action == "list":

@@ -136,6 +136,89 @@ def needs_auto_name(name: str) -> bool:
     return False
 
 
+def sanitize_generated_title(raw: str, *, max_len: int = 80) -> str:
+    """Keep an LLM-proposed session title only if it is short and non-placeholder."""
+    from src.text_helpers import strip_think
+
+    title = strip_think((raw or "").strip(), prose=False, prompt_echo=False)
+    title = title.strip().strip("\"'").strip()
+    title = " ".join(title.split())
+    if title.endswith(".") and title.count(".") == 1:
+        title = title[:-1].rstrip()
+    if not title or len(title) > max_len:
+        return ""
+    if needs_auto_name(title):
+        return ""
+    return title
+
+
+def parse_session_rename_map(raw: str, sessions: list) -> dict:
+    """Map LLM title JSON onto full session ids. Keys may be id prefixes."""
+    from src.text_helpers import strip_think
+
+    text = strip_think((raw or "").strip(), prose=False, prompt_echo=False)
+
+    def _loads_lenient(s):
+        if not s:
+            return None
+        for cand in (s, re.sub(r",(\s*[}\]])", r"\1", s)):
+            try:
+                return json.loads(cand)
+            except json.JSONDecodeError:
+                continue
+        return None
+
+    parsed = _loads_lenient(text)
+    if parsed is None:
+        fence = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", text)
+        if fence:
+            parsed = _loads_lenient(fence.group(1).strip())
+    if parsed is None:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            parsed = _loads_lenient(text[start:end + 1])
+    names = parsed.get("names") if isinstance(parsed, dict) else None
+    if not isinstance(names, dict):
+        return {}
+    by_prefix = {}
+    for sess in sessions:
+        sid = str(sess.get("id") or "")
+        if sid:
+            by_prefix[sid[:8]] = sid
+    out = {}
+    for key, value in names.items():
+        sid = by_prefix.get(str(key)[:8])
+        title = sanitize_generated_title(str(value) if value is not None else "")
+        if sid and title:
+            out[sid] = title
+    return out
+
+
+def build_rename_prompt(sessions: list) -> str:
+    """Prompt the task model to title chats from a recap of subject/task/objective."""
+    lines = []
+    for sess in sessions:
+        sid = str(sess.get("id") or "")
+        name = str(sess.get("name") or "(unnamed)").replace('"', "'")
+        recap = str(sess.get("recap") or "").strip()
+        lines.append(f'  "{sid[:8]}": "{name}"')
+        if recap:
+            lines.append(f"    {recap}")
+    body = "\n".join(lines)
+    return (
+        "You rename chat sessions from a short recap of each conversation.\n\n"
+        "Rules:\n"
+        "- Title captures the subject, task, or objective — not a greeting, not the model name\n"
+        "- 3–8 words; no quotes, no trailing period, no IDs\n"
+        "- Use the 8-char ID prefixes exactly as given\n"
+        "- Output ONLY raw JSON, no markdown fences, no explanation\n\n"
+        "Required JSON format:\n"
+        '{"names": {"idprefix": "Title here"}}\n\n'
+        f"Sessions:\n{body}"
+    )
+
+
 async def auto_name_session(session_manager, sess):
     """Generate a short title for a session from its first user message."""
     try:

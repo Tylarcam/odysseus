@@ -56,3 +56,9 @@ markitdown[docx,pptx,xlsx,xls]==0.1.5
 # `.predict()`, which src/ocr_processor.py targets directly.
 paddlepaddle==3.2.2
 paddleocr==3.7.0
+
+# navi-du (tools/navi_du_tui.py): terminal disk-usage visualizer rendered as
+# a MegaMan Battle Network Navi Customizer Memory Map. Textual gives it
+# mouse + keyboard nav, live-resize, and streaming scan progress in a real
+# terminal app (Windows Terminal, no browser).
+textual

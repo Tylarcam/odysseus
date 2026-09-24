@@ -30,6 +30,32 @@ from .skill_format import Skill, slugify
 logger = logging.getLogger(__name__)
 
 
+def _disabled_skill_names() -> set:
+    """Skill names the user turned off in Settings (slash + agent index)."""
+    try:
+        from src.settings import get_setting
+        raw = get_setting("disabled_skills", []) or []
+        if not isinstance(raw, list):
+            return set()
+        return {str(n).strip() for n in raw if str(n).strip()}
+    except Exception:
+        return set()
+
+
+def _is_shared_plugin_skill(source: Optional[str]) -> bool:
+    """Cursor/Claude plugin packs are shared library skills (source=plugin:<id>)."""
+    return str(source or "").startswith("plugin:")
+
+
+def _skill_visible_to(entry_owner: Optional[str], source: Optional[str], viewer: Optional[str]) -> bool:
+    """Owner filter with shared plugin packs visible to every authenticated user."""
+    if viewer is None:
+        return True
+    if _is_shared_plugin_skill(source):
+        return True
+    return (entry_owner or "") == viewer
+
+
 # ---------------------------------------------------------------------------
 # Token / similarity helpers (kept for the relevance fallback)
 # ---------------------------------------------------------------------------
@@ -279,12 +305,14 @@ class SkillsManager:
         entries = self.load_all()
         if owner is None:
             return entries
-        # SECURITY: strict ownership filter. The previous predicate also
-        # included skills with NO owner field (`not s.get("owner")`), which
-        # leaked legacy / un-stamped skills to every authenticated user.
-        # Hide them now; the owner needs to be backfilled on disk if those
-        # skills should be visible to a specific user.
-        return [s for s in entries if s.get("owner") == owner]
+        # SECURITY: strict ownership filter for user-authored skills.
+        # Plugin packs (`source: plugin:<id>`) are shared library skills and
+        # remain visible to every authenticated user (Settings toggles still
+        # gate them via disabled_skills).
+        return [
+            s for s in entries
+            if _skill_visible_to(s.get("owner"), s.get("source"), owner)
+        ]
 
     # ----------------------------------------------------------------------
     # CRUD — disk-backed
@@ -546,7 +574,7 @@ class SkillsManager:
             sk = self._read_skill(path)
             if not sk or sk.name != name:
                 continue
-            if (sk.owner or "") != (owner or ""):
+            if not _skill_visible_to(sk.owner, sk.source, owner):
                 continue
             try:
                 with open(path, encoding="utf-8") as f:
@@ -562,7 +590,7 @@ class SkillsManager:
             sk = self._read_skill(path)
             if not sk or sk.name != name:
                 continue
-            if (sk.owner or "") != (owner or ""):
+            if not _skill_visible_to(sk.owner, sk.source, owner):
                 continue
             base = os.path.realpath(os.path.dirname(path))
             target = os.path.realpath(os.path.join(base, ref_path))
@@ -604,6 +632,7 @@ class SkillsManager:
         prompt with half-finished procedures.
         """
         active_toolsets = active_toolsets or []
+        disabled = _disabled_skill_names()
         out = []
         for s in self.load(owner=owner):
             status = s.get("status")
@@ -614,6 +643,9 @@ class SkillsManager:
                     pass  # let it through
                 else:
                     continue
+            name = (s.get("name") or "").strip()
+            if name and name in disabled:
+                continue
             # Platform gating
             if platform and s.get("platforms") and platform not in s["platforms"]:
                 continue
@@ -659,6 +691,9 @@ class SkillsManager:
         # entries with a 🎓 badge so users can demote / delete bad
         # ones when they spot them.
         skills = [s for s in skills if s.get("status") in ("published", "draft")]
+        disabled = _disabled_skill_names()
+        if disabled:
+            skills = [s for s in skills if (s.get("name") or "") not in disabled]
         # Confidence gate (used by prompt-injection, NOT by search): a DRAFT
         # skill must clear the bar to be injected. Published skills are already
         # vetted, so they always qualify. Missing confidence = treat as 1.0

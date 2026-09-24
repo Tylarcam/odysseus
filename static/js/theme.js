@@ -251,7 +251,16 @@ function generateHarmonyColors(accentHex, harmonyType, mode) {
   };
 }
 
+function markThemeLuma(bg) {
+  let light = false;
+  if (bg) {
+    try { light = hexToHSL(bg)[2] >= 50; } catch (e) { light = false; }
+  }
+  document.documentElement.dataset.themeLuma = light ? 'light' : 'dark';
+}
+
 export function applyColors(colors) {
+  markThemeLuma(colors && colors.bg);
   const s = document.documentElement.style;
   s.setProperty('--bg', colors.bg);
   s.setProperty('--fg', colors.fg);

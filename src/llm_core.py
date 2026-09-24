@@ -8,10 +8,11 @@ import logging
 import hashlib
 import threading
 import re
+import socket
 from fastapi import HTTPException
 from typing import Optional, Dict, List, Tuple
 from src.model_context import get_context_length, DEFAULT_CONTEXT
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,42 @@ def _prefer_native_ollama_for_thinking(url: str, model: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return url
     return f"{parsed.scheme}://{parsed.netloc}/api/chat"
+
+
+def _prefer_ipv4_docker_host(url: str) -> str:
+    """Rewrite host.docker.internal to its IPv4 address.
+
+    Docker Desktop already maps host.docker.internal to an IPv4 gateway
+    (typically 192.168.65.254). Compose ``extra_hosts: host-gateway`` also
+    injects an IPv6 mapping that has no route from the compose network, so
+    httpx's dual-stack connect finishes on ENETUNREACH even when IPv4 would
+    work — or would at least fail with a clearer ECONNREFUSED. Force the A
+    record so Tidy / chat don't surface ``[Errno 101] Network is unreachable``.
+    """
+    if not url:
+        return url
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return url
+    host = (parsed.hostname or "").lower()
+    if host != "host.docker.internal":
+        return url
+    try:
+        infos = socket.getaddrinfo(host, parsed.port or 80, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return url
+    ipv4 = infos[0][4][0] if infos else None
+    if not ipv4:
+        return url
+    userinfo = ""
+    if parsed.username is not None:
+        userinfo = parsed.username
+        if parsed.password is not None:
+            userinfo += f":{parsed.password}"
+        userinfo += "@"
+    netloc = f"{userinfo}{ipv4}" + (f":{parsed.port}" if parsed.port else "")
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 def _ollama_api_root(url: str) -> str:
@@ -782,6 +819,35 @@ def _supports_thinking(model: str) -> bool:
         return False
     m = model.lower()
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
+
+
+def _is_glm53_model(model: str) -> bool:
+    """True for GLM-5.3 / GLM-5.3-Flash ids (OpenRouter, Z.ai, Ollama Cloud)."""
+    if not model:
+        return False
+    tail = model.lower().split("/")[-1].split(":")[0]
+    return "glm-5.3" in tail
+
+
+def _apply_glm53_reasoning_payload(
+    payload: Dict,
+    url: str,
+    model: str,
+    *,
+    stream: bool = False,
+    tools: Optional[List] = None,
+) -> None:
+    """Wire mandatory reasoning for GLM-5.3-Flash on OpenRouter and Z.ai."""
+    if not _is_glm53_model(model):
+        return
+    provider = _detect_provider(url)
+    if provider == "openrouter":
+        payload.setdefault("reasoning", {"effort": "max", "exclude": False})
+    elif _host_match(url, "z.ai"):
+        payload.setdefault("reasoning_effort", "max")
+        payload.setdefault("thinking", {"type": "enabled", "clear_thinking": False})
+        if stream and tools:
+            payload.setdefault("tool_stream", True)
 
 def _convert_openai_content_to_anthropic(content):
     """Convert OpenAI multimodal content blocks to Anthropic format.
@@ -1317,6 +1383,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
              max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 
              timeout: int = LLMConfig.DEFAULT_TIMEOUT, prompt_type: Optional[str] = None) -> str:
     """Synchronous LLM call with optional prompt type enhancement."""
+    url = _prefer_ipv4_docker_host(url)
     url = _prefer_native_ollama_for_thinking(url, model)
     h = _provider_headers(_detect_provider(url))
     # Tolerate headers that arrive as a JSON string (some sessions stored them
@@ -1377,6 +1444,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
         if max_tokens and max_tokens > 0:
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
+        _apply_glm53_reasoning_payload(payload, url, model)
         if provider == "cloudflare":
             messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
     try:
@@ -1479,6 +1547,7 @@ async def llm_call_async(
     session_id: Optional[str] = None,
 ) -> str:
     """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    url = _prefer_ipv4_docker_host(url)
     url = _prefer_native_ollama_for_thinking(url, model)
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
@@ -1577,6 +1646,7 @@ async def llm_call_async(
         # Suppress thinking for qwen3/gemma4 on Ollama /v1 — same as stream_llm.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+        _apply_glm53_reasoning_payload(payload, url, model)
         if provider == "cloudflare":
             messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
         _apply_local_cache_affinity(payload, url, session_id)
@@ -1649,6 +1719,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
       - event: error                       — errors
       - data: [DONE]                       — end of stream
     """
+    url = _prefer_ipv4_docker_host(url)
     url = _prefer_native_ollama_for_thinking(url, model)
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
@@ -1708,6 +1779,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
         if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
             payload["think"] = False
+        _apply_glm53_reasoning_payload(payload, url, model, stream=True, tools=tools)
         if provider == "cloudflare":
             messages_copy = _apply_cloudflare_vision_payload(payload, messages_copy)
         _apply_local_cache_affinity(payload, url, session_id)

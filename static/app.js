@@ -302,9 +302,12 @@ function initializeEventListeners() {
       currentMeta.style.cursor = 'pointer';
       currentMeta.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Swipe-to-switch on mobile suppresses the synthetic click that follows.
+        if (sessionModule.consumeTitleSwipeClick && sessionModule.consumeTitleSwipeClick()) return;
         exportDlBtn.click();
       });
     }
+    if (sessionModule.initChatTitleSwipe) sessionModule.initChatTitleSwipe();
   }
 
   // Serialize the current chat history into a plain-text transcript.
@@ -471,6 +474,56 @@ function initializeEventListeners() {
         if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
         if (ev.key === 'Escape') { input.removeEventListener('blur', commit); metaEl.textContent = origText; }
       });
+    });
+  }
+
+  const exportAutoRenameBtn = el('export-auto-rename-btn');
+  if (exportAutoRenameBtn) {
+    exportAutoRenameBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      exportMenu.classList.remove('open');
+      let sid = sessionModule.getCurrentSessionId();
+      const hasPending = sessionModule.hasPendingChat && sessionModule.hasPendingChat();
+      const meta = sid ? sessionModule.getSessions().find(s => s.id === sid) : null;
+      const currentName = (meta?.name || '').trim();
+      if (currentName === 'Nobody' || currentName === 'Incognito') {
+        uiModule.showToast('Incognito chats stay unnamed');
+        return;
+      }
+      const transcript = _serializeChatTranscript();
+      if (!sid) {
+        if (!hasPending || !transcript) {
+          uiModule.showToast('Nothing to name');
+          return;
+        }
+        try { await sessionModule.materializePendingSession(); sid = sessionModule.getCurrentSessionId(); } catch (_) {}
+        if (!sid) {
+          uiModule.showToast('Nothing to name');
+          return;
+        }
+      }
+      uiModule.showToast('Naming…');
+      try {
+        const res = await fetch(`${API_BASE}/api/session/${sid}/auto-rename`, { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const detail = data.detail;
+          throw new Error(typeof detail === 'string' ? detail : 'Auto-rename failed');
+        }
+        if (data.status === 'ok' && data.name) {
+          const _m = sessionModule.getSessions().find(s => s.id === sid);
+          if (_m) _m.name = data.name;
+          const metaEl = el('current-meta');
+          if (metaEl) metaEl.textContent = data.name;
+          uiModule.showToast('Renamed');
+          sessionModule.loadSessions();
+        } else {
+          uiModule.showToast(data.reason || 'Could not name this chat');
+        }
+      } catch (err) {
+        console.error('Auto-rename failed:', err);
+        uiModule.showError(err.message || 'Auto-rename failed');
+      }
     });
   }
 
@@ -1354,19 +1407,61 @@ function initializeEventListeners() {
       }
     }
 
+    async function _runRename() {
+      const btnIcon = sortBtn.querySelector('.sort-icon');
+      if (btnIcon) btnIcon.style.display = 'none';
+      const wp = spinnerModule.create('', 'clean', 'whirlpool');
+      const wpEl = wp.createElement();
+      wpEl.style.cssText = 'width:13px;height:13px;display:inline-block;vertical-align:middle;margin-top:-5px;';
+      sortBtn.appendChild(wpEl);
+      wp.start();
+      sortDropdown.style.display = 'none';
+      try {
+        const res = await fetch(`${API_BASE}/api/sessions/auto-sort/rename`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Rename failed');
+        if (data.status === 'ok') {
+          const remaining = data.remaining || 0;
+          let msg;
+          if (data.renamed > 0) {
+            msg = `Renamed ${data.renamed} chat${data.renamed === 1 ? '' : 's'}`;
+            if (remaining > 0) msg += ` — ${remaining} left, hit Rename again`;
+          } else if (remaining > 0) {
+            msg = `${remaining} untitled chats — hit Rename again`;
+          } else {
+            msg = 'All named';
+          }
+          uiModule.showToast(msg);
+          if (sessionModule) await sessionModule.loadSessions();
+        } else {
+          uiModule.showToast(data.reason || 'Nothing to rename');
+        }
+      } catch (e) {
+        uiModule.showError('Rename: ' + e.message);
+      } finally {
+        wp.destroy();
+        if (wpEl.parentNode) wpEl.parentNode.removeChild(wpEl);
+        if (btnIcon) btnIcon.style.display = '';
+      }
+    }
+
     const autoSortBtn = el('auto-sort-sessions-btn');
     if (autoSortBtn) autoSortBtn.addEventListener('click', () => _runTidy(false));
 
-    // Chevron next to the Tidy row toggles the no-AI sub-item.
+    // Chevron next to the Tidy row toggles Rename + no-AI Tidy.
     const autoSortMoreBtn = el('auto-sort-sessions-more');
+    const autoSortRenameBtn = el('auto-sort-sessions-rename-btn');
     const autoSortNoaiBtn = el('auto-sort-sessions-noai-btn');
-    if (autoSortMoreBtn && autoSortNoaiBtn) {
+    if (autoSortMoreBtn) {
       autoSortMoreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        autoSortNoaiBtn.style.display = autoSortNoaiBtn.style.display === 'none' ? 'block' : 'none';
+        const extras = [autoSortRenameBtn, autoSortNoaiBtn].filter(Boolean);
+        const show = extras.some(n => n.style.display === 'none');
+        extras.forEach(n => { n.style.display = show ? 'block' : 'none'; });
       });
-      autoSortNoaiBtn.addEventListener('click', () => _runTidy(true));
     }
+    if (autoSortRenameBtn) autoSortRenameBtn.addEventListener('click', () => _runRename());
+    if (autoSortNoaiBtn) autoSortNoaiBtn.addEventListener('click', () => _runTidy(true));
   }
 
   // Model sort dropdown

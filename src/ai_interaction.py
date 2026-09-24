@@ -943,10 +943,10 @@ async def do_manage_session(content: str, session_id: Optional[str] = None, owne
 # ---------------------------------------------------------------------------
 
 async def do_manage_memory(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
-    """Manage memories: list, add, edit, delete, search.
+    """Manage memories: list, add, edit, delete, search, pin, unpin.
 
     Content format:
-      Line 1: action (list|add|edit|delete|search)
+      Line 1: action (list|add|edit|delete|search|pin|unpin)
       Line 2+: action-specific params
 
     Actions:
@@ -955,6 +955,8 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
       edit                    — line 2: memory_id, line 3: new text
       delete                  — line 2: memory_id
       search                  — line 2: query
+      pin                     — line 2: memory_id; optional line 3: false to unpin
+      unpin                   — line 2: memory_id
     """
     if not _memory_manager:
         return {"error": "Memory manager not available"}
@@ -976,10 +978,11 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
         for m in memories[:100]:
             cat = m.get("category", "fact")
             mid = m.get("id", "?")[:8]
+            pin = " [PINNED]" if m.get("pinned") else ""
             text = m.get("text", "")
             if len(text) > 150:
                 text = text[:150] + "..."
-            result_lines.append(f"- [{cat}] `{mid}` — {text}")
+            result_lines.append(f"- [{cat}] `{mid}`{pin} — {text}")
         if len(memories) > 100:
             result_lines.append(f"... and {len(memories) - 100} more")
         return {"results": "\n".join(result_lines)}
@@ -1097,12 +1100,37 @@ async def do_manage_memory(content: str, session_id: Optional[str] = None, owner
         for m in results:
             cat = m.get("category", "fact")
             mid = m.get("id", "?")[:8]
+            pin = " [PINNED]" if m.get("pinned") else ""
             text = m.get("text", "")
-            result_lines.append(f"- [{cat}] `{mid}` — {text}")
+            result_lines.append(f"- [{cat}] `{mid}`{pin} — {text}")
         return {"results": "\n".join(result_lines)}
 
+    elif action in ("pin", "unpin"):
+        if len(lines) < 2 or not lines[1].strip():
+            return {"error": "Pin/unpin needs line 2: memory_id"}
+        memory_id = lines[1].strip()
+        from src.memory import pin_memory_item
+        want_pin = action != "unpin"
+        if action == "pin" and len(lines) > 2 and lines[2].strip():
+            flag = lines[2].strip().lower()
+            if flag in ("false", "0", "no", "off", "unpin", "unpinned"):
+                want_pin = False
+            elif flag in ("true", "1", "yes", "on", "pin", "pinned"):
+                want_pin = True
+        result = pin_memory_item(_memory_manager, memory_id, pinned=want_pin, owner=owner)
+        if not result.get("ok"):
+            return {"error": result.get("error") or "could not pin memory"}
+        state = "pinned" if result.get("pinned") else "unpinned"
+        mid = result.get("memory_id") or memory_id
+        return {
+            "action": action,
+            "memory_id": mid,
+            "pinned": bool(result.get("pinned")),
+            "results": f"Memory {mid} is now {state}. Pin does not delete.",
+        }
+
     else:
-        return {"error": f"Unknown action '{action}'. Use: list, add, edit, delete, search"}
+        return {"error": f"Unknown action '{action}'. Use: list, add, edit, delete, search, pin, unpin"}
 
 
 # ---------------------------------------------------------------------------

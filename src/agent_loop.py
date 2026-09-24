@@ -85,6 +85,7 @@ _AGENT_RULES = """\
 - Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
 - Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
+- Filed money facts the user wants always-on ("pin that money fact", "keep this in memory", "pin that") → `manage_memory` action=pin with memory_id from list/search. unpin removes always-on context. Pin does not delete.
 - "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
 - "List/show/analyze my todo list" / "what's on my todo list" / "categorize my todos" → call `manage_notes` with `action=list` FIRST. User todos and checklists live in Odysseus Notes — NOT in Notion, NOT in `manage_tasks`. `manage_tasks` is the scheduled background-jobs panel (recurring AI automations); an empty `manage_tasks` list does NOT mean the user has no todos. **Never call Notion unless the user explicitly mentions Notion or a Notion page/database.**
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
@@ -141,6 +142,7 @@ _API_AGENT_RULES = """\
 - Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
 - Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory or infer it is the same inbox. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
+- Filed money facts the user wants always-on ("pin that money fact", "keep this in memory", "pin that") → `manage_memory` action=pin with memory_id from list/search. unpin removes always-on context. Pin does not delete.
 - You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
 - "Cookbook" = the LLM-serving subsystem (NOT chat sessions, NOT a recipe app). Routing:
@@ -188,6 +190,7 @@ _AGENT_RULES = """\
 - After a tool fails, retry with a concrete fix or state what is blocking you.
 - Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
 - User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
+- Filed money facts: `manage_memory` action=pin with memory_id from list/search. Pin does not delete.
 """
 
 _API_AGENT_RULES = """\
@@ -201,6 +204,7 @@ _API_AGENT_RULES = """\
 - After a tool fails, retry with a concrete fix or state what is blocking you.
 - Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
 - User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
+- Filed money facts: `manage_memory` action=pin with memory_id from list/search. Pin does not delete.
 - "Open/show <panel>" (documents, library, gallery, email, inbox, sessions, brain/memories, skills, settings, notes, cookbook, cmd-center) → call `ui_control` with `open_panel <name>`. Panel aliases: library/doc/docs/document→documents, images→gallery, mail/inbox/emails→email, chats/history→sessions, memory/memories→brain, preferences→settings, models/serve/serving→cookbook, vault/command center/cmd center→cmd-center. CRITICAL: "open memory/memories/brain" / "open skills" / "open notes" / "open documents" / "open cookbook" means OPEN THE PANEL — call `ui_control`, NOT a manage/list tool.
 - DISABLED (Docker): do NOT call `app_api` POST `/api/clicky/start` — the Linux container cannot spawn the Windows WPF overlay. For "start/launch/run Clicky" tell the user to run `deploy/scripts/start-clicky.ps1` on the Windows host (repo root). Clicky is the cursor-overlay app — NOT a note, task, or model.
 """
@@ -409,7 +413,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "ask_teacher": "- ```ask_teacher``` — Escalate a hard question to a more capable model. Line 1 = model name or 'auto', rest = the question. Use when stuck or need expert knowledge.",
     "list_models": "- ```list_models``` — Show all available AI models across all endpoints. Use when user asks what models are available.",
     "manage_session": "- ```manage_session``` — Rename, archive, delete, fork, switch, or `list` chats (the UI calls them 'chats'; 'session' is internal). Line 1 = action (list/switch/rename/archive/unarchive/delete/important/unimportant/truncate/fork), Line 2 = exact chat id from `list_sessions` (or `current` where supported). For delete/archive/truncate, always list first and reuse the exact id; never invent placeholder ids. `switch`/`open` returns a clickable anchor link the user can tap to open the chat — use for \"open my X chat\".",
-    "manage_memory": "- ```manage_memory``` — Manage the user's persistent memory (facts, identity, preferences, context that persists across chats). Line 1 = action (list/add/edit/delete/search), rest = content. Use when user says 'remember this', states identity facts like 'my name is <name>' / 'call me <name>' / 'I live in <place>', or asks about stored memories.",
+    "manage_memory": "- ```manage_memory``` — Manage the user's persistent memory (facts, identity, preferences, money facts, context that persists across chats). Line 1 = action (list/add/edit/delete/search/pin/unpin), rest = content. pin/unpin need memory_id from list or search ('pin that money fact', 'keep this in memory'). Pin does not delete — it flags the fact for always-on Jarvis context (same as POST /api/memory/{id}/pin). Use when user says 'remember this', states identity facts like 'my name is <name>' / 'call me <name>' / 'I live in <place>', or asks about stored memories.",
     "manage_skills": "- ```manage_skills``` — Skill registry (SKILL.md format). Args (JSON): {\"action\": \"list|view|view_ref|search|add|edit|patch|publish|delete\", ...}. `list` returns the index of available skills (published + teacher-escalation drafts); `view name=foo` fetches the full SKILL.md; `view_ref name=foo path=...` loads a reference file under the skill directory. For `add`, provide an explicit kebab-case `name` and only report the exact returned name, because storage may normalize or dedupe it. Use this BEFORE doing domain work — there may already be a procedure (published or draft) that prescribes the correct steps. Drafts written by the teacher loop are authoritative guidance even though they're not yet published.",
     "manage_tasks": "- ```manage_tasks``` — Scheduled BACKGROUND AI JOBS (Tasks panel), NOT the user's todo list. For todos/checklists use `manage_notes` action=list. Args (JSON): {\"action\": \"list|create|edit|delete|pause|resume|run\", ...}",
     "manage_endpoints": "- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}. Use when user wants to add a new AI provider.",
@@ -944,6 +948,7 @@ def _build_system_prompt(
     # the trusted system role. Bound up front so the insert block below can
     # always check it.
     _skills_message = None
+    _pinned_memory_message = None
     if active_document:
         set_active_document(active_document.id)
         _doc_raw = active_document.current_content or ""
@@ -1230,6 +1235,25 @@ def _build_system_prompt(
         except Exception as _sk_err:
             logger.debug(f"skill injection failed (non-fatal): {_sk_err}")
 
+        try:
+            _memory_on = True
+            try:
+                from routes.prefs_routes import _load_for_user as _load_mem_prefs
+                _memory_on = (_load_mem_prefs(owner) or {}).get("memory_enabled", True)
+            except Exception:
+                pass
+            if _memory_on:
+                from src.memory import load_pinned_memory_facts
+                _pinned_facts = load_pinned_memory_facts(owner)
+                if _pinned_facts:
+                    _pinned_text = "\n- ".join(_pinned_facts)
+                    _pinned_memory_message = untrusted_context_message(
+                        "saved memory: pinned user facts",
+                        f"Core facts about the user:\n- {_pinned_text}",
+                    )
+        except Exception as _pin_err:
+            logger.debug("pinned memory injection skipped: %s", _pin_err)
+
     agent_msg = {"role": "system", "content": agent_prompt}
     insert_idx = 0
     for i, msg in enumerate(messages):
@@ -1266,6 +1290,9 @@ def _build_system_prompt(
     if _doc_message:
         merged.insert(last_user_idx, _doc_message)
         last_user_idx += 1  # the document message is now at last_user_idx
+    if _pinned_memory_message:
+        merged.insert(last_user_idx, _pinned_memory_message)
+        last_user_idx += 1
     if _skills_message:
         merged.insert(last_user_idx, _skills_message)
         last_user_idx += 1

@@ -14,6 +14,7 @@ import httpx
 from core.database import McpServer, SessionLocal
 from core.middleware import require_admin
 from src.constants import DATA_DIR, MCP_OAUTH_DIR
+from src.builtin_mcp import builtin_status_entries
 from src.mcp_manager import McpManager
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,10 @@ def setup_mcp_routes(mcp_manager: McpManager):
                     "has_oauth": oauth_cfg is not None,
                     "needs_oauth": needs_oauth,
                 })
+            seen = {row["id"] for row in result}
+            for entry in builtin_status_entries(mcp_manager):
+                if entry["id"] not in seen:
+                    result.append(entry)
             return result
         finally:
             db.close()
@@ -286,6 +291,18 @@ def setup_mcp_routes(mcp_manager: McpManager):
         try:
             srv = db.query(McpServer).filter(McpServer.id == server_id).first()
             if not srv:
+                if mcp_manager.is_builtin(server_id):
+                    connected = await mcp_manager._reconnect_builtin(server_id)
+                    status = mcp_manager.get_server_status(server_id)
+                    return {
+                        "connected": connected,
+                        "status": status.get("status", "disconnected"),
+                        "tool_count": status.get("tool_count", 0),
+                        "error": status.get("error"),
+                        "auth_url": status.get("auth_url"),
+                        "needs_auth": status.get("status") == "needs_auth",
+                        "builtin": True,
+                    }
                 raise HTTPException(404, "Server not found")
 
             await mcp_manager.disconnect_server(server_id)

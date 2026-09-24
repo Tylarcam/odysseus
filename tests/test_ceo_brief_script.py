@@ -1594,3 +1594,86 @@ def test_nomination_packet_outranks_faculty_insight_when_charter_names_pi():
     assert hero.get("confirm_action") == "confirm_grant_packet_sent"
 
 
+DOCKET_PIN = (
+    "Odyssey Triage 2026-07-24: 5 Upwork proposals still unsent. "
+    "NPR Panel 2 thank-yous ready to send."
+)
+
+
+def _loom_brief_md() -> str:
+    return compose_ceo_brief_markdown(
+        title="CEO Brief — 2026-08-20",
+        jobs={"ready_to_apply": [{"company": "Loom", "role": "pack"}]},
+    )
+
+
+def test_money_hero_surfaces_pinned_docket_as_do_it_confirm():
+    """Pinned Odyssey Triage fact becomes the Money Move needle with real send-pack IDs."""
+    md = _loom_brief_md()
+    hero = _build_money_hero(
+        ceo_brief={"status": "ready", "content": md, "id": "d9b62b7e", "title": "CEO Brief"},
+        notes_list=[
+            {
+                "id": "ccd47cbf",
+                "title": "Objectives — Q3 2026",
+                "content": CHARTER_Q3,
+                "pinned": True,
+            },
+            UPWORK_NOTE,
+        ],
+        documents=[UPWORK_DOC],
+        pinned_facts=[DOCKET_PIN],
+    )
+    assert "Upwork" in (hero.get("title") or "")
+    assert "4f9a694f" in str(hero.get("target_id") or "")
+    assert hero.get("action") == "open_doc"
+    assert hero.get("confirm_action") == "confirm_pack_sent"
+    assert hero.get("confirm_one_action") == "confirm_proposal_sent"
+    ranked_blob = " ".join(item.get("title") or "" for item in (hero.get("ranked_top3") or []))
+    assert "Upwork" in ranked_blob
+    assert "$" not in (hero.get("title") or "")
+
+    from services.voice.vault_brief import build_brief_script
+
+    spoken = " ".join(
+        line["text"]
+        for line in build_brief_script(
+            money_hero=hero,
+            ceo_brief={"status": "ready", "content": md},
+        )
+    )
+    assert "Upwork" in spoken
+    assert "4f9a694f" in spoken or "send pack" in spoken.lower()
+
+
+def test_money_hero_pin_fallback_uses_known_pack_id_without_rec():
+    """Pin still names the send pack when recency dropped the Library row."""
+    md = _loom_brief_md()
+    hero = _build_money_hero(
+        ceo_brief={"status": "ready", "content": md, "id": "d9b62b7e", "title": "CEO Brief"},
+        pinned_facts=[DOCKET_PIN],
+    )
+    assert "Upwork" in (hero.get("title") or "") or "Triage" in (hero.get("title") or "")
+    assert str(hero.get("target_id") or "").startswith("4f9a694f")
+    assert hero.get("action") == "open_doc"
+    assert hero.get("confirm_action") == "confirm_pack_sent"
+
+
+def test_money_hero_absent_pins_keeps_brief_ranking():
+    md = _loom_brief_md()
+    hero = _build_money_hero(
+        ceo_brief={"status": "ready", "content": md, "id": "d9b62b7e", "title": "CEO Brief"},
+        pinned_facts=[],
+    )
+    assert "Loom" in (hero.get("title") or "")
+    assert "4f9a694f" not in str(hero.get("target_id") or "")
+    assert not hero.get("confirm_action")
+
+    fruit_hero = _build_money_hero(
+        ceo_brief={"status": "ready", "content": md, "id": "d9b62b7e", "title": "CEO Brief"},
+        pinned_facts=["FRUIT: $400 harvest from NPR panel"],
+    )
+    assert "Loom" in (fruit_hero.get("title") or "")
+    assert fruit_hero.get("confirm_action") != "confirm_pack_sent"
+
+

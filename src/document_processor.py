@@ -267,13 +267,21 @@ def _load_vl_settings() -> dict:
         return {}
 
 
-def _resolve_vl_model(configured: str, owner: str | None = None) -> tuple:
+def _resolve_vl_model(configured: str, owner: str | None = None, endpoint_id: str | None = None) -> tuple:
     """Resolve the vision model to (url, model_id, headers).
 
-    Uses admin-configured model if set, otherwise tries auto-detection
-    of known vision-capable models across configured endpoints.
+    When ``endpoint_id`` is set (Settings → Vision → Endpoint), resolve against
+    that host first so two providers can expose similarly named models without
+    colliding. Falls back to searching all endpoints by model id, then
+    auto-detection of known vision-capable models.
     """
     from src.ai_interaction import _resolve_model
+    from src.endpoint_resolver import resolve_endpoint_by_id
+
+    if endpoint_id:
+        resolved = resolve_endpoint_by_id(endpoint_id, configured or "", owner=owner)
+        if resolved:
+            return resolved
 
     if configured:
         return _resolve_model(configured, owner=owner)
@@ -301,10 +309,21 @@ def analyze_image_with_vl_result(image_path: str, owner: str | None = None) -> d
         settings = _load_vl_settings()
         if not settings.get("vision_enabled", True):
             return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
-        vl_model = settings.get("vision_model", "")
+        vl_model = settings.get("vision_model", "") or ""
+        vl_ep = settings.get("vision_endpoint_id", "") or ""
+        if owner:
+            try:
+                from routes.prefs_routes import _load_for_user
+                prefs = _load_for_user(owner) or {}
+                if prefs.get("vision_model"):
+                    vl_model = prefs["vision_model"]
+                if prefs.get("vision_endpoint_id"):
+                    vl_ep = prefs["vision_endpoint_id"]
+            except Exception:
+                pass
 
         try:
-            url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
+            url, model_id, headers = _resolve_vl_model(vl_model, owner=owner, endpoint_id=vl_ep)
         except ValueError:
             return {"text": "[No vision model configured — set one in Settings → Vision]", "model": vl_model or ""}
 

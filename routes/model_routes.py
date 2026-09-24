@@ -40,6 +40,7 @@ _ENDPOINT_SETTING_FIELDS = {
     "utility_endpoint_id":  ("utility_model",   "Utility Model"),
     "research_endpoint_id": ("research_model",  "Deep Research"),
     "task_endpoint_id":     ("task_model",       "Background Tasks"),
+    "vision_endpoint_id":   ("vision_model",     "Vision Model"),
 }
 
 _ENDPOINT_FALLBACK_FIELDS = {
@@ -226,7 +227,7 @@ _PROVIDER_CURATED = {
         "claude-sonnet-4-5", "claude-haiku-3-5",
     ],
     "zai": [
-        "glm-5.2", "glm-5", "glm-5.1", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
+        "glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5", "glm-5.1", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash",
         "glm-4.6", "glm-4.6v",
         "glm-4.5", "glm-4.5v", "glm-4.5-air", "glm-4.5-flash",
     ],

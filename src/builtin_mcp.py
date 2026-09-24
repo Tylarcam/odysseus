@@ -231,3 +231,58 @@ async def _is_npx_package_cached(npx_path, package_spec, timeout_s=5):
             pass
         return False
     return proc.returncode == 0 and bool(stdout.strip())
+
+
+def builtin_status_entries(mcp_manager) -> list[dict]:
+    """Status rows for auto-registered builtin MCP servers (not stored in DB).
+
+    Settings and manage_mcp previously listed only `McpServer` rows, so the
+    built-in Email server could be connected (or crashed) with no way to see
+    or reconnect it. Callers merge these onto the DB list by `id`.
+    """
+    entries = []
+    for server_id, (_script, name) in _BUILTIN_SERVERS.items():
+        status = mcp_manager.get_server_status(server_id) if mcp_manager else {}
+        tool_count = int(status.get("tool_count") or 0)
+        entries.append({
+            "id": server_id,
+            "name": name,
+            "transport": "stdio",
+            "command": "",
+            "args": [],
+            "env": {},
+            "url": None,
+            "is_enabled": True,
+            "status": status.get("status", "disconnected"),
+            "tool_count": tool_count,
+            "disabled_tool_count": 0,
+            "enabled_tool_count": tool_count,
+            "error": status.get("error"),
+            "auth_url": status.get("auth_url"),
+            "has_oauth": False,
+            "needs_oauth": False,
+            "builtin": True,
+        })
+    for server_id, cfg in _BUILTIN_NPX_SERVERS.items():
+        status = mcp_manager.get_server_status(server_id) if mcp_manager else {}
+        tool_count = int(status.get("tool_count") or 0)
+        entries.append({
+            "id": server_id,
+            "name": cfg.get("name") or server_id,
+            "transport": "stdio",
+            "command": cfg.get("command") or "",
+            "args": list(cfg.get("args") or []),
+            "env": {},
+            "url": None,
+            "is_enabled": True,
+            "status": status.get("status", "disconnected"),
+            "tool_count": tool_count,
+            "disabled_tool_count": 0,
+            "enabled_tool_count": tool_count,
+            "error": status.get("error"),
+            "auth_url": status.get("auth_url"),
+            "has_oauth": False,
+            "needs_oauth": False,
+            "builtin": True,
+        })
+    return entries
